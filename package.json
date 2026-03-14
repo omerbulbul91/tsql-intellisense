@@ -31,8 +31,38 @@
       {
         "command": "tsql-intellisense.alterProc",
         "title": "T-SQL IntelliSense: ALTER Procedure (Fetch SP Code)"
+      },
+      {
+        "command": "tsql-intellisense.runQuery",
+        "title": "T-SQL IntelliSense: Run Query",
+        "icon": "$(play)"
       }
     ],
+    "keybindings": [
+      {
+        "command": "tsql-intellisense.runQuery",
+        "key": "f5",
+        "when": "editorLangId == sql && !inDebugMode"
+      }
+    ],
+    "viewsContainers": {
+      "panel": [
+        {
+          "id": "tsql-results-panel",
+          "title": "Query Results",
+          "icon": "$(database)"
+        }
+      ]
+    },
+    "views": {
+      "tsql-results-panel": [
+        {
+          "id": "tsqlResults",
+          "name": "Query Results",
+          "type": "webview"
+        }
+      ]
+    },
     "configuration": {
       "title": "T-SQL IntelliSense",
       "properties": {

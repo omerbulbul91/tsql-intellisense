@@ -10,6 +10,7 @@ export enum SqlContextType {
     AFTER_ALIAS_DOT = 'AFTER_ALIAS_DOT',
     AFTER_ALTER_PROC = 'AFTER_ALTER_PROC',
     AFTER_SELECT = 'AFTER_SELECT',
+    AFTER_TABLE_NAME = 'AFTER_TABLE_NAME',
 }
 
 export interface SqlContext {
@@ -32,24 +33,36 @@ export interface AliasMapping {
  * Statements are delimited by GO, semicolons, or document boundaries.
  */
 export function getCurrentStatement(fullText: string, offset: number): string {
-    // Find statement start: look backward for GO or start of text
+    // Find statement start: look backward for GO or semicolon
     let start = 0;
     const beforeCursor = fullText.substring(0, offset);
 
-    // Find last GO (on its own line) or semicolon before cursor
     const goMatches = [...beforeCursor.matchAll(/\bGO\b\s*$/gmi)];
     if (goMatches.length > 0) {
         const lastGo = goMatches[goMatches.length - 1];
         start = (lastGo.index || 0) + lastGo[0].length;
     }
 
-    // Also check for semicolons (take whichever is closer to cursor)
     const lastSemicolon = beforeCursor.lastIndexOf(';');
     if (lastSemicolon > start) {
         start = lastSemicolon + 1;
     }
 
-    return fullText.substring(start, offset);
+    // Find statement end: look forward for GO, semicolon, or end of text
+    let end = fullText.length;
+    const afterCursor = fullText.substring(offset);
+
+    const nextSemicolon = afterCursor.indexOf(';');
+    if (nextSemicolon >= 0) {
+        end = offset + nextSemicolon;
+    }
+
+    const nextGo = afterCursor.match(/^\s*GO\b/mi);
+    if (nextGo && nextGo.index !== undefined && (nextSemicolon < 0 || nextGo.index < nextSemicolon)) {
+        end = offset + nextGo.index;
+    }
+
+    return fullText.substring(start, end);
 }
 
 /**
@@ -80,6 +93,23 @@ export function extractAliases(statementText: string): AliasMapping[] {
     }
 
     return aliases;
+}
+
+/**
+ * Extract table names from FROM/JOIN clauses (without alias).
+ * Returns all table names referenced in the statement.
+ */
+export function extractTables(statementText: string): string[] {
+    const tables: string[] = [];
+    const regex = /(?:FROM|(?:INNER|LEFT|RIGHT|CROSS|FULL)\s+(?:OUTER\s+)?JOIN|JOIN)\s+(?:dbo\.)?(\[?\w+\]?)/gi;
+    let match;
+    while ((match = regex.exec(statementText)) !== null) {
+        let tableName = match[1].replace(/[\[\]]/g, '');
+        if (!tables.includes(tableName)) {
+            tables.push(tableName);
+        }
+    }
+    return tables;
 }
 
 /**
@@ -138,7 +168,7 @@ export function detectContext(textBeforeCursor: string, fullStatementText: strin
         };
     }
 
-    // 4. Check for FROM / JOIN
+    // 4. Check for FROM / JOIN — typing table name
     const fromJoinMatch = textBeforeCursor.match(
         /(?:FROM|(?:INNER|LEFT|RIGHT|CROSS|FULL)\s+(?:OUTER\s+)?JOIN|JOIN)\s+(?:dbo\.)?(\w*)$/i
     );
@@ -147,6 +177,24 @@ export function detectContext(textBeforeCursor: string, fullStatementText: strin
             type: SqlContextType.AFTER_FROM_JOIN,
             prefix: fromJoinMatch[1],
         };
+    }
+
+    // 4b. Check if cursor is AFTER a table name (for alias/keyword suggestions)
+    // e.g. "FROM RN100_Kullanicilar w" → suggest WHERE, or alias
+    const afterTableMatch = textBeforeCursor.match(
+        /(?:FROM|(?:INNER|LEFT|RIGHT|CROSS|FULL)\s+(?:OUTER\s+)?JOIN|JOIN)\s+(?:dbo\.)?\w+\s+(\w*)$/i
+    );
+    if (afterTableMatch) {
+        const prefix = afterTableMatch[1];
+        // Don't trigger if it already looks like a known keyword followed by something
+        if (!/^(ON|WHERE|SET|ORDER|GROUP|HAVING|INNER|LEFT|RIGHT|CROSS|FULL|JOIN|AS|INTO|VALUES|SELECT|FROM)$/i.test(prefix)) {
+            const tables = extractTables(fullStatementText);
+            return {
+                type: SqlContextType.AFTER_TABLE_NAME,
+                prefix,
+                tableName: tables.length > 0 ? tables[tables.length - 1] : undefined,
+            };
+        }
     }
 
     // 5. Check for INSERT INTO
@@ -174,6 +222,38 @@ export function detectContext(textBeforeCursor: string, fullStatementText: strin
             type: SqlContextType.AFTER_FROM_JOIN,
             prefix: deleteMatch[1],
         };
+    }
+
+    // 8. Check for SELECT / WHERE / ORDER BY / GROUP BY / HAVING / SET — suggest columns
+    // Only if the statement has a FROM clause with a table
+    const tables = extractTables(fullStatementText);
+    if (tables.length > 0) {
+        const aliases = extractAliases(fullStatementText);
+        // Find alias for the primary table
+        const primaryAlias = aliases.length > 0 ? aliases[0].alias : undefined;
+
+        // Check if cursor is in a column context (after SELECT, WHERE, ORDER BY, etc.)
+        // Include * as valid prefix for "expand all columns"
+        const columnContextMatch = currentLine.match(/(?:SELECT|WHERE|AND|OR|ON|SET|ORDER\s+BY|GROUP\s+BY|HAVING|,)\s+([\w*]*)$/i);
+        if (columnContextMatch) {
+            return {
+                type: SqlContextType.AFTER_SELECT,
+                prefix: columnContextMatch[1],
+                tableName: tables[0],
+                alias: primaryAlias,
+            };
+        }
+
+        // Also match PARTITION BY, OVER(ORDER BY etc.
+        const windowMatch = currentLine.match(/(?:PARTITION\s+BY|OVER\s*\(\s*(?:ORDER\s+BY)?)\s+(\w*)$/i);
+        if (windowMatch) {
+            return {
+                type: SqlContextType.AFTER_SELECT,
+                prefix: windowMatch[1],
+                tableName: tables[0],
+                alias: primaryAlias,
+            };
+        }
     }
 
     return { type: SqlContextType.NONE };

@@ -16,6 +16,14 @@ export interface QueryResult {
     columns: string[];
 }
 
+export interface BatchResult {
+    resultSets: QueryResult[];
+    messages: string[];
+    rowsAffected: number;
+    error?: string;
+    elapsed: number;
+}
+
 export class ConnectionManager {
     private connection: Connection | null = null;
     private activeProfile: ConnectionProfile | null = null;
@@ -38,10 +46,41 @@ export class ConnectionManager {
         return this.activeProfile;
     }
 
-    /** Get saved connection profiles from settings */
+    /** Get saved connection profiles from both our settings and mssql extension */
     getSavedProfiles(): ConnectionProfile[] {
-        const config = vscode.workspace.getConfiguration('tsql-intellisense');
-        return config.get<ConnectionProfile[]>('connections', []);
+        const profiles: ConnectionProfile[] = [];
+
+        // 1. Our own connections
+        const ourConfig = vscode.workspace.getConfiguration('tsql-intellisense');
+        const ourProfiles = ourConfig.get<ConnectionProfile[]>('connections', []);
+        profiles.push(...ourProfiles);
+
+        // 2. Read mssql extension connections
+        const mssqlConfig = vscode.workspace.getConfiguration('mssql');
+        const mssqlConnections = mssqlConfig.get<any[]>('connections', []);
+
+        for (const mc of mssqlConnections) {
+            // Skip if no server defined
+            if (!mc.server) { continue; }
+
+            // Skip duplicates (same server+database already in our list)
+            const isDuplicate = profiles.some(
+                p => p.server === mc.server && p.database === mc.database
+            );
+            if (isDuplicate) { continue; }
+
+            profiles.push({
+                name: mc.profileName || `${mc.server}/${mc.database || 'default'}`,
+                server: mc.server,
+                database: mc.database || '',
+                user: mc.user,
+                password: mc.password,
+                port: mc.port,
+                trustServerCertificate: mc.trustServerCertificate !== false,
+            });
+        }
+
+        return profiles;
     }
 
     /** Connect to a database using a profile */
@@ -150,6 +189,89 @@ export class ConnectionManager {
                     row[col.metadata.colName] = col.value;
                 }
                 rows.push(row);
+            });
+
+            this.connection.execSql(request);
+        });
+    }
+
+    /** Execute a SQL batch (supports GO separators, captures messages) */
+    async executeBatch(sql: string): Promise<BatchResult> {
+        const startTime = Date.now();
+        const resultSets: QueryResult[] = [];
+        const messages: string[] = [];
+        let totalRowsAffected = 0;
+
+        // Split by GO on its own line
+        const batches = sql.split(/^\s*GO\s*$/gmi).filter(b => b.trim().length > 0);
+
+        try {
+            for (const batch of batches) {
+                const result = await this.executeSingleBatch(batch, messages);
+                if (result.columns.length > 0 || result.rows.length > 0) {
+                    resultSets.push(result);
+                }
+                totalRowsAffected += result.rows.length;
+            }
+
+            return {
+                resultSets,
+                messages,
+                rowsAffected: totalRowsAffected,
+                elapsed: Date.now() - startTime,
+            };
+        } catch (err: any) {
+            return {
+                resultSets,
+                messages,
+                rowsAffected: totalRowsAffected,
+                error: err.message,
+                elapsed: Date.now() - startTime,
+            };
+        }
+    }
+
+    private executeSingleBatch(sql: string, messages: string[]): Promise<QueryResult> {
+        return new Promise((resolve, reject) => {
+            if (!this.connection) {
+                reject(new Error('Not connected to database'));
+                return;
+            }
+
+            const rows: Record<string, any>[] = [];
+            const columns: string[] = [];
+
+            const request = new Request(sql, (err, rowCount) => {
+                if (err) {
+                    reject(err);
+                } else {
+                    if (rowCount !== undefined && rowCount > 0 && columns.length === 0) {
+                        messages.push(`(${rowCount} rows affected)`);
+                    }
+                    resolve({ rows, columns });
+                }
+            });
+
+            request.on('columnMetadata', (columnsMetadata: ColumnMetaData[]) => {
+                for (const col of columnsMetadata) {
+                    if (!columns.includes(col.colName)) {
+                        columns.push(col.colName);
+                    }
+                }
+            });
+
+            request.on('row', (rowColumns: any[]) => {
+                const row: Record<string, any> = {};
+                for (const col of rowColumns) {
+                    row[col.metadata.colName] = col.value;
+                }
+                rows.push(row);
+            });
+
+            request.on('infoMessage', (info: any) => {
+                if (info.message) {
+                    messages.push(info.message);
+                }
             });
 
             this.connection.execSql(request);
