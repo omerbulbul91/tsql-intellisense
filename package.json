@@ -1,0 +1,105 @@
+{
+  "name": "tsql-intellisense",
+  "displayName": "T-SQL IntelliSense",
+  "description": "SQL Prompt-like IntelliSense for T-SQL in VS Code",
+  "version": "0.1.0",
+  "publisher": "octo",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "activationEvents": [
+    "onLanguage:sql"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "tsql-intellisense.connect",
+        "title": "T-SQL IntelliSense: Connect to Database"
+      },
+      {
+        "command": "tsql-intellisense.disconnect",
+        "title": "T-SQL IntelliSense: Disconnect"
+      },
+      {
+        "command": "tsql-intellisense.refreshSchema",
+        "title": "T-SQL IntelliSense: Refresh Schema Cache"
+      },
+      {
+        "command": "tsql-intellisense.alterProc",
+        "title": "T-SQL IntelliSense: ALTER Procedure (Fetch SP Code)"
+      }
+    ],
+    "configuration": {
+      "title": "T-SQL IntelliSense",
+      "properties": {
+        "tsql-intellisense.connections": {
+          "type": "array",
+          "default": [],
+          "description": "Saved database connections",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "Connection profile name"
+              },
+              "server": {
+                "type": "string",
+                "description": "SQL Server hostname or IP"
+              },
+              "database": {
+                "type": "string",
+                "description": "Database name"
+              },
+              "user": {
+                "type": "string",
+                "description": "SQL login username"
+              },
+              "password": {
+                "type": "string",
+                "description": "SQL login password"
+              },
+              "port": {
+                "type": "number",
+                "default": 1433,
+                "description": "SQL Server port"
+              },
+              "trustServerCertificate": {
+                "type": "boolean",
+                "default": true
+              }
+            },
+            "required": [
+              "name",
+              "server",
+              "database"
+            ]
+          }
+        },
+        "tsql-intellisense.autoRefreshMinutes": {
+          "type": "number",
+          "default": 30,
+          "description": "Auto-refresh schema cache interval in minutes (0 to disable)"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node",
+    "watch": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --watch",
+    "package": "vsce package"
+  },
+  "dependencies": {
+    "tedious": "^18.6.1"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.85.0",
+    "@types/node": "^20.0.0",
+    "typescript": "^5.3.0",
+    "esbuild": "^0.24.0"
+  }
+}
