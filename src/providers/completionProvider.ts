@@ -24,7 +24,7 @@ export class TsqlCompletionProvider implements vscode.CompletionItemProvider {
 
         switch (context.type) {
             case SqlContextType.AFTER_FROM_JOIN:
-                return await this.completeTableNames(context.prefix);
+                return this.completeTableNames(context.prefix);
 
             case SqlContextType.AFTER_EXEC:
                 return this.completeProcedureNames(context.prefix);
@@ -50,9 +50,53 @@ export class TsqlCompletionProvider implements vscode.CompletionItemProvider {
             case SqlContextType.AFTER_GROUP_BY:
                 return await this.completeGroupBy(context, statementText);
 
+            case SqlContextType.NONE:
+                return this.completeStatementStart(context.prefix);
+
             default:
                 return undefined;
         }
+    }
+
+    /** Suggest SQL statement keywords when no specific context matches */
+    private completeStatementStart(prefix?: string): vscode.CompletionList | undefined {
+        // Only trigger if there's a partial word being typed
+        if (!prefix) { return undefined; }
+
+        const items: vscode.CompletionItem[] = [];
+        const keywords = [
+            { label: 'SELECT', detail: 'Query data' },
+            { label: 'EXEC', detail: 'Execute stored procedure' },
+            { label: 'INSERT INTO', detail: 'Insert rows' },
+            { label: 'UPDATE', detail: 'Update rows' },
+            { label: 'DELETE FROM', detail: 'Delete rows' },
+            { label: 'ALTER PROCEDURE', detail: 'Modify stored procedure' },
+            { label: 'CREATE PROCEDURE', detail: 'Create stored procedure' },
+            { label: 'ALTER TABLE', detail: 'Modify table' },
+            { label: 'CREATE TABLE', detail: 'Create table' },
+            { label: 'ALTER VIEW', detail: 'Modify view' },
+            { label: 'CREATE VIEW', detail: 'Create view' },
+            { label: 'BEGIN TRANSACTION', detail: 'Start transaction' },
+            { label: 'COMMIT', detail: 'Commit transaction' },
+            { label: 'ROLLBACK', detail: 'Rollback transaction' },
+            { label: 'DECLARE', detail: 'Declare variable' },
+            { label: 'SET', detail: 'Set variable value' },
+            { label: 'IF', detail: 'Conditional' },
+            { label: 'WHILE', detail: 'Loop' },
+            { label: 'PRINT', detail: 'Print message' },
+            { label: 'GO', detail: 'Batch separator' },
+        ];
+
+        for (const kw of keywords) {
+            const item = new vscode.CompletionItem(kw.label);
+            item.kind = vscode.CompletionItemKind.Keyword;
+            item.detail = kw.detail;
+            item.sortText = `0_${kw.label}`;
+            item.filterText = kw.label;
+            items.push(item);
+        }
+
+        return new vscode.CompletionList(items, true);
     }
 
     /** Complete ALTER PROC — selecting an SP triggers fetching its code */
@@ -327,17 +371,9 @@ export class TsqlCompletionProvider implements vscode.CompletionItemProvider {
         return new vscode.CompletionList(items, true);
     }
 
-    private async completeTableNames(prefix?: string): Promise<vscode.CompletionList> {
+    private completeTableNames(prefix?: string): vscode.CompletionList {
         const items: vscode.CompletionItem[] = [];
         const tablesAndViews = this.schemaCache.getTablesAndViews();
-
-        // Ensure all metadata is loaded before building docs
-        await Promise.all([
-            this.schemaCache.loadViewDefinitions(),
-            this.schemaCache.loadForeignKeys(),
-            this.schemaCache.loadIndexes(),
-            this.schemaCache.loadTriggers(),
-        ]);
 
         for (const obj of tablesAndViews) {
             const alias = this.generateAlias(obj.name);
@@ -363,6 +399,8 @@ export class TsqlCompletionProvider implements vscode.CompletionItemProvider {
             const doc = this.buildTableDocumentation(obj.name);
             if (doc) {
                 item.documentation = doc;
+            } else {
+                item.documentation = new vscode.MarkdownString(`**${obj.name}** (${obj.type})`);
             }
 
             items.push(item);
@@ -374,7 +412,15 @@ export class TsqlCompletionProvider implements vscode.CompletionItemProvider {
     /** Build full documentation: VIEW definition or CREATE TABLE + PK + Indexes + FK + Triggers */
     private buildTableDocumentation(tableName: string): vscode.MarkdownString | undefined {
         const obj = this.schemaCache.findObject(tableName);
-        if (!obj) { return undefined; }
+        if (!obj) {
+            console.log(`[DOC] findObject("${tableName}") → NOT FOUND`);
+            return undefined;
+        }
+        const cols = obj.columns?.length ?? 0;
+        const idxs = this.schemaCache.getIndexes(tableName).length;
+        const fks = this.schemaCache.getForeignKeysForTable(tableName).length;
+        const trigs = this.schemaCache.getTriggers(tableName).length;
+        console.log(`[DOC] ${tableName}: type=${obj.type}, cols=${cols}, idx=${idxs}, fk=${fks}, trig=${trigs}, fullyLoaded=${this.schemaCache.isFullyLoaded}`);
 
         const md = new vscode.MarkdownString();
         md.isTrusted = true;
@@ -390,15 +436,19 @@ export class TsqlCompletionProvider implements vscode.CompletionItemProvider {
             if (viewDef) {
                 md.appendCodeblock(viewDef.trim(), 'sql');
             } else if (obj.columns && obj.columns.length > 0) {
-                // Fallback: show columns if definition not loaded yet
                 const colList = obj.columns.map(c => `    ${c.name} (${c.dataType})`).join('\n');
                 md.appendCodeblock(`-- VIEW: ${tableName}\n${colList}`, 'sql');
+            } else {
+                md.appendMarkdown('*View definition loading...*');
             }
             return md;
         }
 
         // TABLE → CREATE TABLE script
-        if (!obj.columns || obj.columns.length === 0) { return undefined; }
+        if (!obj.columns || obj.columns.length === 0) {
+            md.appendMarkdown('*Schema loading...*');
+            return md;
+        }
 
         const lines: string[] = [`CREATE TABLE [dbo].[${tableName}]`, '('];
         for (let i = 0; i < obj.columns.length; i++) {
@@ -518,16 +568,19 @@ export class TsqlCompletionProvider implements vscode.CompletionItemProvider {
     private completeProcedureNames(prefix?: string): vscode.CompletionList {
         const items: vscode.CompletionItem[] = [];
         const procedures = this.schemaCache.getProcedures();
-        const functions = this.schemaCache.getFunctions();
 
-        for (const obj of [...procedures, ...functions]) {
+        for (const obj of procedures) {
             const item = new vscode.CompletionItem(obj.name);
-            item.kind = obj.type === 'PROCEDURE'
-                ? vscode.CompletionItemKind.Method
-                : vscode.CompletionItemKind.Function;
-            item.detail = obj.type;
+            item.kind = vscode.CompletionItemKind.Method;
+            item.detail = 'PROCEDURE';
             item.sortText = `0_${obj.name}`;
             item.filterText = obj.name;
+            // When selected, fetch params and insert snippet
+            item.command = {
+                command: 'tsql-intellisense.insertSpParams',
+                title: 'Insert SP Parameters',
+                arguments: [obj.name],
+            };
             items.push(item);
         }
 

@@ -387,5 +387,7 @@ export function detectContext(textBeforeCursor: string, fullStatementText: strin
         }
     }
 
-    return { type: SqlContextType.NONE };
+    // Capture prefix for statement-start keyword suggestions
+    const nonePrefix = textBeforeCursor.match(/\b(\w+)$/i);
+    return { type: SqlContextType.NONE, prefix: nonePrefix ? nonePrefix[1] : undefined };
 }

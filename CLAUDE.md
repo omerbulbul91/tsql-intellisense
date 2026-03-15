@@ -58,15 +58,34 @@ src/
 | `( ` (fonksiyon içi) | Kolon önerisi (SUM(), COUNT() içinde) |
 | `ORDER BY col` | ASC / DESC önerisi |
 | `GROUP BY` | "All non-aggregated columns" snippet + alias'lar + kolonlar |
-| `EXEC / EXECUTE` | SP ve fonksiyon önerisi |
+| `EXEC / EXECUTE` | Sadece SP önerisi (fonksiyonlar listelenmez — SELECT dbo.FnName() ile kullanılır) |
 | `ALTER PROC` | SP listesi, seçince kodu getir |
 | Genel fallback | Sorgu içinde keyword önerisi (ORDER BY, WHERE vs.) |
 
-### Tablo Documentation Popup
+### Tablo/View Documentation Popup
 
-- **TABLE**: CREATE TABLE scripti + PK + Indexes + FK + Triggers (⚡ ikonu)
-- **VIEW**: Gerçek CREATE VIEW tanımı (DB'den)
-- Tıklanabilir linkler: `Copy Script` (panoya kopyala) | `Open Script` (yeni tab'da aç)
+Completion listesinde tablo/view seçildiğinde sağ panelde detaylı bilgi gösterilir.
+Metadata arka planda yüklenir — yüklenene kadar "Schema loading..." görünür.
+
+**TABLE popup içeriği (tamamı gösterilmeli):**
+- `Copy Script` | `Open Script` tıklanabilir linkler
+- CREATE TABLE scripti (tüm kolonlar, tip, nullable)
+- PRIMARY KEY constraint
+- UNIQUE / NONCLUSTERED / CLUSTERED INDEX'ler
+- FOREIGN KEY constraint'ler (hangi tabloya referans verdiği)
+- CHECK constraint'ler (varsa)
+- DEFAULT constraint'ler (varsa)
+- ⚡ Trigger'lar (CREATE TRIGGER scriptiyle)
+
+**VIEW popup içeriği:**
+- `Copy Script` | `Open Script` tıklanabilir linkler
+- Gerçek CREATE VIEW tanımı (DB'den `OBJECT_DEFINITION` ile çekilir)
+- Kolon listesi yedek olarak (view tanımı henüz yüklenmediyse)
+
+**Önemli kurallar:**
+- Doc popup hiçbir zaman completion'ı bloklamamalı (async await YAPMA)
+- Metadata yüklenmediyse "Schema loading..." göster, boş bırakma
+- `md.isTrusted = true` ve `md.supportHtml = true` set edilmeli (command linkler için)
 
 ### Kolon Bilgileri (Completion Listesinde)
 
@@ -74,6 +93,20 @@ src/
 - FK kolonlar: `int 🔗`
 - Normal kolonlar: `varchar(50) null`
 - Tip + nullable bilgisi doğrudan completion listesinde görünür
+
+### Go to Definition (F12)
+
+- SP/Function üzerinde F12 → CREATE PROCEDURE/FUNCTION scripti yeni tab'da açılır
+- View üzerinde F12 → CREATE VIEW scripti
+- Table üzerinde F12 → CREATE TABLE + PK + Index + FK + Trigger scripti
+- `OBJECT_DEFINITION` ile DB'den çekilir (SP/Function/View), Table için cache'ten üretilir
+
+### SP Parametre Completion
+
+- EXEC sonrası SP seçilince parametreleri otomatik doldurur
+- OUTPUT parametreler için DECLARE satırları EXEC'in üstüne eklenir
+- Her parametre: varsayılan değer + tip yorumu + hizalama
+- Format: `@ParamName = 0  -- int`
 
 ### Alias Rename (F2)
 
@@ -154,6 +187,43 @@ Regex tabanlı cursor pozisyonu analizi. Türler:
 - **tedious** — SQL Server TDS protokolü driver'ı
 - **@types/vscode** — VS Code API tipleri
 - **esbuild** — bundler
+
+## Test
+
+### Otomatik (programatik)
+
+```bash
+npm test    # 40 context detection testi (test/contextDetection.test.ts)
+```
+
+### Manuel Checklist (F5 ile Extension Dev Host'ta)
+
+| # | Test | Yaz | Beklenen |
+|---|------|-----|----------|
+| 1 | FROM tablo önerisi | `FROM asort` | Tablo listesi + doc popup (CREATE TABLE + PK + Index + FK) |
+| 2 | VIEW doc popup | FROM sonrası view seç | CREATE VIEW tanımı (DB'den) |
+| 3 | Trigger ikonu | Trigger'lı tablo | ⚡ ikonu + trigger scripti doc'ta |
+| 4 | Copy/Open Script | Doc popup'ta link tıkla | Panoya kopyala / yeni tab'da aç |
+| 5 | Alias.dot kolonlar | `am.` yaz | Kolonlar (PK 🔑, FK 🔗, tip, nullable) |
+| 6 | SELECT kolon önerisi | `SELECT ` (FROM'lu sorgu) | Kolonlar + SQL fonksiyon snippet'leri |
+| 7 | Fonksiyon içi kolon | `SUM(` | Kolon önerisi |
+| 8 | Keyword önerisi | `FROM T k wh` | WHERE, ORDER BY vs. |
+| 9 | Fallback keyword | `WHERE k.ID = 1 or` | ORDER BY önerisi |
+| 10 | GO yazma | `go` yaz | GO önerisi, sorunsuz yazılır |
+| 11 | JOIN ON condition | `LEFT JOIN T2 r ON ` | FK eşleşmeleri + aynı isimli kolonlar |
+| 12 | = sonrası alias | `ON r.ID = ` | Alias'lar + tüm kolonlar |
+| 13 | ORDER BY ASC/DESC | `ORDER BY k.Name de` | DESC / ASC |
+| 14 | GROUP BY | `GROUP BY ` | Non-agg columns + alias'lar |
+| 15 | EXEC SP önerisi | `EXEC sp_` | Sadece SP listesi (fonksiyon olmamalı) |
+| 16 | F2 alias rename | Alias üzerinde F2 | Tüm kullanımlarda rename |
+| 17 | SQL snippet | `loj` + Tab | LEFT OUTER JOIN ... ON |
+| 18 | Alt+F1 sp_help | Tablo üzerinde Alt+F1 | sp_help sonucu (stacked/tabs) |
+| 19 | Ctrl+3 SELECT | Tablo üzerinde Ctrl+3 | SELECT TOP 100 * FROM tablo |
+| 20 | Multi result set | sp_help çalıştır | Ayrı gridler (stacked veya tabs) |
+| 21 | F12 SP definition | SP adı üzerinde F12 | CREATE PROCEDURE scripti yeni tab'da |
+| 22 | F12 Table definition | Tablo adı üzerinde F12 | CREATE TABLE + PK + FK + Index scripti |
+| 23 | F12 View definition | View adı üzerinde F12 | CREATE VIEW scripti |
+| 24 | SP param completion | `EXEC spName` seç | Parametreler otomatik doldurulur (DECLARE + format) |
 
 ## Bilinen Sınırlamalar
 

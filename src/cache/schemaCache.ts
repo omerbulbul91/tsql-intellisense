@@ -71,6 +71,10 @@ export class SchemaCache {
         return this.objects.size > 0;
     }
 
+    get isFullyLoaded(): boolean {
+        return this.allColumnsLoaded && this.fkLoaded && this.indexesLoaded && this.triggersLoaded && this.viewDefsLoaded;
+    }
+
     get objectCount(): number {
         return this.objects.size;
     }
@@ -205,6 +209,7 @@ export class SchemaCache {
         }
 
         const result = await this.connectionManager.executeQuery(FK_QUERY);
+        console.log(`[CACHE] FK query returned ${result.rows.length} rows`);
         this.foreignKeys = result.rows.map(row => ({
             fkName: row['FK_NAME'] as string,
             parentTable: row['PARENT_TABLE'] as string,
@@ -233,6 +238,7 @@ export class SchemaCache {
         }
 
         const result = await this.connectionManager.executeQuery(ALL_TRIGGERS_QUERY);
+        console.log(`[CACHE] Trigger query returned ${result.rows.length} rows`);
         this.triggers.clear();
 
         for (const row of result.rows) {
@@ -269,6 +275,7 @@ export class SchemaCache {
         }
 
         const result = await this.connectionManager.executeQuery(ALL_INDEXES_QUERY);
+        console.log(`[CACHE] Index query returned ${result.rows.length} rows`);
         this.indexes.clear();
 
         for (const row of result.rows) {
@@ -302,6 +309,7 @@ export class SchemaCache {
         }
 
         const result = await this.connectionManager.executeQuery(ALL_VIEW_DEFINITIONS_QUERY);
+        console.log(`[CACHE] View definitions query returned ${result.rows.length} rows`);
         this.viewDefinitions.clear();
 
         for (const row of result.rows) {
@@ -361,15 +369,15 @@ export class SchemaCache {
         }
     }
 
-    /** Full refresh: reload object names + columns */
+    /** Full refresh: reload object names + all metadata sequentially */
     async refresh(): Promise<void> {
         await this.loadObjectNames();
-        // Load columns, FK, triggers, indexes, view definitions in background
-        this.loadAllColumns().catch(() => {});
-        this.loadForeignKeys().catch(() => {});
-        this.loadTriggers().catch(() => {});
-        this.loadIndexes().catch(() => {});
-        this.loadViewDefinitions().catch(() => {});
+        // Sequential — tedious single connection cannot run parallel queries
+        await this.loadAllColumns().catch(() => {});
+        await this.loadForeignKeys().catch(() => {});
+        await this.loadIndexes().catch(() => {});
+        await this.loadTriggers().catch(() => {});
+        await this.loadViewDefinitions().catch(() => {});
     }
 
     dispose(): void {

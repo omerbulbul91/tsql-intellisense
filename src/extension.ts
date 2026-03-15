@@ -5,6 +5,7 @@ import { TsqlCompletionProvider } from './providers/completionProvider';
 import { AlterProcProvider } from './providers/alterProcProvider';
 import { QueryRunner } from './providers/queryRunner';
 import { TsqlRenameProvider } from './providers/renameProvider';
+import { TsqlDefinitionProvider } from './providers/definitionProvider';
 
 let connectionManager: ConnectionManager;
 let schemaCache: SchemaCache;
@@ -39,6 +40,15 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.languages.registerRenameProvider(
             { language: 'sql', scheme: '*' },
             renameProvider
+        )
+    );
+
+    // Register definition provider (F12 → Go to Definition)
+    const definitionProvider = new TsqlDefinitionProvider(connectionManager, schemaCache);
+    context.subscriptions.push(
+        vscode.languages.registerDefinitionProvider(
+            { language: 'sql', scheme: '*' },
+            definitionProvider
         )
     );
 
@@ -83,6 +93,98 @@ export function activate(context: vscode.ExtensionContext) {
             queryRunner.runQuery();
         })
     );
+
+    // Insert SP parameters when SP is selected from completion
+    context.subscriptions.push(
+        vscode.commands.registerCommand('tsql-intellisense.insertSpParams', async (spName: string) => {
+            const editor = vscode.window.activeTextEditor;
+            if (!editor || !connectionManager.isConnected) { return; }
+
+            try {
+                const result = await connectionManager.executeQuery(
+                    `SELECT PARAMETER_NAME, DATA_TYPE, PARAMETER_MODE, CHARACTER_MAXIMUM_LENGTH
+                     FROM INFORMATION_SCHEMA.PARAMETERS
+                     WHERE SPECIFIC_SCHEMA = 'dbo' AND SPECIFIC_NAME = @spName
+                     ORDER BY ORDINAL_POSITION`,
+                    { spName: { type: TYPES.NVarChar, value: spName } }
+                );
+
+                if (result.rows.length === 0) { return; }
+
+                const params = result.rows.map(row => ({
+                    name: row['PARAMETER_NAME'] as string,
+                    type: row['DATA_TYPE'] as string,
+                    mode: row['PARAMETER_MODE'] as string,
+                    maxLen: row['CHARACTER_MAXIMUM_LENGTH'] as number | null,
+                }));
+
+                // Build DECLARE for OUTPUT params
+                const outputParams = params.filter(p => p.mode === 'INOUT');
+                const declares: string[] = [];
+                for (const p of outputParams) {
+                    let typeStr = p.type.toUpperCase();
+                    if (p.maxLen && p.maxLen > 0) { typeStr += `(${p.maxLen})`; }
+                    declares.push(`Declare ${p.name} ${typeStr};`);
+                }
+
+                // Build parameter list
+                const paramLines: string[] = [];
+                const maxNameLen = Math.max(...params.map(p => p.name.length));
+
+                for (let i = 0; i < params.length; i++) {
+                    const p = params[i];
+                    let typeStr = p.type;
+                    if (p.maxLen && p.maxLen > 0) { typeStr += `(${p.maxLen})`; }
+
+                    const padding = ' '.repeat(Math.max(1, maxNameLen - p.name.length + 1));
+                    const defaultVal = getDefaultValue(p.type);
+                    const outputSuffix = p.mode === 'INOUT' ? ` Output` : '';
+                    const comment = `-- ${typeStr}`;
+                    const prefix = i === 0 ? ' ' : ',';
+
+                    paramLines.push(`${' '.repeat(30)}${prefix} ${p.name} = ${defaultVal}${outputSuffix}${padding}${comment}`);
+                }
+
+                // Build full snippet
+                const lines: string[] = [];
+                if (declares.length > 0) {
+                    lines.push(...declares);
+                    lines.push('');
+                }
+
+                // Insert after current SP name
+                const snippet = '\n' + paramLines.join('\n');
+
+                await editor.edit(editBuilder => {
+                    const pos = editor.selection.active;
+                    // Insert declares before the EXEC line if needed
+                    if (declares.length > 0) {
+                        // Find the start of the current line
+                        const lineStart = new vscode.Position(pos.line, 0);
+                        editBuilder.insert(lineStart, declares.join('\n') + '\n\n');
+                    }
+                    editBuilder.insert(pos, snippet);
+                });
+            } catch (err: any) {
+                console.error('insertSpParams failed:', err.message);
+            }
+        })
+    );
+
+    function getDefaultValue(dataType: string): string {
+        switch (dataType.toLowerCase()) {
+            case 'int': case 'bigint': case 'smallint': case 'tinyint': case 'decimal': case 'numeric': case 'float': case 'real': case 'money': case 'smallmoney':
+                return '0';
+            case 'bit':
+                return '0';
+            case 'datetime': case 'datetime2': case 'smalldatetime': case 'date':
+                return 'GETDATE()';
+            case 'uniqueidentifier':
+                return 'NEWID()';
+            default:
+                return "''";
+        }
+    }
 
     // Query shortcuts (SSMS-style: Alt+F1 → sp_help, Ctrl+1 → sp_who, etc.)
     for (let i = 0; i < 10; i++) {
@@ -239,15 +341,23 @@ export function activate(context: vscode.ExtensionContext) {
             try {
                 await schemaCache.loadObjectNames();
                 schemaCache.startAutoRefresh();
-                // Load columns, FK, indexes, triggers in background
-                schemaCache.loadAllColumns().catch(() => {});
-                schemaCache.loadForeignKeys().catch(() => {});
-                schemaCache.loadIndexes().catch(() => {});
-                schemaCache.loadTriggers().catch(() => {});
-                schemaCache.loadViewDefinitions().catch(() => {});
                 vscode.window.showInformationMessage(
                     `T-SQL IntelliSense: Schema loaded (${schemaCache.objectCount} objects)`
                 );
+                // Load detailed metadata in background with status bar indicator
+                const statusItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 0);
+                statusItem.text = '$(sync~spin) T-SQL: Loading schema details...';
+                statusItem.show();
+                // Sequential — tedious can only run one query at a time on a single connection
+                await schemaCache.loadAllColumns().catch(e => console.error('loadAllColumns failed:', e));
+                await schemaCache.loadForeignKeys().catch(e => console.error('loadForeignKeys failed:', e));
+                await schemaCache.loadIndexes().catch(e => console.error('loadIndexes failed:', e));
+                await schemaCache.loadTriggers().catch(e => console.error('loadTriggers failed:', e));
+                await schemaCache.loadViewDefinitions().catch(e => console.error('loadViewDefinitions failed:', e));
+                statusItem.text = schemaCache.isFullyLoaded
+                    ? '$(check) T-SQL: Schema ready'
+                    : '$(warning) T-SQL: Schema partially loaded';
+                setTimeout(() => statusItem.dispose(), 5000);
             } catch (err: any) {
                 vscode.window.showErrorMessage(`Failed to load schema: ${err.message}`);
             }
