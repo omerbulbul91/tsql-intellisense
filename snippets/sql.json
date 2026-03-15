@@ -1,0 +1,32 @@
+{
+    "LEFT OUTER JOIN": {
+        "prefix": "loj",
+        "body": "LEFT OUTER JOIN ${1:TableName} ${2:alias} ON ${3:condition}",
+        "description": "LEFT OUTER JOIN snippet"
+    },
+    "LEFT JOIN": {
+        "prefix": "lj",
+        "body": "LEFT JOIN ${1:TableName} ${2:alias} ON ${3:condition}",
+        "description": "LEFT JOIN snippet"
+    },
+    "INNER JOIN": {
+        "prefix": "ij",
+        "body": "INNER JOIN ${1:TableName} ${2:alias} ON ${3:condition}",
+        "description": "INNER JOIN snippet"
+    },
+    "RIGHT JOIN": {
+        "prefix": "rj",
+        "body": "RIGHT JOIN ${1:TableName} ${2:alias} ON ${3:condition}",
+        "description": "RIGHT JOIN snippet"
+    },
+    "CROSS JOIN": {
+        "prefix": "cj",
+        "body": "CROSS JOIN ${1:TableName} ${2:alias}",
+        "description": "CROSS JOIN snippet"
+    },
+    "SELECT TOP": {
+        "prefix": "st",
+        "body": "SELECT TOP ${1:100} * FROM ${2:TableName} ${3:alias}",
+        "description": "SELECT TOP snippet"
+    }
+}

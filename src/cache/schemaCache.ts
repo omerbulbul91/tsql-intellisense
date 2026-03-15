@@ -5,6 +5,10 @@ import {
     ALL_ROUTINES_QUERY,
     ALL_COLUMNS_QUERY,
     TABLE_COLUMNS_QUERY,
+    FK_QUERY,
+    ALL_TRIGGERS_QUERY,
+    ALL_INDEXES_QUERY,
+    ALL_VIEW_DEFINITIONS_QUERY,
 } from '../queries/schemaQueries';
 
 export interface ColumnInfo {
@@ -21,10 +25,41 @@ export interface ObjectInfo {
     columns?: ColumnInfo[];
 }
 
+export interface TriggerInfo {
+    name: string;
+    tableName: string;
+    definition: string;
+}
+
+export interface IndexInfo {
+    name: string;
+    tableName: string;
+    type: string;
+    isUnique: boolean;
+    isPrimaryKey: boolean;
+    columns: string;
+}
+
+export interface ForeignKeyInfo {
+    fkName: string;
+    parentTable: string;
+    parentColumn: string;
+    referencedTable: string;
+    referencedColumn: string;
+}
+
 export class SchemaCache {
     private objects: Map<string, ObjectInfo> = new Map();
     private columnsLoaded: Set<string> = new Set();
     private allColumnsLoaded = false;
+    private foreignKeys: ForeignKeyInfo[] = [];
+    private fkLoaded = false;
+    private triggers: Map<string, TriggerInfo[]> = new Map();
+    private triggersLoaded = false;
+    private indexes: Map<string, IndexInfo[]> = new Map();
+    private indexesLoaded = false;
+    private viewDefinitions: Map<string, string> = new Map();
+    private viewDefsLoaded = false;
     private lastRefresh: Date | null = null;
     private refreshTimer: NodeJS.Timeout | null = null;
     private _onSchemaLoaded = new vscode.EventEmitter<void>();
@@ -49,6 +84,14 @@ export class SchemaCache {
         this.objects.clear();
         this.columnsLoaded.clear();
         this.allColumnsLoaded = false;
+        this.foreignKeys = [];
+        this.fkLoaded = false;
+        this.triggers.clear();
+        this.triggersLoaded = false;
+        this.indexes.clear();
+        this.indexesLoaded = false;
+        this.viewDefinitions.clear();
+        this.viewDefsLoaded = false;
 
         // Load tables and views
         const tablesResult = await this.connectionManager.executeQuery(ALL_OBJECTS_QUERY);
@@ -155,6 +198,135 @@ export class SchemaCache {
         return this.objects.get(name.toLowerCase());
     }
 
+    /** Load foreign key relationships */
+    async loadForeignKeys(): Promise<void> {
+        if (!this.connectionManager.isConnected || this.fkLoaded) {
+            return;
+        }
+
+        const result = await this.connectionManager.executeQuery(FK_QUERY);
+        this.foreignKeys = result.rows.map(row => ({
+            fkName: row['FK_NAME'] as string,
+            parentTable: row['PARENT_TABLE'] as string,
+            parentColumn: row['PARENT_COLUMN'] as string,
+            referencedTable: row['REFERENCED_TABLE'] as string,
+            referencedColumn: row['REFERENCED_COLUMN'] as string,
+        }));
+        this.fkLoaded = true;
+    }
+
+    /** Get FK relationships between two tables */
+    getForeignKeysBetween(table1: string, table2: string): ForeignKeyInfo[] {
+        const t1 = table1.toLowerCase();
+        const t2 = table2.toLowerCase();
+        return this.foreignKeys.filter(fk => {
+            const p = fk.parentTable.toLowerCase();
+            const r = fk.referencedTable.toLowerCase();
+            return (p === t1 && r === t2) || (p === t2 && r === t1);
+        });
+    }
+
+    /** Load all triggers */
+    async loadTriggers(): Promise<void> {
+        if (!this.connectionManager.isConnected || this.triggersLoaded) {
+            return;
+        }
+
+        const result = await this.connectionManager.executeQuery(ALL_TRIGGERS_QUERY);
+        this.triggers.clear();
+
+        for (const row of result.rows) {
+            const tableName = (row['TABLE_NAME'] as string).toLowerCase();
+            const trigger: TriggerInfo = {
+                name: row['TRIGGER_NAME'] as string,
+                tableName: row['TABLE_NAME'] as string,
+                definition: row['TRIGGER_DEFINITION'] as string || '',
+            };
+
+            if (!this.triggers.has(tableName)) {
+                this.triggers.set(tableName, []);
+            }
+            this.triggers.get(tableName)!.push(trigger);
+        }
+        this.triggersLoaded = true;
+    }
+
+    /** Get triggers for a table */
+    getTriggers(tableName: string): TriggerInfo[] {
+        return this.triggers.get(tableName.toLowerCase()) || [];
+    }
+
+    /** Check if a table has triggers */
+    hasTriggers(tableName: string): boolean {
+        const trigs = this.triggers.get(tableName.toLowerCase());
+        return !!trigs && trigs.length > 0;
+    }
+
+    /** Load all indexes and primary keys */
+    async loadIndexes(): Promise<void> {
+        if (!this.connectionManager.isConnected || this.indexesLoaded) {
+            return;
+        }
+
+        const result = await this.connectionManager.executeQuery(ALL_INDEXES_QUERY);
+        this.indexes.clear();
+
+        for (const row of result.rows) {
+            const tableName = (row['TABLE_NAME'] as string).toLowerCase();
+            const idx: IndexInfo = {
+                name: row['INDEX_NAME'] as string,
+                tableName: row['TABLE_NAME'] as string,
+                type: row['INDEX_TYPE'] as string,
+                isUnique: row['IS_UNIQUE'] as boolean,
+                isPrimaryKey: row['IS_PRIMARY_KEY'] as boolean,
+                columns: row['COLUMNS'] as string,
+            };
+
+            if (!this.indexes.has(tableName)) {
+                this.indexes.set(tableName, []);
+            }
+            this.indexes.get(tableName)!.push(idx);
+        }
+        this.indexesLoaded = true;
+    }
+
+    /** Get indexes for a table */
+    getIndexes(tableName: string): IndexInfo[] {
+        return this.indexes.get(tableName.toLowerCase()) || [];
+    }
+
+    /** Load all view definitions */
+    async loadViewDefinitions(): Promise<void> {
+        if (!this.connectionManager.isConnected || this.viewDefsLoaded) {
+            return;
+        }
+
+        const result = await this.connectionManager.executeQuery(ALL_VIEW_DEFINITIONS_QUERY);
+        this.viewDefinitions.clear();
+
+        for (const row of result.rows) {
+            const name = (row['TABLE_NAME'] as string).toLowerCase();
+            const def = row['VIEW_DEFINITION'] as string;
+            if (def) {
+                this.viewDefinitions.set(name, def);
+            }
+        }
+        this.viewDefsLoaded = true;
+    }
+
+    /** Get view definition */
+    getViewDefinition(viewName: string): string | undefined {
+        return this.viewDefinitions.get(viewName.toLowerCase());
+    }
+
+    /** Get all FK relationships involving a specific table (as parent or referenced) */
+    getForeignKeysForTable(tableName: string): ForeignKeyInfo[] {
+        const t = tableName.toLowerCase();
+        return this.foreignKeys.filter(fk =>
+            fk.parentTable.toLowerCase() === t || fk.referencedTable.toLowerCase() === t
+        );
+    }
+
     /** Get columns for a table/view (from cache, or load lazily) */
     async getColumns(tableName: string): Promise<ColumnInfo[]> {
         const key = tableName.toLowerCase();
@@ -192,8 +364,12 @@ export class SchemaCache {
     /** Full refresh: reload object names + columns */
     async refresh(): Promise<void> {
         await this.loadObjectNames();
-        // Load columns in background (don't await)
+        // Load columns, FK, triggers, indexes, view definitions in background
         this.loadAllColumns().catch(() => {});
+        this.loadForeignKeys().catch(() => {});
+        this.loadTriggers().catch(() => {});
+        this.loadIndexes().catch(() => {});
+        this.loadViewDefinitions().catch(() => {});
     }
 
     dispose(): void {

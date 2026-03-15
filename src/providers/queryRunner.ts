@@ -80,6 +80,34 @@ export class QueryRunner implements vscode.WebviewViewProvider {
         this.showResults(result);
     }
 
+    /** Run a specific SQL text (for query shortcuts) */
+    async runQueryText(sql: string): Promise<void> {
+        if (!this.connectionManager.isConnected) {
+            const action = await vscode.window.showWarningMessage(
+                'T-SQL IntelliSense: Not connected to a database',
+                'Connect'
+            );
+            if (action === 'Connect') {
+                await this.connectionManager.promptConnect();
+            }
+            return;
+        }
+
+        if (!sql.trim()) { return; }
+
+        const result = await vscode.window.withProgress(
+            {
+                location: vscode.ProgressLocation.Notification,
+                title: 'Executing query...',
+                cancellable: false,
+            },
+            () => this.connectionManager.executeBatch(sql)
+        );
+
+        this.lastResult = result;
+        this.showResults(result);
+    }
+
     /** Display results in the bottom panel */
     private showResults(result: BatchResult): void {
         // Make sure the panel is visible
@@ -104,9 +132,15 @@ export class QueryRunner implements vscode.WebviewViewProvider {
     }
 
     private buildHtml(result: BatchResult): string {
+        const config = vscode.workspace.getConfiguration('tsql-intellisense');
+        const displayMode = config.get<string>('resultDisplayMode', 'tabs');
         const resultTabs = result.resultSets.map((rs, i) => this.buildResultSetTab(rs, i));
         const messagesHtml = this.buildMessages(result);
         const activeTab = result.resultSets.length > 0 ? 0 : -1;
+
+        if (displayMode === 'stacked' && result.resultSets.length > 1) {
+            return this.buildStackedHtml(result, resultTabs, messagesHtml);
+        }
 
         return `<!DOCTYPE html>
 <html lang="en">
@@ -290,6 +324,109 @@ export class QueryRunner implements vscode.WebviewViewProvider {
         const rs = resultSets[Math.max(0, currentTab)];
         if (!rs) return;
         vscode.postMessage({ type: 'exportJson', data: JSON.stringify(rs.rows, null, 2) });
+    }
+</script>
+</body>
+</html>`;
+    }
+
+    /** Build stacked layout — all result sets shown vertically */
+    private buildStackedHtml(result: BatchResult, resultTabs: string[], messagesHtml: string): string {
+        const stackedContent = resultTabs.map((html, i) => `
+            <div class="stacked-section">
+                <div class="stacked-header">Result ${i + 1} (${result.resultSets[i].rows.length} rows)</div>
+                ${html}
+            </div>
+        `).join('');
+
+        return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+        font-family: var(--vscode-font-family, 'Segoe UI', sans-serif);
+        font-size: var(--vscode-font-size, 13px);
+        color: var(--vscode-foreground);
+        background: var(--vscode-editor-background);
+    }
+    .toolbar {
+        display: flex; align-items: center; gap: 8px; padding: 4px 8px;
+        background: var(--vscode-editorWidget-background);
+        border-bottom: 1px solid var(--vscode-editorWidget-border);
+    }
+    .toolbar .info { flex: 1; font-size: 12px; color: var(--vscode-descriptionForeground); }
+    .toolbar button {
+        padding: 2px 8px; font-size: 11px; cursor: pointer;
+        background: var(--vscode-button-secondaryBackground);
+        color: var(--vscode-button-secondaryForeground);
+        border: none; border-radius: 2px;
+    }
+    .toolbar button:hover { background: var(--vscode-button-secondaryHoverBackground); }
+    .stacked-section { margin-bottom: 12px; }
+    .stacked-header {
+        padding: 4px 8px; font-size: 11px; font-weight: bold;
+        background: var(--vscode-editorWidget-background);
+        border-bottom: 2px solid var(--vscode-focusBorder);
+        color: var(--vscode-foreground);
+    }
+    .table-container { overflow: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    th {
+        position: sticky; top: 0;
+        background: var(--vscode-editorWidget-background);
+        padding: 4px 8px; text-align: left;
+        border-bottom: 2px solid var(--vscode-editorWidget-border);
+        cursor: pointer; user-select: none; white-space: nowrap;
+    }
+    th:hover { background: var(--vscode-list-hoverBackground); }
+    th .sort-arrow { margin-left: 4px; opacity: 0.5; font-size: 10px; }
+    td {
+        padding: 2px 8px;
+        border-bottom: 1px solid var(--vscode-editorWidget-border);
+        white-space: nowrap; max-width: 400px; overflow: hidden; text-overflow: ellipsis;
+    }
+    tr:hover td { background: var(--vscode-list-hoverBackground); }
+    td.null-val { color: var(--vscode-descriptionForeground); font-style: italic; }
+    .messages {
+        padding: 6px 8px; font-family: var(--vscode-editor-fontFamily, monospace);
+        font-size: 12px; white-space: pre-wrap;
+        border-top: 1px solid var(--vscode-editorWidget-border);
+    }
+    .error {
+        color: var(--vscode-errorForeground);
+        background: var(--vscode-inputValidation-errorBackground);
+        padding: 6px 8px; border-left: 3px solid var(--vscode-inputValidation-errorBorder);
+    }
+</style>
+</head>
+<body>
+    <div class="toolbar">
+        <span class="info">${this.buildInfoText(result)}</span>
+    </div>
+    <div style="overflow: auto; max-height: calc(100vh - 40px);">
+        ${stackedContent}
+        ${messagesHtml ? `<div class="stacked-section"><div class="stacked-header">Messages</div>${messagesHtml}</div>` : ''}
+    </div>
+<script>
+    function sortTable(tabIndex, colIndex) {
+        const tables = document.querySelectorAll('.stacked-section table tbody');
+        const container = tables[tabIndex];
+        if (!container) return;
+        const rows = Array.from(container.rows);
+        const isAsc = container.dataset.sortCol == colIndex && container.dataset.sortDir === 'asc';
+        rows.sort((a, b) => {
+            const aVal = a.cells[colIndex].textContent || '';
+            const bVal = b.cells[colIndex].textContent || '';
+            const aNum = Number(aVal), bNum = Number(bVal);
+            if (!isNaN(aNum) && !isNaN(bNum)) return isAsc ? bNum - aNum : aNum - bNum;
+            return isAsc ? bVal.localeCompare(aVal) : aVal.localeCompare(bVal);
+        });
+        rows.forEach(r => container.appendChild(r));
+        container.dataset.sortCol = colIndex;
+        container.dataset.sortDir = isAsc ? 'desc' : 'asc';
     }
 </script>
 </body>

@@ -207,11 +207,13 @@ export class ConnectionManager {
 
         try {
             for (const batch of batches) {
-                const result = await this.executeSingleBatch(batch, messages);
-                if (result.columns.length > 0 || result.rows.length > 0) {
-                    resultSets.push(result);
+                const batchResults = await this.executeSingleBatch(batch, messages);
+                for (const result of batchResults) {
+                    if (result.columns.length > 0 || result.rows.length > 0) {
+                        resultSets.push(result);
+                    }
+                    totalRowsAffected += result.rows.length;
                 }
-                totalRowsAffected += result.rows.length;
             }
 
             return {
@@ -231,33 +233,37 @@ export class ConnectionManager {
         }
     }
 
-    private executeSingleBatch(sql: string, messages: string[]): Promise<QueryResult> {
+    private executeSingleBatch(sql: string, messages: string[]): Promise<QueryResult[]> {
         return new Promise((resolve, reject) => {
             if (!this.connection) {
                 reject(new Error('Not connected to database'));
                 return;
             }
 
-            const rows: Record<string, any>[] = [];
-            const columns: string[] = [];
+            const resultSets: QueryResult[] = [];
+            let currentColumns: string[] = [];
+            let currentRows: Record<string, any>[] = [];
 
-            const request = new Request(sql, (err, rowCount) => {
+            const request = new Request(sql, (err) => {
                 if (err) {
                     reject(err);
                 } else {
-                    if (rowCount !== undefined && rowCount > 0 && columns.length === 0) {
-                        messages.push(`(${rowCount} rows affected)`);
+                    // Push last result set if it has data
+                    if (currentColumns.length > 0 || currentRows.length > 0) {
+                        resultSets.push({ rows: currentRows, columns: currentColumns });
                     }
-                    resolve({ rows, columns });
+                    resolve(resultSets);
                 }
             });
 
             request.on('columnMetadata', (columnsMetadata: ColumnMetaData[]) => {
-                for (const col of columnsMetadata) {
-                    if (!columns.includes(col.colName)) {
-                        columns.push(col.colName);
-                    }
+                // New result set starting — save previous one if exists
+                if (currentColumns.length > 0 || currentRows.length > 0) {
+                    resultSets.push({ rows: currentRows, columns: currentColumns });
                 }
+                // Start new result set
+                currentColumns = columnsMetadata.map(c => c.colName);
+                currentRows = [];
             });
 
             request.on('row', (rowColumns: any[]) => {
@@ -265,7 +271,7 @@ export class ConnectionManager {
                 for (const col of rowColumns) {
                     row[col.metadata.colName] = col.value;
                 }
-                rows.push(row);
+                currentRows.push(row);
             });
 
             request.on('infoMessage', (info: any) => {

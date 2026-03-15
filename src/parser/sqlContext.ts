@@ -11,6 +11,9 @@ export enum SqlContextType {
     AFTER_ALTER_PROC = 'AFTER_ALTER_PROC',
     AFTER_SELECT = 'AFTER_SELECT',
     AFTER_TABLE_NAME = 'AFTER_TABLE_NAME',
+    AFTER_ORDER_BY_COLUMN = 'AFTER_ORDER_BY_COLUMN',
+    AFTER_ON = 'AFTER_ON',
+    AFTER_GROUP_BY = 'AFTER_GROUP_BY',
 }
 
 export interface SqlContext {
@@ -21,6 +24,12 @@ export interface SqlContext {
     tableName?: string;
     /** Partial text the user has typed (for filtering) */
     prefix?: string;
+    /** For AFTER_ON: all alias mappings in the statement */
+    aliases?: AliasMapping[];
+    /** For AFTER_ON: the table that was just JOINed */
+    joinedTable?: string;
+    /** For AFTER_ON: alias of the joined table */
+    joinedAlias?: string;
 }
 
 export interface AliasMapping {
@@ -93,6 +102,51 @@ export function extractAliases(statementText: string): AliasMapping[] {
     }
 
     return aliases;
+}
+
+/**
+ * Extract non-aggregated columns from the SELECT clause.
+ * Returns column expressions that are NOT wrapped in aggregate functions.
+ * e.g. "SELECT k.Name, k.RolID, SUM(k.Amount)" → ["k.Name", "k.RolID"]
+ */
+export function extractNonAggColumns(statementText: string): string[] {
+    // Extract SELECT clause (between SELECT and FROM)
+    const selectMatch = statementText.match(/SELECT\s+(?:TOP\s+\d+\s+)?(?:DISTINCT\s+)?([\s\S]*?)\bFROM\b/i);
+    if (!selectMatch) { return []; }
+
+    const selectClause = selectMatch[1];
+    if (selectClause.trim() === '*') { return []; }
+
+    // Split by comma (respecting parentheses depth)
+    const columns: string[] = [];
+    let depth = 0;
+    let current = '';
+    for (const ch of selectClause) {
+        if (ch === '(') { depth++; }
+        else if (ch === ')') { depth--; }
+        else if (ch === ',' && depth === 0) {
+            columns.push(current.trim());
+            current = '';
+            continue;
+        }
+        current += ch;
+    }
+    if (current.trim()) { columns.push(current.trim()); }
+
+    // Filter out aggregate columns
+    const aggPattern = /^(?:SUM|COUNT|AVG|MIN|MAX|STDEV|STDEVP|VAR|VARP|STRING_AGG|CHECKSUM_AGG|COUNT_BIG)\s*\(/i;
+    const nonAgg: string[] = [];
+    for (const col of columns) {
+        if (aggPattern.test(col)) { continue; }
+        // Remove trailing alias (AS alias or just alias after space)
+        // e.g. "k.Name AS KullaniciAdi" → "k.Name"
+        const cleaned = col.replace(/\s+AS\s+\w+$/i, '').replace(/\s+\w+$/, '').trim();
+        if (cleaned && cleaned !== '*') {
+            nonAgg.push(cleaned);
+        }
+    }
+
+    return nonAgg;
 }
 
 /**
@@ -179,6 +233,27 @@ export function detectContext(textBeforeCursor: string, fullStatementText: strin
         };
     }
 
+    // 4a. Check for ON after JOIN table alias — suggest join conditions
+    // e.g. "LEFT JOIN RN100_Roller r ON " → suggest r.RolID = k.RolID
+    const joinOnMatch = textBeforeCursor.match(
+        /JOIN\s+(?:dbo\.)?(\w+)\s+(\w+)\s+ON\s+(\w*)$/i
+    ) || textBeforeCursor.match(
+        /(?:INNER|LEFT|RIGHT|CROSS|FULL)\s+(?:OUTER\s+)?JOIN\s+(?:dbo\.)?(\w+)\s+(\w+)\s+ON\s+(\w*)$/i
+    );
+    if (joinOnMatch) {
+        const joinedTable = joinOnMatch[1];
+        const joinedAlias = joinOnMatch[2];
+        const prefix = joinOnMatch[3];
+        const aliases = extractAliases(fullStatementText);
+        return {
+            type: SqlContextType.AFTER_ON,
+            prefix,
+            joinedTable,
+            joinedAlias,
+            aliases,
+        };
+    }
+
     // 4b. Check if cursor is AFTER a table name (for alias/keyword suggestions)
     // e.g. "FROM RN100_Kullanicilar w" → suggest WHERE, or alias
     const afterTableMatch = textBeforeCursor.match(
@@ -195,6 +270,18 @@ export function detectContext(textBeforeCursor: string, fullStatementText: strin
                 tableName: tables.length > 0 ? tables[tables.length - 1] : undefined,
             };
         }
+    }
+
+    // 4c. Check if cursor is after FROM table alias + typing a keyword
+    // e.g. "FROM RN100_Kullanicilar k or" → suggest ORDER BY, etc.
+    const afterAliasKeywordMatch = textBeforeCursor.match(
+        /(?:FROM|(?:INNER|LEFT|RIGHT|CROSS|FULL)\s+(?:OUTER\s+)?JOIN|JOIN)\s+(?:dbo\.)?\w+\s+\w+\s+(\w*)$/i
+    );
+    if (afterAliasKeywordMatch) {
+        return {
+            type: SqlContextType.AFTER_TABLE_NAME,
+            prefix: afterAliasKeywordMatch[1],
+        };
     }
 
     // 5. Check for INSERT INTO
@@ -234,13 +321,45 @@ export function detectContext(textBeforeCursor: string, fullStatementText: strin
 
         // Check if cursor is in a column context (after SELECT, WHERE, ORDER BY, etc.)
         // Include * as valid prefix for "expand all columns"
-        const columnContextMatch = currentLine.match(/(?:SELECT|WHERE|AND|OR|ON|SET|ORDER\s+BY|GROUP\s+BY|HAVING|,)\s+([\w*]*)$/i);
+        // 8a. After = sign → suggest aliases (user picks alias, then types . for columns)
+        const afterEqualsMatch = currentLine.match(/=\s*(\w*)$/);
+        if (afterEqualsMatch) {
+            return {
+                type: SqlContextType.AFTER_ON,
+                prefix: afterEqualsMatch[1],
+                aliases,
+            };
+        }
+
+        // 8b. GROUP BY → separate context (no * expand, has "all non-agg columns")
+        const groupByMatch = currentLine.match(/GROUP\s+BY\s+([\w]*)$/i);
+        if (groupByMatch) {
+            return {
+                type: SqlContextType.AFTER_GROUP_BY,
+                prefix: groupByMatch[1],
+                tableName: tables[0],
+                alias: primaryAlias,
+                aliases,
+            };
+        }
+
+        const columnContextMatch = currentLine.match(/(?:SELECT|WHERE|AND|OR|ON|SET|ORDER\s+BY|HAVING|,|\()\s*([\w*]*)$/i);
         if (columnContextMatch) {
             return {
                 type: SqlContextType.AFTER_SELECT,
                 prefix: columnContextMatch[1],
                 tableName: tables[0],
                 alias: primaryAlias,
+            };
+        }
+
+        // 8b. Check for ORDER BY column + typing ASC/DESC
+        // e.g. "ORDER BY k.KullaniciAdi de" → suggest DESC, ASC
+        const orderByColMatch = currentLine.match(/ORDER\s+BY\b.*\S+\s+(\w*)$/i);
+        if (orderByColMatch) {
+            return {
+                type: SqlContextType.AFTER_ORDER_BY_COLUMN,
+                prefix: orderByColMatch[1],
             };
         }
 
@@ -252,6 +371,18 @@ export function detectContext(textBeforeCursor: string, fullStatementText: strin
                 prefix: windowMatch[1],
                 tableName: tables[0],
                 alias: primaryAlias,
+            };
+        }
+    }
+
+    // 9. Fallback: suggest SQL keywords when typing a word in a query that has tables
+    // e.g. "WHERE k.KullaniciID = 1 or" → suggest ORDER BY
+    if (tables.length > 0) {
+        const keywordFallbackMatch = textBeforeCursor.match(/\b(\w+)$/i);
+        if (keywordFallbackMatch) {
+            return {
+                type: SqlContextType.AFTER_TABLE_NAME,
+                prefix: keywordFallbackMatch[1],
             };
         }
     }

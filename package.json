@@ -36,6 +36,30 @@
         "command": "tsql-intellisense.runQuery",
         "title": "T-SQL IntelliSense: Run Query",
         "icon": "$(play)"
+      },
+      {
+        "command": "tsql-intellisense.copyTableScript",
+        "title": "T-SQL IntelliSense: Copy Table/View Script"
+      },
+      {
+        "command": "tsql-intellisense.openTableScript",
+        "title": "T-SQL IntelliSense: Open Table/View Script"
+      },
+      {
+        "command": "tsql-intellisense.queryShortcut0",
+        "title": "T-SQL IntelliSense: Query Shortcut Alt+F1"
+      },
+      {
+        "command": "tsql-intellisense.queryShortcut1",
+        "title": "T-SQL IntelliSense: Query Shortcut Ctrl+1"
+      },
+      {
+        "command": "tsql-intellisense.queryShortcut2",
+        "title": "T-SQL IntelliSense: Query Shortcut Ctrl+2"
+      },
+      {
+        "command": "tsql-intellisense.queryShortcut3",
+        "title": "T-SQL IntelliSense: Query Shortcut Ctrl+3"
       }
     ],
     "keybindings": [
@@ -43,6 +67,26 @@
         "command": "tsql-intellisense.runQuery",
         "key": "f5",
         "when": "editorLangId == sql && !inDebugMode"
+      },
+      {
+        "command": "tsql-intellisense.queryShortcut0",
+        "key": "alt+f1",
+        "when": "editorLangId == sql"
+      },
+      {
+        "command": "tsql-intellisense.queryShortcut1",
+        "key": "ctrl+1",
+        "when": "editorLangId == sql"
+      },
+      {
+        "command": "tsql-intellisense.queryShortcut2",
+        "key": "ctrl+2",
+        "when": "editorLangId == sql"
+      },
+      {
+        "command": "tsql-intellisense.queryShortcut3",
+        "key": "ctrl+3",
+        "when": "editorLangId == sql"
       }
     ],
     "viewsContainers": {
@@ -63,6 +107,12 @@
         }
       ]
     },
+    "snippets": [
+      {
+        "language": "sql",
+        "path": "./snippets/sql.json"
+      }
+    ],
     "configuration": {
       "title": "T-SQL IntelliSense",
       "properties": {
@@ -114,6 +164,35 @@
           "type": "number",
           "default": 30,
           "description": "Auto-refresh schema cache interval in minutes (0 to disable)"
+        },
+        "tsql-intellisense.resultDisplayMode": {
+          "type": "string",
+          "enum": ["tabs", "stacked"],
+          "default": "stacked",
+          "description": "How to display multiple result sets: 'tabs' (switch between tabs) or 'stacked' (all visible, vertically)"
+        },
+        "tsql-intellisense.queryShortcuts": {
+          "type": "array",
+          "description": "SSMS-style query shortcuts. Use @WORD as placeholder for the word under cursor.",
+          "default": [
+            { "key": "Alt+F1", "query": "EXEC sp_help '@WORD'" },
+            { "key": "Ctrl+1", "query": "EXEC sp_who" },
+            { "key": "Ctrl+2", "query": "EXEC sp_lock" },
+            { "key": "Ctrl+3", "query": "SELECT TOP 100 * FROM @WORD" }
+          ],
+          "items": {
+            "type": "object",
+            "properties": {
+              "key": {
+                "type": "string",
+                "description": "Shortcut key label (for display only)"
+              },
+              "query": {
+                "type": "string",
+                "description": "SQL query to execute. @WORD = word under cursor"
+              }
+            }
+          }
         }
       }
     }

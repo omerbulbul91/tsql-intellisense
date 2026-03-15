@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { SchemaCache } from '../cache/schemaCache';
-import { SqlContextType, detectContext, getCurrentStatement } from '../parser/sqlContext';
+import { SqlContextType, SqlContext, detectContext, getCurrentStatement, extractNonAggColumns } from '../parser/sqlContext';
 
 export class TsqlCompletionProvider implements vscode.CompletionItemProvider {
     constructor(private schemaCache: SchemaCache) {}
@@ -24,7 +24,7 @@ export class TsqlCompletionProvider implements vscode.CompletionItemProvider {
 
         switch (context.type) {
             case SqlContextType.AFTER_FROM_JOIN:
-                return this.completeTableNames(context.prefix);
+                return await this.completeTableNames(context.prefix);
 
             case SqlContextType.AFTER_EXEC:
                 return this.completeProcedureNames(context.prefix);
@@ -40,6 +40,15 @@ export class TsqlCompletionProvider implements vscode.CompletionItemProvider {
 
             case SqlContextType.AFTER_TABLE_NAME:
                 return this.completeAfterTableName(context.tableName);
+
+            case SqlContextType.AFTER_ORDER_BY_COLUMN:
+                return this.completeOrderByDirection(context.prefix);
+
+            case SqlContextType.AFTER_ON:
+                return await this.completeJoinCondition(context);
+
+            case SqlContextType.AFTER_GROUP_BY:
+                return await this.completeGroupBy(context, statementText);
 
             default:
                 return undefined;
@@ -87,6 +96,7 @@ export class TsqlCompletionProvider implements vscode.CompletionItemProvider {
             { label: 'CROSS JOIN', detail: 'Cross join' },
             { label: 'ON', detail: 'Join condition' },
             { label: 'AS', detail: 'Alias' },
+            { label: 'GO', detail: 'Batch separator' },
         ];
 
         for (const kw of keywords) {
@@ -101,27 +111,392 @@ export class TsqlCompletionProvider implements vscode.CompletionItemProvider {
         return new vscode.CompletionList(items, true);
     }
 
-    private completeTableNames(prefix?: string): vscode.CompletionList {
+    /** Suggest ASC/DESC after ORDER BY column */
+    private completeOrderByDirection(prefix?: string): vscode.CompletionList {
         const items: vscode.CompletionItem[] = [];
-        const tablesAndViews = this.schemaCache.getTablesAndViews();
+        const directions = [
+            { label: 'ASC', detail: 'Ascending order' },
+            { label: 'DESC', detail: 'Descending order' },
+        ];
 
-        for (const obj of tablesAndViews) {
-            const alias = this.generateAlias(obj.name);
-            const item = new vscode.CompletionItem(obj.name);
-            item.kind = obj.type === 'TABLE'
-                ? vscode.CompletionItemKind.Class
-                : vscode.CompletionItemKind.Interface;
-            item.detail = obj.type;
-            item.sortText = `0_${obj.name}`;
-            item.filterText = obj.name;
-            // Insert table name + alias (e.g. "RN100_Kullanicilar k")
-            if (alias) {
-                item.insertText = `${obj.name} ${alias}`;
-            }
+        for (const dir of directions) {
+            const item = new vscode.CompletionItem(dir.label);
+            item.kind = vscode.CompletionItemKind.Keyword;
+            item.detail = dir.detail;
+            item.sortText = `0_${dir.label}`;
+            item.filterText = dir.label;
             items.push(item);
         }
 
         return new vscode.CompletionList(items, true);
+    }
+
+    /** GROUP BY completion: "All non-aggregated columns" snippet + aliases + columns */
+    private async completeGroupBy(context: SqlContext, statementText: string): Promise<vscode.CompletionList> {
+        const items: vscode.CompletionItem[] = [];
+        const { aliases } = context;
+
+        // 1. "All non-aggregated columns" snippet (highest priority)
+        const nonAggCols = extractNonAggColumns(statementText);
+        if (nonAggCols.length > 0) {
+            const snippet = nonAggCols.join(',\n\t');
+            const item = new vscode.CompletionItem('All non-aggregated columns', vscode.CompletionItemKind.Snippet);
+            item.detail = `${nonAggCols.length} columns`;
+            item.documentation = nonAggCols.join(', ');
+            item.sortText = '0_0000';
+            item.filterText = 'all non aggregated columns';
+            item.insertText = new vscode.SnippetString(snippet);
+            items.push(item);
+        }
+
+        // 2. Aliases
+        if (aliases && aliases.length > 0) {
+            for (let i = 0; i < aliases.length; i++) {
+                const a = aliases[i];
+                const item = new vscode.CompletionItem(a.alias);
+                item.kind = vscode.CompletionItemKind.Variable;
+                item.detail = a.tableName;
+                item.sortText = `1_${String(i).padStart(4, '0')}`;
+                item.insertText = a.alias;
+                item.command = {
+                    command: 'editor.action.triggerSuggest',
+                    title: 'Trigger Suggest',
+                };
+                items.push(item);
+            }
+
+            // 3. All columns from all aliases
+            let colIndex = 0;
+            for (let i = 0; i < aliases.length; i++) {
+                const a = aliases[i];
+                const columns = await this.schemaCache.getColumns(a.tableName);
+                for (const col of columns) {
+                    const displayName = `${a.alias}.${col.name}`;
+                    const item = new vscode.CompletionItem(displayName);
+                    item.kind = vscode.CompletionItemKind.Field;
+                    let typeStr = col.dataType;
+                    if (col.maxLength && col.maxLength > 0) {
+                        typeStr += `(${col.maxLength})`;
+                    }
+                    item.detail = typeStr;
+                    item.sortText = `2_${String(i).padStart(2, '0')}_${String(col.ordinalPosition).padStart(4, '0')}`;
+                    item.filterText = `${a.alias} ${col.name}`;
+                    item.insertText = displayName;
+                    items.push(item);
+                    colIndex++;
+                }
+            }
+        }
+
+        return new vscode.CompletionList(items, true);
+    }
+
+    /** Suggest join conditions: FK matches first, then same-name columns, then aliases */
+    private async completeJoinCondition(context: SqlContext): Promise<vscode.CompletionList> {
+        const items: vscode.CompletionItem[] = [];
+        const { joinedTable, joinedAlias, aliases } = context;
+
+        // After = sign: show aliases first, then all columns from all aliases
+        if (!joinedTable && aliases && aliases.length > 0) {
+            // 1. Aliases (highest priority, FROM clause order)
+            for (let i = 0; i < aliases.length; i++) {
+                const a = aliases[i];
+                const item = new vscode.CompletionItem(a.alias);
+                item.kind = vscode.CompletionItemKind.Variable;
+                item.detail = a.tableName;
+                item.sortText = `0_${String(i).padStart(4, '0')}`;
+                item.filterText = `${a.alias} ${a.tableName}`;
+                item.insertText = a.alias;
+                item.command = {
+                    command: 'editor.action.triggerSuggest',
+                    title: 'Trigger Suggest',
+                };
+                items.push(item);
+            }
+
+            // 2. All columns from all aliases
+            let colIndex = 0;
+            for (let i = 0; i < aliases.length; i++) {
+                const a = aliases[i];
+                const columns = await this.schemaCache.getColumns(a.tableName);
+                for (const col of columns) {
+                    const displayName = `${a.alias}.${col.name}`;
+                    const item = new vscode.CompletionItem(displayName);
+                    item.kind = vscode.CompletionItemKind.Field;
+                    let typeStr = col.dataType;
+                    if (col.maxLength && col.maxLength > 0) {
+                        typeStr += `(${col.maxLength})`;
+                    }
+                    item.detail = typeStr;
+                    // Sort: alias order first, then column ordinal
+                    item.sortText = `1_${String(i).padStart(2, '0')}_${String(col.ordinalPosition).padStart(4, '0')}`;
+                    // Filter by alias + column name so typing "r" or "RolID" both work
+                    item.filterText = `${a.alias} ${col.name}`;
+                    item.insertText = displayName;
+                    items.push(item);
+                    colIndex++;
+                }
+            }
+
+            return new vscode.CompletionList(items, true);
+        }
+
+        if (!joinedTable || !joinedAlias || !aliases || aliases.length === 0) {
+            return new vscode.CompletionList(items, true);
+        }
+
+        // Get columns of the joined table
+        const joinedColumns = await this.schemaCache.getColumns(joinedTable);
+
+        // Find other tables in the statement (FROM table and other JOINs)
+        const otherAliases = aliases.filter(a => a.alias.toLowerCase() !== joinedAlias.toLowerCase());
+
+        const addedConditions = new Set<string>();
+        let sortIndex = 0;
+
+        for (const other of otherAliases) {
+            const otherColumns = await this.schemaCache.getColumns(other.tableName);
+
+            // 1. FK relationships (highest priority)
+            const fks = this.schemaCache.getForeignKeysBetween(joinedTable, other.tableName);
+            for (const fk of fks) {
+                let joinCol: string;
+                let otherCol: string;
+                if (fk.parentTable.toLowerCase() === joinedTable.toLowerCase()) {
+                    joinCol = fk.parentColumn;
+                    otherCol = fk.referencedColumn;
+                } else {
+                    joinCol = fk.referencedColumn;
+                    otherCol = fk.parentColumn;
+                }
+
+                const label = `${joinedAlias}.${joinCol} = ${other.alias}.${otherCol}`;
+                if (addedConditions.has(label.toLowerCase())) { continue; }
+                addedConditions.add(label.toLowerCase());
+
+                const item = new vscode.CompletionItem(label);
+                item.kind = vscode.CompletionItemKind.Reference;
+                item.detail = `FK: ${fk.fkName}`;
+                item.sortText = `0_${String(sortIndex++).padStart(4, '0')}`;
+                // filterText starts with alias so typing "r" or "rol" matches
+                item.filterText = `${joinedAlias} ${joinCol} ${otherCol}`;
+                item.insertText = label;
+                items.push(item);
+            }
+
+            // 2. Same-name columns
+            for (const jCol of joinedColumns) {
+                const matchingCol = otherColumns.find(
+                    c => c.name.toLowerCase() === jCol.name.toLowerCase()
+                );
+                if (!matchingCol) { continue; }
+
+                const label = `${joinedAlias}.${jCol.name} = ${other.alias}.${matchingCol.name}`;
+                if (addedConditions.has(label.toLowerCase())) { continue; }
+                addedConditions.add(label.toLowerCase());
+
+                const item = new vscode.CompletionItem(label);
+                item.kind = vscode.CompletionItemKind.Field;
+                item.detail = `Same column: ${jCol.dataType}`;
+                item.sortText = `1_${String(sortIndex++).padStart(4, '0')}`;
+                item.filterText = `${joinedAlias} ${jCol.name}`;
+                item.insertText = label;
+                items.push(item);
+            }
+        }
+
+        // 3. Add aliases so user can type alias.column manually
+        const allAliases = [
+            { alias: joinedAlias, tableName: joinedTable },
+            ...otherAliases,
+        ];
+        for (const a of allAliases) {
+            const item = new vscode.CompletionItem(a.alias);
+            item.kind = vscode.CompletionItemKind.Variable;
+            item.detail = a.tableName;
+            item.sortText = `2_${a.alias}`;
+            item.insertText = a.alias;
+            // After selecting alias, trigger suggest so user gets dot-completion
+            item.command = {
+                command: 'editor.action.triggerSuggest',
+                title: 'Trigger Suggest',
+            };
+            items.push(item);
+        }
+
+        return new vscode.CompletionList(items, true);
+    }
+
+    private async completeTableNames(prefix?: string): Promise<vscode.CompletionList> {
+        const items: vscode.CompletionItem[] = [];
+        const tablesAndViews = this.schemaCache.getTablesAndViews();
+
+        // Ensure all metadata is loaded before building docs
+        await Promise.all([
+            this.schemaCache.loadViewDefinitions(),
+            this.schemaCache.loadForeignKeys(),
+            this.schemaCache.loadIndexes(),
+            this.schemaCache.loadTriggers(),
+        ]);
+
+        for (const obj of tablesAndViews) {
+            const alias = this.generateAlias(obj.name);
+            const hasTrigger = this.schemaCache.hasTriggers(obj.name);
+            const label = hasTrigger ? `${obj.name} ⚡` : obj.name;
+            const item = new vscode.CompletionItem(label);
+            item.kind = obj.type === 'TABLE'
+                ? vscode.CompletionItemKind.Class
+                : vscode.CompletionItemKind.Interface;
+            item.detail = hasTrigger
+                ? `${obj.type} (has trigger)`
+                : obj.type;
+            item.sortText = `0_${obj.name}`;
+            item.filterText = obj.name;
+            // Insert table name + alias (without ⚡)
+            if (alias) {
+                item.insertText = `${obj.name} ${alias}`;
+            } else {
+                item.insertText = obj.name;
+            }
+
+            // Build documentation: CREATE script + trigger scripts
+            const doc = this.buildTableDocumentation(obj.name);
+            if (doc) {
+                item.documentation = doc;
+            }
+
+            items.push(item);
+        }
+
+        return new vscode.CompletionList(items, true);
+    }
+
+    /** Build full documentation: VIEW definition or CREATE TABLE + PK + Indexes + FK + Triggers */
+    private buildTableDocumentation(tableName: string): vscode.MarkdownString | undefined {
+        const obj = this.schemaCache.findObject(tableName);
+        if (!obj) { return undefined; }
+
+        const md = new vscode.MarkdownString();
+        md.isTrusted = true;
+        md.supportHtml = true;
+
+        // Command links at top
+        const encodedName = encodeURIComponent(JSON.stringify([tableName]));
+        md.appendMarkdown(`[Copy Script](command:tsql-intellisense.copyTableScript?${encodedName}) | [Open Script](command:tsql-intellisense.openTableScript?${encodedName})\n\n`);
+
+        // VIEW → show actual view definition
+        if (obj.type === 'VIEW') {
+            const viewDef = this.schemaCache.getViewDefinition(tableName);
+            if (viewDef) {
+                md.appendCodeblock(viewDef.trim(), 'sql');
+            } else if (obj.columns && obj.columns.length > 0) {
+                // Fallback: show columns if definition not loaded yet
+                const colList = obj.columns.map(c => `    ${c.name} (${c.dataType})`).join('\n');
+                md.appendCodeblock(`-- VIEW: ${tableName}\n${colList}`, 'sql');
+            }
+            return md;
+        }
+
+        // TABLE → CREATE TABLE script
+        if (!obj.columns || obj.columns.length === 0) { return undefined; }
+
+        const lines: string[] = [`CREATE TABLE [dbo].[${tableName}]`, '('];
+        for (let i = 0; i < obj.columns.length; i++) {
+            const col = obj.columns[i];
+            let colDef = `    [${col.name}] [${col.dataType}]`;
+            if (col.maxLength && col.maxLength > 0) {
+                colDef += `(${col.maxLength})`;
+            }
+            colDef += col.isNullable ? ' NULL' : ' NOT NULL';
+            if (i < obj.columns.length - 1) { colDef += ','; }
+            lines.push(colDef);
+        }
+        lines.push(')');
+
+        // PK + Indexes
+        const indexes = this.schemaCache.getIndexes(tableName);
+        const pk = indexes.find(idx => idx.isPrimaryKey);
+        if (pk) {
+            lines.push('GO');
+            lines.push(`ALTER TABLE [dbo].[${tableName}] ADD CONSTRAINT [${pk.name}] PRIMARY KEY (${pk.columns})`);
+        }
+
+        const otherIndexes = indexes.filter(idx => !idx.isPrimaryKey);
+        for (const idx of otherIndexes) {
+            lines.push('GO');
+            const unique = idx.isUnique ? 'UNIQUE ' : '';
+            lines.push(`CREATE ${unique}${idx.type} INDEX [${idx.name}] ON [dbo].[${tableName}] (${idx.columns})`);
+        }
+
+        // FK relationships
+        const tableFks = this.schemaCache.getForeignKeysForTable(tableName);
+        if (tableFks.length > 0) {
+            for (const fk of tableFks) {
+                lines.push('GO');
+                lines.push(`ALTER TABLE [dbo].[${fk.parentTable}] ADD CONSTRAINT [${fk.fkName}] FOREIGN KEY ([${fk.parentColumn}]) REFERENCES [dbo].[${fk.referencedTable}] ([${fk.referencedColumn}])`);
+            }
+        }
+
+        md.appendCodeblock(lines.join('\n'), 'sql');
+
+        // Triggers
+        const triggers = this.schemaCache.getTriggers(tableName);
+        if (triggers.length > 0) {
+            md.appendMarkdown(`\n\n---\n\n**⚡ Triggers (${triggers.length}):**\n\n`);
+            for (const trig of triggers) {
+                md.appendMarkdown(`**${trig.name}**\n\n`);
+                if (trig.definition) {
+                    md.appendCodeblock(trig.definition.trim(), 'sql');
+                }
+            }
+        }
+
+        return md;
+    }
+
+
+    /** Get PK and FK column sets for a table */
+    private getColumnKeyInfo(tableName: string): { pkColumns: Set<string>; fkColumns: Set<string> } {
+        const pkColumns = new Set<string>();
+        const fkColumns = new Set<string>();
+
+        const indexes = this.schemaCache.getIndexes(tableName);
+        const pk = indexes.find(idx => idx.isPrimaryKey);
+        if (pk) {
+            for (const col of pk.columns.split(',')) {
+                pkColumns.add(col.trim().toLowerCase());
+            }
+        }
+
+        const fks = this.schemaCache.getForeignKeysForTable(tableName);
+        for (const fk of fks) {
+            if (fk.parentTable.toLowerCase() === tableName.toLowerCase()) {
+                fkColumns.add(fk.parentColumn.toLowerCase());
+            }
+        }
+
+        return { pkColumns, fkColumns };
+    }
+
+    /** Build detail string for a column: type + nullable + PK/FK indicator */
+    private buildColumnDetail(col: { name: string; dataType: string; maxLength: number | null; isNullable: boolean }, pkColumns: Set<string>, fkColumns: Set<string>): { detail: string; icon: string } {
+        let typeStr = col.dataType;
+        if (col.maxLength && col.maxLength > 0) {
+            typeStr += `(${col.maxLength})`;
+        }
+        typeStr += col.isNullable ? ' null' : ' not null';
+
+        const colLower = col.name.toLowerCase();
+        let icon = '';
+        if (pkColumns.has(colLower)) {
+            icon = '🔑';
+            typeStr += ' 🔑';
+        } else if (fkColumns.has(colLower)) {
+            icon = '🔗';
+            typeStr += ' 🔗';
+        }
+
+        return { detail: typeStr, icon };
     }
 
     /** Generate a short alias from a table name */
@@ -188,23 +563,65 @@ export class TsqlCompletionProvider implements vscode.CompletionItemProvider {
             items.push(starItem);
         }
 
-        for (const col of columns) {
-            // Show alias in label (e.g. "k.KullaniciID")
-            const displayName = alias ? `${aliasPrefix}${col.name}` : col.name;
-            const item = new vscode.CompletionItem(displayName);
-            item.kind = vscode.CompletionItemKind.Field;
+        // Add SQL function snippets
+        const sqlFunctions = [
+            { label: 'COUNT', snippet: 'COUNT(${1:*})', detail: 'Aggregate: count rows' },
+            { label: 'SUM', snippet: 'SUM(${1:column})', detail: 'Aggregate: sum values' },
+            { label: 'AVG', snippet: 'AVG(${1:column})', detail: 'Aggregate: average' },
+            { label: 'MIN', snippet: 'MIN(${1:column})', detail: 'Aggregate: minimum' },
+            { label: 'MAX', snippet: 'MAX(${1:column})', detail: 'Aggregate: maximum' },
+            { label: 'ROW_NUMBER', snippet: 'ROW_NUMBER() OVER(${1:ORDER BY ${2:column}})', detail: 'Window: row number' },
+            { label: 'RANK', snippet: 'RANK() OVER(${1:ORDER BY ${2:column}})', detail: 'Window: rank' },
+            { label: 'DENSE_RANK', snippet: 'DENSE_RANK() OVER(${1:ORDER BY ${2:column}})', detail: 'Window: dense rank' },
+            { label: 'NTILE', snippet: 'NTILE(${1:n}) OVER(${2:ORDER BY ${3:column}})', detail: 'Window: ntile' },
+            { label: 'LAG', snippet: 'LAG(${1:column}, ${2:1}) OVER(${3:ORDER BY ${4:column}})', detail: 'Window: previous row value' },
+            { label: 'LEAD', snippet: 'LEAD(${1:column}, ${2:1}) OVER(${3:ORDER BY ${4:column}})', detail: 'Window: next row value' },
+            { label: 'CAST', snippet: 'CAST(${1:expression} AS ${2:datatype})', detail: 'Convert data type' },
+            { label: 'CONVERT', snippet: 'CONVERT(${1:datatype}, ${2:expression})', detail: 'Convert data type' },
+            { label: 'ISNULL', snippet: 'ISNULL(${1:expression}, ${2:replacement})', detail: 'Replace NULL' },
+            { label: 'COALESCE', snippet: 'COALESCE(${1:expr1}, ${2:expr2})', detail: 'First non-NULL' },
+            { label: 'CASE', snippet: 'CASE WHEN ${1:condition} THEN ${2:result} ELSE ${3:default} END', detail: 'Conditional expression' },
+            { label: 'LEFT', snippet: 'LEFT(${1:string}, ${2:length})', detail: 'String: left substring' },
+            { label: 'RIGHT', snippet: 'RIGHT(${1:string}, ${2:length})', detail: 'String: right substring' },
+            { label: 'SUBSTRING', snippet: 'SUBSTRING(${1:string}, ${2:start}, ${3:length})', detail: 'String: substring' },
+            { label: 'LEN', snippet: 'LEN(${1:string})', detail: 'String: length' },
+            { label: 'REPLACE', snippet: 'REPLACE(${1:string}, ${2:old}, ${3:new})', detail: 'String: replace' },
+            { label: 'TRIM', snippet: 'TRIM(${1:string})', detail: 'String: trim whitespace' },
+            { label: 'UPPER', snippet: 'UPPER(${1:string})', detail: 'String: to uppercase' },
+            { label: 'LOWER', snippet: 'LOWER(${1:string})', detail: 'String: to lowercase' },
+            { label: 'GETDATE', snippet: 'GETDATE()', detail: 'Date: current datetime' },
+            { label: 'DATEADD', snippet: 'DATEADD(${1:datepart}, ${2:number}, ${3:date})', detail: 'Date: add interval' },
+            { label: 'DATEDIFF', snippet: 'DATEDIFF(${1:datepart}, ${2:startdate}, ${3:enddate})', detail: 'Date: difference' },
+            { label: 'FORMAT', snippet: 'FORMAT(${1:value}, ${2:format})', detail: 'Format value' },
+            { label: 'STRING_AGG', snippet: 'STRING_AGG(${1:expression}, ${2:\', \'})', detail: 'Aggregate: concatenate strings' },
+        ];
 
-            let typeStr = col.dataType;
-            if (col.maxLength && col.maxLength > 0) {
-                typeStr += `(${col.maxLength})`;
+        for (const fn of sqlFunctions) {
+            const item = new vscode.CompletionItem(fn.label, vscode.CompletionItemKind.Function);
+            item.detail = fn.detail;
+            item.sortText = `1_${fn.label}`;
+            item.filterText = fn.label;
+            item.insertText = new vscode.SnippetString(fn.snippet);
+            if (replaceRange) {
+                item.range = replaceRange;
             }
-            item.detail = typeStr;
-            item.documentation = `${tableName}.${col.name} — ${typeStr}${col.isNullable ? ' NULL' : ' NOT NULL'}`;
+            items.push(item);
+        }
+
+        const { pkColumns, fkColumns } = this.getColumnKeyInfo(tableName);
+
+        for (const col of columns) {
+            const displayName = alias ? `${aliasPrefix}${col.name}` : col.name;
+            const { detail } = this.buildColumnDetail(col, pkColumns, fkColumns);
+            const item = new vscode.CompletionItem({
+                label: displayName,
+                detail: `  ${detail}`,
+                description: '',
+            });
+            item.kind = vscode.CompletionItemKind.Field;
             item.sortText = `0_${String(col.ordinalPosition).padStart(4, '0')}`;
-            // Filter by column name (without alias) so "kull" still matches "k.KullaniciID"
             item.filterText = col.name;
             item.insertText = displayName;
-
             items.push(item);
         }
 
@@ -215,23 +632,19 @@ export class TsqlCompletionProvider implements vscode.CompletionItemProvider {
     private async completeColumns(tableName: string, prefix?: string): Promise<vscode.CompletionList> {
         const items: vscode.CompletionItem[] = [];
         const columns = await this.schemaCache.getColumns(tableName);
+        const { pkColumns, fkColumns } = this.getColumnKeyInfo(tableName);
 
         for (const col of columns) {
-            const item = new vscode.CompletionItem(col.name);
+            const { detail } = this.buildColumnDetail(col, pkColumns, fkColumns);
+            const item = new vscode.CompletionItem({
+                label: col.name,
+                detail: `  ${detail}`,
+                description: '',
+            });
             item.kind = vscode.CompletionItemKind.Field;
-
-            // Show data type info
-            let typeStr = col.dataType;
-            if (col.maxLength && col.maxLength > 0) {
-                typeStr += `(${col.maxLength})`;
-            }
-            item.detail = typeStr;
-            item.documentation = `${tableName}.${col.name} — ${typeStr}${col.isNullable ? ' NULL' : ' NOT NULL'}`;
-
-            // Sort by ordinal position (columns appear in table order)
             item.sortText = `0_${String(col.ordinalPosition).padStart(4, '0')}`;
             item.filterText = col.name;
-
+            item.insertText = col.name;
             items.push(item);
         }
 
