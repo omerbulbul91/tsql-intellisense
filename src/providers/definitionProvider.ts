@@ -46,11 +46,17 @@ export class TsqlDefinitionProvider implements vscode.DefinitionProvider {
     private async getObjectDefinition(name: string): Promise<string | null> {
         try {
             const result = await this.connectionManager.executeQuery(
-                `SELECT OBJECT_DEFINITION(OBJECT_ID(@objectName)) AS [definition]`,
+                `SELECT COALESCE(
+                    OBJECT_DEFINITION(OBJECT_ID(@objectName)),
+                    OBJECT_DEFINITION(OBJECT_ID(@objectName, 'TR'))
+                ) AS [definition]`,
                 { objectName: { type: TYPES.NVarChar, value: name } }
             );
             if (result.rows.length > 0 && result.rows[0]['definition']) {
-                return result.rows[0]['definition'] as string;
+                let def = result.rows[0]['definition'] as string;
+                // CREATE → ALTER dönüşümü
+                def = def.replace(/^(\s*)CREATE\s+/i, '$1ALTER ');
+                return def;
             }
         } catch {}
         return null;

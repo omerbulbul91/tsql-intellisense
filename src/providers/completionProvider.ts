@@ -50,6 +50,12 @@ export class TsqlCompletionProvider implements vscode.CompletionItemProvider {
             case SqlContextType.AFTER_GROUP_BY:
                 return await this.completeGroupBy(context, statementText);
 
+            case SqlContextType.AFTER_ALTER_CREATE:
+                return this.completeAlterCreateObjects(context.prefix);
+
+            case SqlContextType.AFTER_ALTER_OBJECT:
+                return this.completeObjectsByType(context.alias, context.prefix);
+
             case SqlContextType.NONE:
                 return this.completeStatementStart(context.prefix);
 
@@ -116,6 +122,95 @@ export class TsqlCompletionProvider implements vscode.CompletionItemProvider {
             item.command = {
                 command: 'tsql-intellisense.fetchProcCode',
                 title: 'Fetch SP Code',
+                arguments: [obj.name],
+            };
+            items.push(item);
+        }
+
+        return new vscode.CompletionList(items, true);
+    }
+
+    /** Suggest object types after ALTER/CREATE */
+    private completeAlterCreateObjects(prefix?: string): vscode.CompletionList {
+        const items: vscode.CompletionItem[] = [];
+        const objectTypes = [
+            { label: 'PROCEDURE', detail: 'Stored procedure' },
+            { label: 'PROC', detail: 'Stored procedure (short)' },
+            { label: 'FUNCTION', detail: 'User-defined function' },
+            { label: 'TABLE', detail: 'Table' },
+            { label: 'VIEW', detail: 'View' },
+            { label: 'INDEX', detail: 'Index' },
+            { label: 'TRIGGER', detail: 'Trigger' },
+            { label: 'DATABASE', detail: 'Database' },
+            { label: 'SCHEMA', detail: 'Schema' },
+            { label: 'LOGIN', detail: 'Login' },
+            { label: 'USER', detail: 'Database user' },
+            { label: 'ROLE', detail: 'Database role' },
+            { label: 'APPLICATION ROLE', detail: 'Application role' },
+            { label: 'ASSEMBLY', detail: 'Assembly' },
+            { label: 'ASYMMETRIC KEY', detail: 'Asymmetric key' },
+            { label: 'AUTHORIZATION ON', detail: 'Authorization' },
+            { label: 'AVAILABILITY GROUP', detail: 'Availability group' },
+            { label: 'BROKER PRIORITY', detail: 'Broker priority' },
+            { label: 'CERTIFICATE', detail: 'Certificate' },
+            { label: 'COLUMN ENCRYPTION KEY', detail: 'Column encryption key' },
+            { label: 'CREDENTIAL', detail: 'Credential' },
+            { label: 'CRYPTOGRAPHIC PROVIDER', detail: 'Cryptographic provider' },
+            { label: 'DATABASE AUDIT SPECIFICATION', detail: 'Database audit spec' },
+            { label: 'DATABASE ENCRYPTION KEY', detail: 'Database encryption key' },
+            { label: 'DATABASE SCOPED', detail: 'Database scoped' },
+            { label: 'DATABASE SCOPED CONFIGURATION', detail: 'Database scoped config' },
+            { label: 'ENDPOINT', detail: 'Endpoint' },
+        ];
+
+        for (const ot of objectTypes) {
+            const item = new vscode.CompletionItem(ot.label);
+            item.kind = vscode.CompletionItemKind.Keyword;
+            item.detail = ot.detail;
+            item.sortText = `0_${ot.label}`;
+            item.filterText = ot.label;
+            items.push(item);
+        }
+
+        return new vscode.CompletionList(items, true);
+    }
+
+    /** Suggest objects by type: ALTER TABLE → tables, ALTER VIEW → views, etc. */
+    private completeObjectsByType(objType?: string, prefix?: string): vscode.CompletionList {
+        const items: vscode.CompletionItem[] = [];
+        const type = (objType || '').toUpperCase();
+
+        let objects: { name: string; type: string }[] = [];
+        if (type === 'TABLE') {
+            objects = this.schemaCache.getTablesAndViews().filter(o => o.type === 'TABLE');
+        } else if (type === 'VIEW') {
+            objects = this.schemaCache.getTablesAndViews().filter(o => o.type === 'VIEW');
+        } else if (type === 'FUNCTION') {
+            objects = this.schemaCache.getFunctions();
+        } else if (type === 'TRIGGER') {
+            // Collect all trigger names from all tables
+            const allTables = this.schemaCache.getTablesAndViews().filter(o => o.type === 'TABLE');
+            for (const t of allTables) {
+                const triggers = this.schemaCache.getTriggers(t.name);
+                for (const trig of triggers) {
+                    objects.push({ name: trig.name, type: 'TRIGGER' });
+                }
+            }
+        }
+
+        for (const obj of objects) {
+            const item = new vscode.CompletionItem(obj.name);
+            item.kind = type === 'TRIGGER' ? vscode.CompletionItemKind.Event
+                : type === 'FUNCTION' ? vscode.CompletionItemKind.Function
+                : type === 'VIEW' ? vscode.CompletionItemKind.Interface
+                : vscode.CompletionItemKind.Class;
+            item.detail = obj.type;
+            item.sortText = `0_${obj.name}`;
+            item.filterText = obj.name;
+            // When selected, open the object definition
+            item.command = {
+                command: 'tsql-intellisense.openObjectDefinition',
+                title: 'Open Definition',
                 arguments: [obj.name],
             };
             items.push(item);

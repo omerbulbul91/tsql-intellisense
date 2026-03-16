@@ -88,6 +88,52 @@ export function activate(context: vscode.ExtensionContext) {
         })
     );
 
+    // Open object definition (used by ALTER TABLE/VIEW/FUNCTION/TRIGGER completion)
+    context.subscriptions.push(
+        vscode.commands.registerCommand('tsql-intellisense.openObjectDefinition', async (objName: string) => {
+            if (!connectionManager.isConnected) { return; }
+
+            let script: string | null = null;
+            const obj = schemaCache.findObject(objName);
+
+            if (obj && obj.type === 'TABLE') {
+                script = buildObjectScript(objName);
+            } else {
+                // SP, VIEW, FUNCTION, TRIGGER — use OBJECT_DEFINITION
+                try {
+                    const result = await connectionManager.executeQuery(
+                        `SELECT COALESCE(
+                            OBJECT_DEFINITION(OBJECT_ID(@objectName)),
+                            OBJECT_DEFINITION(OBJECT_ID(@objectName, 'TR'))
+                        ) AS [definition]`,
+                        { objectName: { type: TYPES.NVarChar, value: objName } }
+                    );
+                    if (result.rows.length > 0 && result.rows[0]['definition']) {
+                        script = result.rows[0]['definition'] as string;
+                        // CREATE → ALTER dönüşümü
+                        script = script.replace(/^(\s*)CREATE\s+/i, '$1ALTER ');
+                    }
+                } catch {}
+            }
+
+            if (!script) {
+                vscode.window.showWarningMessage(`Could not retrieve definition for ${objName}`);
+                return;
+            }
+
+            const editor = vscode.window.activeTextEditor;
+            if (editor) {
+                const fullRange = new vscode.Range(
+                    editor.document.positionAt(0),
+                    editor.document.positionAt(editor.document.getText().length)
+                );
+                await editor.edit(editBuilder => {
+                    editBuilder.replace(fullRange, script!);
+                });
+            }
+        })
+    );
+
     context.subscriptions.push(
         vscode.commands.registerCommand('tsql-intellisense.runQuery', () => {
             queryRunner.runQuery();

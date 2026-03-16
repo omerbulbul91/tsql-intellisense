@@ -14,6 +14,8 @@ export enum SqlContextType {
     AFTER_ORDER_BY_COLUMN = 'AFTER_ORDER_BY_COLUMN',
     AFTER_ON = 'AFTER_ON',
     AFTER_GROUP_BY = 'AFTER_GROUP_BY',
+    AFTER_ALTER_CREATE = 'AFTER_ALTER_CREATE',
+    AFTER_ALTER_OBJECT = 'AFTER_ALTER_OBJECT',
 }
 
 export interface SqlContext {
@@ -204,13 +206,24 @@ export function detectContext(textBeforeCursor: string, fullStatementText: strin
         return { type: SqlContextType.NONE };
     }
 
-    // 2. Check for ALTER PROC/PROCEDURE
-    const alterProcMatch = textBeforeCursor.match(/ALTER\s+PROC(?:EDURE)?\s+(?:dbo\.)?(\w*)$/i);
-    if (alterProcMatch) {
+    // 2a. Check for ALTER/CREATE without object type yet → suggest object types
+    const alterCreateMatch = textBeforeCursor.match(/(?:ALTER|CREATE)\s+(\w*)$/i);
+    if (alterCreateMatch && !/^(PROC|PROCEDURE|TABLE|VIEW|FUNCTION|INDEX|TRIGGER|DATABASE|SCHEMA|LOGIN|USER|ROLE)$/i.test(alterCreateMatch[1])) {
         return {
-            type: SqlContextType.AFTER_ALTER_PROC,
-            prefix: alterProcMatch[1],
+            type: SqlContextType.AFTER_ALTER_CREATE,
+            prefix: alterCreateMatch[1],
         };
+    }
+
+    // 2b. Check for ALTER/CREATE + object type + name prefix
+    const alterObjMatch = textBeforeCursor.match(/(?:ALTER|CREATE)\s+(PROC(?:EDURE)?|TABLE|VIEW|FUNCTION|TRIGGER)\s+(?:dbo\.)?(\w*)$/i);
+    if (alterObjMatch) {
+        const objType = alterObjMatch[1].toUpperCase();
+        const prefix = alterObjMatch[2];
+        if (objType === 'PROC' || objType === 'PROCEDURE') {
+            return { type: SqlContextType.AFTER_ALTER_PROC, prefix };
+        }
+        return { type: SqlContextType.AFTER_ALTER_OBJECT, prefix, alias: objType };
     }
 
     // 3. Check for EXEC/EXECUTE
