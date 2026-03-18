@@ -109,6 +109,8 @@
         { "command": "tsql-intellisense.editConnection", "when": "viewItem =~ /^connection\\./" , "group": "2_manage" },
         { "command": "tsql-intellisense.deleteConnection", "when": "viewItem =~ /^connection\\./" , "group": "2_manage" },
         { "command": "tsql-intellisense.setProjectPath", "when": "viewItem == connection.connected", "group": "2_manage" },
+        { "command": "tsql-intellisense.newQueryFromTree", "when": "viewItem == database.connected", "group": "1_db" },
+        { "command": "tsql-intellisense.switchDatabase", "when": "viewItem == database", "group": "1_db" },
         { "command": "tsql-intellisense.refreshSchema", "when": "viewItem =~ /^folder\\./" , "group": "1_actions" },
         { "command": "tsql-intellisense.selectTop100", "when": "viewItem == table", "group": "1_actions" },
         { "command": "tsql-intellisense.copyTableScript", "when": "viewItem == table", "group": "1_actions" },
@@ -119,7 +121,9 @@
         { "command": "tsql-intellisense.newQueryFromTree", "when": "viewItem == connection.connected", "group": "inline" },
         { "command": "tsql-intellisense.editConnection", "when": "viewItem =~ /^connection\\./", "group": "inline" },
         { "command": "tsql-intellisense.refreshSchema", "when": "viewItem == connection.connected", "group": "inline" },
-        { "command": "tsql-intellisense.deleteConnection", "when": "viewItem =~ /^connection\\./", "group": "inline" }
+        { "command": "tsql-intellisense.deleteConnection", "when": "viewItem =~ /^connection\\./", "group": "inline" },
+        { "command": "tsql-intellisense.newQueryFromTree", "when": "viewItem == database.connected", "group": "inline" },
+        { "command": "tsql-intellisense.switchDatabase", "when": "viewItem == database", "group": "inline" }
       ]
     },
     "keybindings": [

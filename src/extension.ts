@@ -594,11 +594,23 @@ export function activate(context: vscode.ExtensionContext) {
         })
     );
 
-    // Tree: New Query (opens empty SQL file when clicking from connected connection)
+    // Tree: New Query — from DB node (remembers which DB) or server node (DB null → F5 asks)
     context.subscriptions.push(
-        vscode.commands.registerCommand('tsql-intellisense.newQueryFromTree', async () => {
+        vscode.commands.registerCommand('tsql-intellisense.newQueryFromTree', async (arg: any) => {
             const doc = await vscode.workspace.openTextDocument({ language: 'sql', content: '' });
             await vscode.window.showTextDocument(doc);
+
+            if (arg?.dbName && arg?.parentProfileName) {
+                // Opened from a DatabaseItem → bind to that DB
+                queryRunner.setDocumentDatabase(doc.uri, {
+                    profileName: arg.parentProfileName,
+                    dbName: arg.dbName,
+                });
+            } else if (arg?.profileName) {
+                // Opened from a ConnectionItem (server level) → DB null, F5 will ask
+                queryRunner.setDocumentDatabase(doc.uri, null);
+            }
+            // else: opened from command palette — no association, runs against current DB
         })
     );
 
