@@ -84,7 +84,8 @@
       { "command": "tsql-intellisense.treeConnect", "title": "T-SQL IntelliSense: Connect", "icon": "$(plug)" },
       { "command": "tsql-intellisense.selectTop100", "title": "SELECT TOP 100", "icon": "$(play)" },
       { "command": "tsql-intellisense.openInExplorer", "title": "Open in Explorer", "icon": "$(folder-opened)" },
-      { "command": "tsql-intellisense.insertSpParams", "title": "T-SQL IntelliSense: EXEC with Params" }
+      { "command": "tsql-intellisense.insertSpParams", "title": "T-SQL IntelliSense: EXEC with Params" },
+      { "command": "tsql-intellisense.newQueryFromTree", "title": "New Query", "icon": "$(new-file)" }
     ],
     "menus": {
       "editor/title": [
@@ -100,6 +101,7 @@
       ],
       "view/item/context": [
         { "command": "tsql-intellisense.treeConnect", "when": "viewItem == connection.disconnected", "group": "1_connection" },
+        { "command": "tsql-intellisense.newQueryFromTree", "when": "viewItem == connection.connected", "group": "1_connection" },
         { "command": "tsql-intellisense.disconnect", "when": "viewItem == connection.connected", "group": "1_connection" },
         { "command": "tsql-intellisense.refreshSchema", "when": "viewItem == connection.connected", "group": "1_connection" },
         { "command": "tsql-intellisense.editConnection", "when": "viewItem =~ /^connection\\./" , "group": "2_manage" },
@@ -111,7 +113,11 @@
         { "command": "tsql-intellisense.openTableScript", "when": "viewItem == table || viewItem == view || viewItem == func", "group": "1_actions" },
         { "command": "tsql-intellisense.alterProc", "when": "viewItem == sp", "group": "1_actions" },
         { "command": "tsql-intellisense.insertSpParams", "when": "viewItem == sp", "group": "1_actions" },
-        { "command": "tsql-intellisense.openInExplorer", "when": "viewItem == projectFolder", "group": "1_actions" }
+        { "command": "tsql-intellisense.openInExplorer", "when": "viewItem == projectFolder", "group": "1_actions" },
+        { "command": "tsql-intellisense.newQueryFromTree", "when": "viewItem == connection.connected", "group": "inline" },
+        { "command": "tsql-intellisense.editConnection", "when": "viewItem =~ /^connection\\./", "group": "inline" },
+        { "command": "tsql-intellisense.refreshSchema", "when": "viewItem == connection.connected", "group": "inline" },
+        { "command": "tsql-intellisense.deleteConnection", "when": "viewItem =~ /^connection\\./", "group": "inline" }
       ]
     },
     "keybindings": [

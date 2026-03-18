@@ -11,14 +11,15 @@ export class ConnectionItem extends vscode.TreeItem {
     ) {
         super(profileName, vscode.TreeItemCollapsibleState.Collapsed);
 
-        this.description = `${server} / ${database}`;
+        this.description = database;
         this.contextValue = isActive ? 'connection.connected' : 'connection.disconnected';
-        this.iconPath = new vscode.ThemeIcon(isActive ? 'database' : 'plug');
 
         if (isActive) {
-            this.tooltip = `Connected: ${server} / ${database}`;
+            this.iconPath = new vscode.ThemeIcon('database', new vscode.ThemeColor('testing.iconPassed'));
+            this.tooltip = `${server}/${database}`;
         } else {
-            this.tooltip = `${server} / ${database} (disconnected)`;
+            this.iconPath = new vscode.ThemeIcon('database', new vscode.ThemeColor('disabledForeground'));
+            this.tooltip = `${server}/${database} — click to connect`;
             this.command = {
                 command: 'tsql-intellisense.treeConnect',
                 title: 'Connect',

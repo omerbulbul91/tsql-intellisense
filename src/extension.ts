@@ -594,6 +594,14 @@ export function activate(context: vscode.ExtensionContext) {
         })
     );
 
+    // Tree: New Query (opens empty SQL file when clicking from connected connection)
+    context.subscriptions.push(
+        vscode.commands.registerCommand('tsql-intellisense.newQueryFromTree', async () => {
+            const doc = await vscode.workspace.openTextDocument({ language: 'sql', content: '' });
+            await vscode.window.showTextDocument(doc);
+        })
+    );
+
     // Tree: Open project folder in Explorer
     context.subscriptions.push(
         vscode.commands.registerCommand('tsql-intellisense.openInExplorer', (item: any) => {
