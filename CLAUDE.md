@@ -33,6 +33,7 @@ src/
 │   └── sqlContext.ts                 -- Regex tabanlı SQL bağlam algılama + extractNonAggColumns
 ├── providers/
 │   ├── completionProvider.ts        -- CompletionItemProvider (tüm tamamlama mantığı)
+│   ├── snippetProvider.ts          -- Redgate SQL Prompt snippet yükleyici
 │   ├── alterProcProvider.ts         -- Quick Pick ile SP seçme komutu
 │   ├── queryRunner.ts              -- WebviewViewProvider, sorgu çalıştırma, sonuç paneli (tabs/stacked)
 │   └── renameProvider.ts           -- F2 ile alias rename
@@ -124,6 +125,19 @@ Metadata arka planda yüklenir — yüklenene kadar "Schema loading..." görün�
 | `cj` | CROSS JOIN ... |
 | `st` | SELECT TOP 100 * FROM ... |
 
+### Redgate SQL Prompt Snippet Desteği
+
+- `tsql-intellisense.snippetFolder` ayarına Redgate snippet dizin yolu girilir
+- Command Palette'den `T-SQL IntelliSense: Set Snippet Folder` ile folder picker açılabilir
+- Dizindeki `.json` dosyaları Redgate formatında (`{id, prefix, description, body}`) okunur
+- Placeholder dönüşümleri:
+  - `$CURSOR$` → VS Code cursor pozisyonu
+  - `$PASTE$` → pano içeriği (boşsa tabstop)
+  - `$table_name$`, `$column_name$` vb. → VS Code tabstop (Tab ile gezilir)
+  - `$SELECTIONSTART$` / `$SELECTIONEND$` → kaldırılır
+- Completion listesinde detail alanında `SQL Prompt` etiketi, doc popup'ta body önizlemesi görünür
+- Snippet'ler schema completion'larının altında sıralanır (`sortText: "zz_"`)
+
 ### Query Shortcuts (SSMS Tarzı)
 
 | Kısayol | Varsayılan Sorgu | Açıklama |
@@ -138,7 +152,8 @@ Metadata arka planda yüklenir — yüklenene kadar "Schema loading..." görün�
 
 ### Sorgu Çalıştırma
 
-- `F5` veya `Ctrl+Shift+Q` ile çalıştır
+- `F5` ile çalıştır (eklenti aktifken mssql yerine bu eklenti öncelikli)
+- Editör toolbar'da Run Query butonu (`$(play)` ikonu) görünür
 - GO batch separator desteği
 - **Multiple result set desteği** (sp_help gibi SP'ler için)
 - İki görüntüleme modu: `tabs` (sekmeler) veya `stacked` (alt alta) — settings'ten ayarlanır
@@ -173,6 +188,7 @@ Regex tabanlı cursor pozisyonu analizi. Türler:
 | `tsql-intellisense.autoRefreshMinutes` | `30` | Şema cache yenileme süresi (0=kapalı) |
 | `tsql-intellisense.resultDisplayMode` | `stacked` | Sonuç görüntüleme: `tabs` veya `stacked` |
 | `tsql-intellisense.queryShortcuts` | SSMS varsayılanları | Query shortcut tanımları |
+| `tsql-intellisense.snippetFolder` | `""` | Redgate SQL Prompt snippet dizin yolu |
 
 ## Kodlama Kuralları
 
@@ -193,7 +209,7 @@ Regex tabanlı cursor pozisyonu analizi. Türler:
 ### Otomatik (programatik)
 
 ```bash
-npm test    # 40 context detection testi (test/contextDetection.test.ts)
+npm test    # 41 context detection + 46 projectSync/snippet testi
 ```
 
 ### Manuel Checklist (F5 ile Extension Dev Host'ta)
@@ -224,6 +240,21 @@ npm test    # 40 context detection testi (test/contextDetection.test.ts)
 | 22 | F12 Table definition | Tablo adı üzerinde F12 | CREATE TABLE + PK + FK + Index scripti |
 | 23 | F12 View definition | View adı üzerinde F12 | CREATE VIEW scripti |
 | 24 | SP param completion | `EXEC spName` seç | Parametreler otomatik doldurulur (DECLARE + format) |
+| 25 | Redgate snippet | Snippet prefix yaz (ör. `snp_`) | Completion listesinde "SQL Prompt" etiketiyle görünür |
+| 26 | Snippet doc popup | Snippet seç, doc popup'a bak | **SQL Prompt Snippet** etiketi + SQL body önizlemesi |
+| 27 | Snippet $PASTE$ | Metin kopyala, $PASTE$ snippet tetikle | Kopyalanan metin yapıştırılır |
+| 28 | Snippet folder picker | Command Palette → Set Snippet Folder | Folder picker açılır, dizin seçilir |
+| 29 | ALTER TABLE completion | `ALTER TABLE tab` yaz | Tablo listesi gelir, seçince CREATE scripti AÇILMAZ |
+| 30 | CREATE OR ALTER sync | `CREATE OR ALTER TRIGGER` çalıştır | Proje dizininde dosya oluşur/güncellenir |
+| 31 | F5 öncelik | Eklenti aktifken F5 | Senin runQuery çalışır (mssql değil) |
+| 32 | Run Query butonu | SQL dosyasında toolbar'a bak | $(play) butonu görünür |
+
+### Project Sync (DDL → SQL Project)
+
+- `ALTER`, `CREATE`, `CREATE OR ALTER` sonrası PROC/VIEW/FUNCTION/TRIGGER/TABLE otomatik sync
+- Bağlantı profilinde `projectPath` ayarı gerekli
+- `ALTER TABLE` seçilince sadece isim tamamlanır, CREATE scripti açılmaz
+- `ALTER VIEW/FUNCTION/TRIGGER` seçilince definition açılır
 
 ## Bilinen Sınırlamalar
 

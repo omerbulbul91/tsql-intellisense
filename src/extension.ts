@@ -6,6 +6,8 @@ import { AlterProcProvider } from './providers/alterProcProvider';
 import { QueryRunner } from './providers/queryRunner';
 import { TsqlRenameProvider } from './providers/renameProvider';
 import { TsqlDefinitionProvider } from './providers/definitionProvider';
+import { ProjectSync } from './sync/projectSync';
+import { SnippetProvider } from './providers/snippetProvider';
 
 let connectionManager: ConnectionManager;
 let schemaCache: SchemaCache;
@@ -13,6 +15,9 @@ let alterProcProvider: AlterProcProvider;
 let queryRunner: QueryRunner;
 
 export function activate(context: vscode.ExtensionContext) {
+    // Mark extension as active (for keybinding priority over mssql)
+    vscode.commands.executeCommand('setContext', 'tsqlIntellisense.active', true);
+
     // Initialize core components
     connectionManager = new ConnectionManager();
     schemaCache = new SchemaCache(connectionManager);
@@ -52,6 +57,42 @@ export function activate(context: vscode.ExtensionContext) {
         )
     );
 
+    // Register snippet provider for Redgate SQL Prompt snippets
+    const snippetOutputChannel = vscode.window.createOutputChannel('T-SQL Snippets');
+    const snippetProvider = new SnippetProvider(snippetOutputChannel);
+    snippetProvider.loadSnippets();
+    context.subscriptions.push(
+        vscode.languages.registerCompletionItemProvider(
+            { language: 'sql', scheme: '*' },
+            snippetProvider
+        )
+    );
+    context.subscriptions.push(
+        vscode.workspace.onDidChangeConfiguration(e => {
+            if (e.affectsConfiguration('tsql-intellisense.snippetFolder')) {
+                snippetProvider.loadSnippets();
+            }
+        })
+    );
+
+    // Set Snippet Folder command (folder picker)
+    context.subscriptions.push(
+        vscode.commands.registerCommand('tsql-intellisense.setSnippetFolder', async () => {
+            const current = vscode.workspace.getConfiguration('tsql-intellisense').get<string>('snippetFolder', '');
+            const result = await vscode.window.showOpenDialog({
+                canSelectFiles: false,
+                canSelectFolders: true,
+                canSelectMany: false,
+                openLabel: 'Snippet Dizini Seç',
+                defaultUri: current ? vscode.Uri.file(current) : undefined
+            });
+            if (result && result[0]) {
+                await vscode.workspace.getConfiguration('tsql-intellisense').update('snippetFolder', result[0].fsPath, vscode.ConfigurationTarget.Global);
+                vscode.window.showInformationMessage(`Snippet dizini ayarlandı: ${result[0].fsPath}`);
+            }
+        })
+    );
+
     // Register commands
     context.subscriptions.push(
         vscode.commands.registerCommand('tsql-intellisense.connect', () => {
@@ -63,6 +104,49 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.commands.registerCommand('tsql-intellisense.disconnect', () => {
             connectionManager.disconnect();
             vscode.window.showInformationMessage('T-SQL IntelliSense: Disconnected');
+        })
+    );
+
+    // Set project path for current connection via folder picker
+    context.subscriptions.push(
+        vscode.commands.registerCommand('tsql-intellisense.setProjectPath', async () => {
+            const profile = connectionManager.currentProfile;
+            if (!profile) {
+                vscode.window.showWarningMessage('T-SQL IntelliSense: Not connected to a database');
+                return;
+            }
+
+            const result = await vscode.window.showOpenDialog({
+                canSelectFolders: true,
+                canSelectFiles: false,
+                canSelectMany: false,
+                openLabel: 'Select SQL Project Folder',
+                title: `Set project path for ${profile.name}`,
+            });
+
+            if (!result || result.length === 0) { return; }
+
+            const selectedPath = result[0].fsPath;
+
+            // Update the connection profile in settings
+            const config = vscode.workspace.getConfiguration('tsql-intellisense');
+            const connections = config.get<any[]>('connections', []);
+            const idx = connections.findIndex(
+                c => c.name === profile.name && c.server === profile.server && c.database === profile.database
+            );
+
+            if (idx >= 0) {
+                connections[idx].projectPath = selectedPath;
+                const target = vscode.workspace.workspaceFolders
+                    ? vscode.ConfigurationTarget.Workspace
+                    : vscode.ConfigurationTarget.Global;
+                await config.update('connections', connections, target);
+                profile.projectPath = selectedPath;
+                connectionManager.refreshStatusBar();
+                vscode.window.showInformationMessage(`Project path set: ${selectedPath}`);
+            } else {
+                vscode.window.showWarningMessage('Connection not found in settings. Add it to tsql-intellisense.connections first.');
+            }
         })
     );
 
@@ -345,6 +429,19 @@ export function activate(context: vscode.ExtensionContext) {
         return lines.join('\n');
     }
 
+    // Project Sync: auto-update SQL project files after DDL execution
+    const projectSync = new ProjectSync(connectionManager, schemaCache);
+    queryRunner.onQueryExecuted(async ({ sql }) => {
+        const profile = connectionManager.currentProfile;
+        if (!profile?.projectPath) { return; }
+
+        try {
+            await projectSync.syncAfterExecution(sql, profile.projectPath, buildObjectScript);
+        } catch (err: any) {
+            vscode.window.showWarningMessage(`Project Sync error: ${err.message}`);
+        }
+    });
+
     // Fetch SP code when selected from ALTER PROC completion
     context.subscriptions.push(
         vscode.commands.registerCommand('tsql-intellisense.fetchProcCode', async (spName: string) => {
@@ -381,6 +478,7 @@ export function activate(context: vscode.ExtensionContext) {
 
     // When connection changes, load schema and remember last profile
     connectionManager.onConnectionChanged(async (profile) => {
+        vscode.commands.executeCommand('setContext', 'tsqlIntellisense.connected', !!profile);
         if (profile) {
             // Remember last connected profile name
             context.globalState.update('lastConnectionName', profile.name);

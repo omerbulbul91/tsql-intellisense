@@ -207,12 +207,15 @@ export class TsqlCompletionProvider implements vscode.CompletionItemProvider {
             item.detail = obj.type;
             item.sortText = `0_${obj.name}`;
             item.filterText = obj.name;
-            // When selected, open the object definition
-            item.command = {
-                command: 'tsql-intellisense.openObjectDefinition',
-                title: 'Open Definition',
-                arguments: [obj.name],
-            };
+            // ALTER TABLE sadece isim tamamlar, script açmaz
+            // Diğerleri (VIEW, FUNCTION, TRIGGER) seçilince definition açar
+            if (type !== 'TABLE') {
+                item.command = {
+                    command: 'tsql-intellisense.openObjectDefinition',
+                    title: 'Open Definition',
+                    arguments: [obj.name],
+                };
+            }
             items.push(item);
         }
 

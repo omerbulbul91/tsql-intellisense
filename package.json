@@ -46,6 +46,10 @@
         "title": "T-SQL IntelliSense: Open Table/View Script"
       },
       {
+        "command": "tsql-intellisense.setProjectPath",
+        "title": "T-SQL IntelliSense: Set Project Path"
+      },
+      {
         "command": "tsql-intellisense.queryShortcut0",
         "title": "T-SQL IntelliSense: Query Shortcut Alt+F1"
       },
@@ -60,13 +64,26 @@
       {
         "command": "tsql-intellisense.queryShortcut3",
         "title": "T-SQL IntelliSense: Query Shortcut Ctrl+3"
+      },
+      {
+        "command": "tsql-intellisense.setSnippetFolder",
+        "title": "T-SQL IntelliSense: Set Snippet Folder"
       }
     ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "tsql-intellisense.runQuery",
+          "when": "editorLangId == sql && tsqlIntellisense.active",
+          "group": "navigation"
+        }
+      ]
+    },
     "keybindings": [
       {
         "command": "tsql-intellisense.runQuery",
         "key": "f5",
-        "when": "editorLangId == sql && !inDebugMode"
+        "when": "editorLangId == sql && !inDebugMode && tsqlIntellisense.active"
       },
       {
         "command": "tsql-intellisense.queryShortcut0",
@@ -151,6 +168,10 @@
               "trustServerCertificate": {
                 "type": "boolean",
                 "default": true
+              },
+              "projectPath": {
+                "type": "string",
+                "description": "SQL Server Database Project directory path for automatic file sync on DDL execution"
               }
             },
             "required": [
@@ -193,6 +214,11 @@
               }
             }
           }
+        },
+        "tsql-intellisense.snippetFolder": {
+          "type": "string",
+          "default": "",
+          "description": "Redgate SQL Prompt snippet JSON dosyalarını içeren dizin yolu"
         }
       }
     }
@@ -200,7 +226,7 @@
   "scripts": {
     "build": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node",
     "watch": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --watch",
-    "test": "npx ts-node test/contextDetection.test.ts",
+    "test": "npx ts-node test/contextDetection.test.ts && npx ts-node test/projectSync.test.ts",
     "package": "vsce package"
   },
   "dependencies": {
