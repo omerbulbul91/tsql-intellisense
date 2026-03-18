@@ -88,11 +88,37 @@ User typing
 
 ### $PASTE$ Resolution
 
-Since clipboard read (`vscode.env.clipboard.readText()`) is async, resolve it in `resolveCompletionItem` rather than `provideCompletionItems` to avoid blocking the completion list.
+Since clipboard read (`vscode.env.clipboard.readText()`) is async, resolve it in `resolveCompletionItem`:
+
+1. **At load time:** Body'deki `$PASTE$` yerinde sentinel placeholder `${1:PASTE}` bırakılır
+2. **resolveCompletionItem'da:** Clipboard okunur, sentinel gerçek değerle veya boşsa `$1` tabstop ile değiştirilir
+3. `$CURSOR$` → `$0` dönüşümü load time'da yapılır (async gerektirmez)
+
+### Error Handling
+
+- Geçersiz JSON veya eksik `prefix`/`body` alanı olan dosyalar atlanır, Output Channel'a warning yazılır
+- `prefix` ve `body` zorunlu; `id` ve `description` opsiyonel
+- Dizin mevcut değilse veya erişilemezse bir kez warning mesajı gösterilir
+- Unrecognized placeholder'lar (`$SELECTEDTEXT$`, `$DATE$` vb.) literal metin olarak bırakılır
+
+### Loading
+
+- Snippet'ler async yüklenir (`fs.promises.readdir` + `fs.promises.readFile`)
+- `sortText: "zz_"` prefix ile snippet'ler schema completion'larının altında sıralanır
+- Dosya isimleri önemsiz, sadece JSON içindeki `prefix` kullanılır
+- `documentation` alanı MarkdownString ile SQL syntax highlighting (```sql fence) kullanır
+- Document selector: `{ language: 'sql', scheme: '*' }` (mevcut provider ile tutarlı)
+- Disposable'lar `context.subscriptions`'a eklenir
+
+### Reload
+
+- `onDidChangeConfiguration` dinlenir, `snippetFolder` değişince yeniden yüklenir
+- File watcher yok (kapsam dışı) — yeni snippet eklenince setting'i değiştirmek veya window reload yeterli
 
 ## Out of Scope
 
 - Multiple snippet directories
 - Snippet editing UI
+- File system watcher (snippet dizini değişiklik izleme)
 - Other Redgate-specific placeholders beyond $PASTE$ and $CURSOR$
 - Snippet creation/management commands
