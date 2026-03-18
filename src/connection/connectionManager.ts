@@ -9,6 +9,7 @@ export interface ConnectionProfile {
     password?: string;
     port?: number;
     trustServerCertificate?: boolean;
+    encrypt?: 'optional' | 'mandatory' | 'strict';
     projectPath?: string;
 }
 
@@ -63,6 +64,16 @@ export class ConnectionManager {
 
     get isConnected(): boolean {
         return this.connection !== null;
+    }
+
+    /** Map encrypt setting to tedious encrypt option */
+    private getEncrypt(profile: ConnectionProfile): boolean {
+        switch (profile.encrypt) {
+            case 'mandatory': return true;
+            case 'strict': return true; // tedious v18 doesn't support 'strict' as string, use true + cert validation
+            case 'optional': return false;
+            default: return false; // default = optional
+        }
     }
 
     /** Parse "server,port" format into separate server and port */
@@ -142,7 +153,7 @@ export class ConnectionManager {
                     database: profile.database,
                     port,
                     trustServerCertificate: profile.trustServerCertificate !== false,
-                    encrypt: false,
+                    encrypt: this.getEncrypt(profile),
                     rowCollectionOnRequestCompletion: true,
                     connectTimeout: 30000,
                     requestTimeout: 30000,
@@ -349,7 +360,7 @@ export class ConnectionManager {
                     database: profile.database,
                     port,
                     trustServerCertificate: profile.trustServerCertificate !== false,
-                    encrypt: false,
+                    encrypt: this.getEncrypt(profile),
                     connectTimeout: 30000,
                 },
             };

@@ -157,7 +157,14 @@ export class ConnectionFormProvider {
                     result.trustServerCertificate = val.toLowerCase() === 'true';
                     break;
                 case 'encrypt':
-                    break; // ignore for now
+                    if (val.toLowerCase() === 'true' || val.toLowerCase() === 'mandatory') {
+                        result.encrypt = 'mandatory';
+                    } else if (val.toLowerCase() === 'strict') {
+                        result.encrypt = 'strict';
+                    } else {
+                        result.encrypt = 'optional';
+                    }
+                    break;
             }
         }
         if (result.server && !result.name) {
@@ -203,7 +210,7 @@ export class ConnectionFormProvider {
         const savedJson = JSON.stringify(saved.map(s => ({
             name: s.name, server: s.server, database: s.database,
             user: s.user, password: s.password, port: s.port,
-            trustServerCertificate: s.trustServerCertificate, projectPath: s.projectPath,
+            trustServerCertificate: s.trustServerCertificate, encrypt: s.encrypt, projectPath: s.projectPath,
         })));
         const recentJson = JSON.stringify(recent.map(r => ({
             name: r.name, server: r.server, database: r.database,
@@ -372,6 +379,14 @@ export class ConnectionFormProvider {
             <input id="database" value="${p ? e(p.database) : ''}" placeholder="MyDatabase or &lt;default&gt;" oninput="updateConnStr()" />
         </div>
         <div class="form-group">
+            <label>Encrypt</label>
+            <select id="encrypt" onchange="updateConnStr()">
+                <option value="optional" ${!p?.encrypt || p.encrypt === 'optional' ? 'selected' : ''}>Optional</option>
+                <option value="mandatory" ${p?.encrypt === 'mandatory' ? 'selected' : ''}>Mandatory</option>
+                <option value="strict" ${p?.encrypt === 'strict' ? 'selected' : ''}>Strict</option>
+            </select>
+        </div>
+        <div class="form-group">
             <div class="checkbox-group">
                 <input id="trustCert" type="checkbox" ${(!p || p.trustServerCertificate !== false) ? 'checked' : ''} onchange="updateConnStr()" />
                 <label for="trustCert" style="margin:0;font-weight:normal;text-transform:none;letter-spacing:0">Trust Server Certificate</label>
@@ -422,6 +437,7 @@ export class ConnectionFormProvider {
     let recentConns = ${recentJson};
 
     renderSidebar();
+    updateConnStr();
 
     function switchTab(tab) {
         document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
@@ -443,6 +459,7 @@ export class ConnectionFormProvider {
         const user = document.getElementById('user').value.trim();
         const pwd = document.getElementById('password').value;
         const trust = document.getElementById('trustCert').checked;
+        const enc = document.getElementById('encrypt').value;
 
         const parts = [];
         if (srv) {
@@ -455,6 +472,8 @@ export class ConnectionFormProvider {
         } else {
             parts.push('Integrated Security=True');
         }
+        const encMap = { optional: 'False', mandatory: 'True', strict: 'Strict' };
+        parts.push('Encrypt=' + (encMap[enc] || 'False'));
         parts.push('TrustServerCertificate=' + (trust ? 'True' : 'False'));
 
         document.getElementById('connString').value = parts.join(';');
@@ -478,6 +497,7 @@ export class ConnectionFormProvider {
         document.getElementById('user').value = profile.user || '';
         document.getElementById('password').value = profile.password || '';
         document.getElementById('trustCert').checked = profile.trustServerCertificate !== false;
+        document.getElementById('encrypt').value = profile.encrypt || 'optional';
         document.getElementById('projectPath').value = profile.projectPath || '';
         document.getElementById('authType').value = profile.user ? 'sql' : 'windows';
         originalName = profile.name || null;
@@ -494,10 +514,12 @@ export class ConnectionFormProvider {
         document.getElementById('user').value = '';
         document.getElementById('password').value = '';
         document.getElementById('trustCert').checked = true;
+        document.getElementById('encrypt').value = 'optional';
         document.getElementById('projectPath').value = '';
         document.getElementById('authType').value = 'sql';
         originalName = null;
         toggleAuth();
+        updateConnStr();
     }
 
     function getProfile() {
@@ -508,6 +530,7 @@ export class ConnectionFormProvider {
             port: parseInt(document.getElementById('port').value) || 1433,
             database: document.getElementById('database').value.trim(),
             trustServerCertificate: document.getElementById('trustCert').checked,
+            encrypt: document.getElementById('encrypt').value,
             projectPath: document.getElementById('projectPath').value.trim() || undefined,
         };
         if (isSql) {
@@ -645,7 +668,9 @@ export class ConnectionFormProvider {
                 if (pr.database) document.getElementById('database').value = pr.database;
                 if (pr.user) { document.getElementById('user').value = pr.user; document.getElementById('authType').value = 'sql'; toggleAuth(); }
                 if (pr.password) document.getElementById('password').value = pr.password;
+                if (pr.encrypt) document.getElementById('encrypt').value = pr.encrypt;
                 if (pr.trustServerCertificate !== undefined) document.getElementById('trustCert').checked = pr.trustServerCertificate;
+                updateConnStr();
             }
         } else if (msg.cmd === 'updatedRecent') {
             recentConns = msg.recent || [];
