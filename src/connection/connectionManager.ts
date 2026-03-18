@@ -9,6 +9,7 @@ export interface ConnectionProfile {
     password?: string;
     port?: number;
     trustServerCertificate?: boolean;
+    projectPath?: string;
 }
 
 export interface QueryResult {
@@ -30,12 +31,34 @@ export class ConnectionManager {
     private statusBarItem: vscode.StatusBarItem;
     private _onConnectionChanged = new vscode.EventEmitter<ConnectionProfile | null>();
     public readonly onConnectionChanged = this._onConnectionChanged.event;
+    private requestQueue: (() => void)[] = [];
+    private isRequestRunning = false;
 
     constructor() {
         this.statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
         this.statusBarItem.command = 'tsql-intellisense.connect';
         this.updateStatusBar();
         this.statusBarItem.show();
+    }
+
+    /** Wait for any running request to finish before executing */
+    private waitForTurn(): Promise<void> {
+        if (!this.isRequestRunning) {
+            this.isRequestRunning = true;
+            return Promise.resolve();
+        }
+        return new Promise(resolve => {
+            this.requestQueue.push(resolve);
+        });
+    }
+
+    private releaseRequest(): void {
+        if (this.requestQueue.length > 0) {
+            const next = this.requestQueue.shift()!;
+            next();
+        } else {
+            this.isRequestRunning = false;
+        }
     }
 
     get isConnected(): boolean {
@@ -152,47 +175,52 @@ export class ConnectionManager {
     }
 
     /** Execute a SQL query and return results */
-    executeQuery(sql: string, params?: Record<string, { type: any; value: any }>): Promise<QueryResult> {
-        return new Promise((resolve, reject) => {
-            if (!this.connection) {
-                reject(new Error('Not connected to database'));
-                return;
-            }
-
-            const rows: Record<string, any>[] = [];
-            const columns: string[] = [];
-
-            const request = new Request(sql, (err, rowCount, resultRows) => {
-                if (err) {
-                    reject(err);
-                } else {
-                    resolve({ rows, columns });
+    async executeQuery(sql: string, params?: Record<string, { type: any; value: any }>): Promise<QueryResult> {
+        await this.waitForTurn();
+        try {
+            return await new Promise<QueryResult>((resolve, reject) => {
+                if (!this.connection) {
+                    reject(new Error('Not connected to database'));
+                    return;
                 }
+
+                const rows: Record<string, any>[] = [];
+                const columns: string[] = [];
+
+                const request = new Request(sql, (err, rowCount, resultRows) => {
+                    if (err) {
+                        reject(err);
+                    } else {
+                        resolve({ rows, columns });
+                    }
+                });
+
+                // Add parameters if provided
+                if (params) {
+                    for (const [name, param] of Object.entries(params)) {
+                        request.addParameter(name, param.type, param.value);
+                    }
+                }
+
+                request.on('columnMetadata', (columnsMetadata: ColumnMetaData[]) => {
+                    for (const col of columnsMetadata) {
+                        columns.push(col.colName);
+                    }
+                });
+
+                request.on('row', (rowColumns: any[]) => {
+                    const row: Record<string, any> = {};
+                    for (const col of rowColumns) {
+                        row[col.metadata.colName] = col.value;
+                    }
+                    rows.push(row);
+                });
+
+                this.connection.execSql(request);
             });
-
-            // Add parameters if provided
-            if (params) {
-                for (const [name, param] of Object.entries(params)) {
-                    request.addParameter(name, param.type, param.value);
-                }
-            }
-
-            request.on('columnMetadata', (columnsMetadata: ColumnMetaData[]) => {
-                for (const col of columnsMetadata) {
-                    columns.push(col.colName);
-                }
-            });
-
-            request.on('row', (rowColumns: any[]) => {
-                const row: Record<string, any> = {};
-                for (const col of rowColumns) {
-                    row[col.metadata.colName] = col.value;
-                }
-                rows.push(row);
-            });
-
-            this.connection.execSql(request);
-        });
+        } finally {
+            this.releaseRequest();
+        }
     }
 
     /** Execute a SQL batch (supports GO separators, captures messages) */
@@ -233,55 +261,60 @@ export class ConnectionManager {
         }
     }
 
-    private executeSingleBatch(sql: string, messages: string[]): Promise<QueryResult[]> {
-        return new Promise((resolve, reject) => {
-            if (!this.connection) {
-                reject(new Error('Not connected to database'));
-                return;
-            }
+    private async executeSingleBatch(sql: string, messages: string[]): Promise<QueryResult[]> {
+        await this.waitForTurn();
+        try {
+            return await new Promise<QueryResult[]>((resolve, reject) => {
+                if (!this.connection) {
+                    reject(new Error('Not connected to database'));
+                    return;
+                }
 
-            const resultSets: QueryResult[] = [];
-            let currentColumns: string[] = [];
-            let currentRows: Record<string, any>[] = [];
+                const resultSets: QueryResult[] = [];
+                let currentColumns: string[] = [];
+                let currentRows: Record<string, any>[] = [];
 
-            const request = new Request(sql, (err) => {
-                if (err) {
-                    reject(err);
-                } else {
-                    // Push last result set if it has data
+                const request = new Request(sql, (err) => {
+                    if (err) {
+                        reject(err);
+                    } else {
+                        // Push last result set if it has data
+                        if (currentColumns.length > 0 || currentRows.length > 0) {
+                            resultSets.push({ rows: currentRows, columns: currentColumns });
+                        }
+                        resolve(resultSets);
+                    }
+                });
+
+                request.on('columnMetadata', (columnsMetadata: ColumnMetaData[]) => {
+                    // New result set starting — save previous one if exists
                     if (currentColumns.length > 0 || currentRows.length > 0) {
                         resultSets.push({ rows: currentRows, columns: currentColumns });
                     }
-                    resolve(resultSets);
-                }
-            });
+                    // Start new result set
+                    currentColumns = columnsMetadata.map(c => c.colName);
+                    currentRows = [];
+                });
 
-            request.on('columnMetadata', (columnsMetadata: ColumnMetaData[]) => {
-                // New result set starting — save previous one if exists
-                if (currentColumns.length > 0 || currentRows.length > 0) {
-                    resultSets.push({ rows: currentRows, columns: currentColumns });
-                }
-                // Start new result set
-                currentColumns = columnsMetadata.map(c => c.colName);
-                currentRows = [];
-            });
+                request.on('row', (rowColumns: any[]) => {
+                    const row: Record<string, any> = {};
+                    for (const col of rowColumns) {
+                        row[col.metadata.colName] = col.value;
+                    }
+                    currentRows.push(row);
+                });
 
-            request.on('row', (rowColumns: any[]) => {
-                const row: Record<string, any> = {};
-                for (const col of rowColumns) {
-                    row[col.metadata.colName] = col.value;
-                }
-                currentRows.push(row);
-            });
+                request.on('infoMessage', (info: any) => {
+                    if (info.message) {
+                        messages.push(info.message);
+                    }
+                });
 
-            request.on('infoMessage', (info: any) => {
-                if (info.message) {
-                    messages.push(info.message);
-                }
+                this.connection.execSql(request);
             });
-
-            this.connection.execSql(request);
-        });
+        } finally {
+            this.releaseRequest();
+        }
     }
 
     /** Show Quick Pick to select a connection profile */
@@ -322,10 +355,18 @@ export class ConnectionManager {
         }
     }
 
+    refreshStatusBar(): void {
+        this.updateStatusBar();
+    }
+
     private updateStatusBar(): void {
         if (this.activeProfile) {
-            this.statusBarItem.text = `$(database) ${this.activeProfile.name}`;
-            this.statusBarItem.tooltip = `${this.activeProfile.server} / ${this.activeProfile.database}\nClick to switch connection`;
+            const folderIcon = this.activeProfile.projectPath ? '$(folder)' : '$(folder-x)';
+            this.statusBarItem.text = `$(database) ${folderIcon} ${this.activeProfile.name}`;
+            const projectInfo = this.activeProfile.projectPath
+                ? `Project: ${this.activeProfile.projectPath}`
+                : 'Project: Not configured';
+            this.statusBarItem.tooltip = `${this.activeProfile.server} / ${this.activeProfile.database}\n${projectInfo}\nClick to switch connection`;
             this.statusBarItem.backgroundColor = undefined;
         } else {
             this.statusBarItem.text = '$(database) DB: Not connected';

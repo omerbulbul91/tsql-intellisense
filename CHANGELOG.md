@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.2.0] - 2026-03-18
+
+### Added
+- Redgate SQL Prompt snippet loader (folder-based, `$CURSOR$`/`$PASTE$`/`$table_name$` placeholders)
+- Set Snippet Folder command with folder picker (`Ctrl+Alt+S` → new SQL file)
+- New SQL File command (`Ctrl+Alt+S`)
+- Run Query button in editor toolbar
+- F5 priority over mssql extension when active
+- Beta label in display name and description
+- Marketplace badges and roadmap in README
+
+### Fixed
+- `CREATE OR ALTER` syntax now detected by Project Sync
+- `ALTER TABLE` completion no longer opens CREATE script
+- Request queue for tedious connection — prevents "SentClientRequest" error on concurrent queries
+
 ## [0.1.0] - 2026-03-18
 
 ### Added

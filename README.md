@@ -1,8 +1,10 @@
-# T-SQL IntelliSense
+# T-SQL IntelliSense (Beta)
 
 ![Version](https://img.shields.io/visual-studio-marketplace/v/omerbulbul.tsql-intellisense)
 ![Installs](https://img.shields.io/visual-studio-marketplace/i/omerbulbul.tsql-intellisense)
 ![Rating](https://img.shields.io/visual-studio-marketplace/r/omerbulbul.tsql-intellisense)
+
+> **Beta**: This extension is under active development. Features may change and bugs are expected. Feedback and bug reports are welcome!
 
 SQL Server IntelliSense for VS Code — a Redgate SQL Prompt alternative.
 

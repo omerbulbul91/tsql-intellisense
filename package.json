@@ -1,8 +1,8 @@
 {
   "name": "tsql-intellisense",
-  "displayName": "T-SQL IntelliSense",
-  "description": "SQL Prompt-like IntelliSense for T-SQL in VS Code",
-  "version": "0.1.0",
+  "displayName": "T-SQL IntelliSense (Beta)",
+  "description": "⚠️ Beta — SQL Prompt-like IntelliSense for T-SQL in VS Code. Features may change.",
+  "version": "0.2.0",
   "publisher": "omerbulbul",
   "license": "MIT",
   "repository": {
@@ -71,6 +71,10 @@
         "title": "T-SQL IntelliSense: Query Shortcut Ctrl+3"
       },
       {
+        "command": "tsql-intellisense.newSqlFile",
+        "title": "T-SQL IntelliSense: New SQL File"
+      },
+      {
         "command": "tsql-intellisense.setSnippetFolder",
         "title": "T-SQL IntelliSense: Set Snippet Folder"
       }
@@ -89,6 +93,11 @@
         "command": "tsql-intellisense.runQuery",
         "key": "f5",
         "when": "editorLangId == sql && !inDebugMode && tsqlIntellisense.active"
+      },
+      {
+        "command": "tsql-intellisense.newSqlFile",
+        "key": "ctrl+alt+s",
+        "when": "tsqlIntellisense.active"
       },
       {
         "command": "tsql-intellisense.queryShortcut0",

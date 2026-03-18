@@ -93,6 +93,14 @@ export function activate(context: vscode.ExtensionContext) {
         })
     );
 
+    // New SQL File command (Ctrl+Alt+S)
+    context.subscriptions.push(
+        vscode.commands.registerCommand('tsql-intellisense.newSqlFile', async () => {
+            const doc = await vscode.workspace.openTextDocument({ language: 'sql', content: '' });
+            await vscode.window.showTextDocument(doc);
+        })
+    );
+
     // Register commands
     context.subscriptions.push(
         vscode.commands.registerCommand('tsql-intellisense.connect', () => {
