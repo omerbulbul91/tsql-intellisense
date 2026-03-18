@@ -9,6 +9,7 @@ import { TsqlDefinitionProvider } from './providers/definitionProvider';
 import { ProjectSync } from './sync/projectSync';
 import { SnippetProvider } from './providers/snippetProvider';
 import { ConnectionTreeProvider } from './providers/connectionTreeProvider';
+import { ConnectionFormProvider } from './providers/connectionFormProvider';
 
 let connectionManager: ConnectionManager;
 let schemaCache: SchemaCache;
@@ -503,17 +504,22 @@ export function activate(context: vscode.ExtensionContext) {
         })
     );
 
-    // Tree: Add Connection — placeholder until Task 6 adds ConnectionFormProvider
+    // Tree: Add Connection
     context.subscriptions.push(
         vscode.commands.registerCommand('tsql-intellisense.addConnection', () => {
-            vscode.window.showInformationMessage('Connection form loading...');
+            ConnectionFormProvider.show(context, connectionManager, treeProvider);
         })
     );
 
-    // Tree: Edit Connection — placeholder until Task 6
+    // Tree: Edit Connection
     context.subscriptions.push(
         vscode.commands.registerCommand('tsql-intellisense.editConnection', (item: any) => {
-            vscode.window.showInformationMessage('Connection form loading...');
+            if (!item?.profileName) { return; }
+            const profiles = connectionManager.getSavedProfiles();
+            const profile = profiles.find(p => p.name === item.profileName);
+            if (profile) {
+                ConnectionFormProvider.show(context, connectionManager, treeProvider, profile);
+            }
         })
     );
 
