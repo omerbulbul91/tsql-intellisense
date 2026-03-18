@@ -2,7 +2,7 @@
   "name": "tsql-intellisense",
   "displayName": "T-SQL IntelliSense (Beta)",
   "description": "⚠️ Beta — SQL Prompt-like IntelliSense for T-SQL in VS Code. Features may change.",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "publisher": "omerbulbul",
   "license": "MIT",
   "repository": {

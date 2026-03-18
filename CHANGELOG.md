@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.3.0] - 2026-03-18
+
+### Added
+- **Sidebar Connection Tree** — T-SQL Explorer panel in Activity Bar with Server → Databases → Objects hierarchy
+- **Object Explorer** — Tables, Views, Stored Procedures, Functions folders with item counts
+- **Column Explorer** — expand tables/views to see columns with PK/FK icons and type info
+- **Connection Form** — webview tab with Connection Properties and Connection String tabs
+- **Connection String Parser** — paste a connection string, form fields auto-fill as you type (two-way sync)
+- **Saved Connections** sidebar in connection form
+- **Recent Connections** tracking (last 10, stored in globalState)
+- **Encrypt dropdown** — Optional (default) / Mandatory / Strict per connection
+- **Password visibility toggle** — eye button on password field
+- **Server,Port format support** — `192.168.1.100,1433` auto-parsed for tedious
+- **Database switching** — click any DB in the tree to switch without reconnecting the server
+- **Per-database project paths** — each database has its own SQL project folder (`databaseProjects` map)
+- **New Query from DB** — opens SQL file bound to that database, F5 auto-switches if needed
+- **New Query from Server** — opens SQL file with no DB, F5 shows database picker
+- **Context menus** — right-click actions: SELECT TOP 100, Copy/Open Script, ALTER PROC, EXEC with Params
+- **Inline icons** — hover over connection/database rows for quick actions (New Query, Edit, Refresh, Delete)
+- **Test Connection** button in connection form
+- Content Security Policy for webview forms
+
+### Fixed
+- Connect timeout increased to 30s for remote servers
+- `encrypt: false` as default (Optional) for compatibility with older SQL Servers
+- SQL injection protection in SELECT TOP 100 (bracket-escape `]` characters)
+- `openTableScript` now works for functions (falls back to OBJECT_DEFINITION)
+
 ## [0.2.0] - 2026-03-18
 
 ### Added
