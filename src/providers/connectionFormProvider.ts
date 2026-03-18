@@ -183,6 +183,10 @@ export class ConnectionFormProvider {
         if (originalName) {
             const idx = connections.findIndex(c => c.name === originalName);
             if (idx >= 0) {
+                // Merge databaseProjects — don't overwrite other DB paths
+                const existingDbProjects = connections[idx].databaseProjects || {};
+                const newDbProjects = profile.databaseProjects || {};
+                profile.databaseProjects = { ...existingDbProjects, ...newDbProjects };
                 connections[idx] = profile;
             } else {
                 connections.push(profile);
@@ -376,7 +380,7 @@ export class ConnectionFormProvider {
         </div>
         <div class="form-group">
             <label>Database</label>
-            <input id="database" value="${p ? e(p.database) : ''}" placeholder="MyDatabase or &lt;default&gt;" oninput="updateConnStr()" />
+            <input id="database" value="${p ? e(p.database) : ''}" placeholder="MyDatabase or &lt;default&gt;" oninput="updateConnStr();toggleProjectPath()" />
         </div>
         <div class="form-group">
             <label>Encrypt</label>
@@ -392,10 +396,10 @@ export class ConnectionFormProvider {
                 <label for="trustCert" style="margin:0;font-weight:normal;text-transform:none;letter-spacing:0">Trust Server Certificate</label>
             </div>
         </div>
-        <div class="form-group">
-            <label>Project Path</label>
+        <div class="form-group" id="projectPathGroup" style="display:${p?.database ? 'block' : 'none'}">
+            <label>Project Path <span style="font-weight:normal;text-transform:none">(for <span id="projectDbLabel">${p?.database ? e(p.database) : ''}</span>)</span></label>
             <div class="browse-group">
-                <input id="projectPath" value="${p?.projectPath ? e(p.projectPath) : ''}" placeholder="Optional: SQL project folder" />
+                <input id="projectPath" value="" placeholder="Optional: SQL project folder for this database" />
                 <button class="btn-secondary" onclick="browse()">Browse</button>
             </div>
         </div>
@@ -479,6 +483,14 @@ export class ConnectionFormProvider {
         document.getElementById('connString').value = parts.join(';');
     }
 
+    function toggleProjectPath() {
+        const db = document.getElementById('database').value.trim();
+        const group = document.getElementById('projectPathGroup');
+        const label = document.getElementById('projectDbLabel');
+        group.style.display = db ? 'block' : 'none';
+        label.textContent = db;
+    }
+
     function togglePwd() {
         const pw = document.getElementById('password');
         pw.type = pw.type === 'password' ? 'text' : 'password';
@@ -498,7 +510,10 @@ export class ConnectionFormProvider {
         document.getElementById('password').value = profile.password || '';
         document.getElementById('trustCert').checked = profile.trustServerCertificate !== false;
         document.getElementById('encrypt').value = profile.encrypt || 'optional';
-        document.getElementById('projectPath').value = profile.projectPath || '';
+        // Load project path for the specific database
+        const dbProj = profile.databaseProjects && profile.database ? profile.databaseProjects[profile.database] : null;
+        document.getElementById('projectPath').value = dbProj || profile.projectPath || '';
+        toggleProjectPath();
         document.getElementById('authType').value = profile.user ? 'sql' : 'windows';
         originalName = profile.name || null;
         toggleAuth();
@@ -519,6 +534,7 @@ export class ConnectionFormProvider {
         document.getElementById('authType').value = 'sql';
         originalName = null;
         toggleAuth();
+        toggleProjectPath();
         updateConnStr();
     }
 
@@ -531,8 +547,12 @@ export class ConnectionFormProvider {
             database: document.getElementById('database').value.trim(),
             trustServerCertificate: document.getElementById('trustCert').checked,
             encrypt: document.getElementById('encrypt').value,
-            projectPath: document.getElementById('projectPath').value.trim() || undefined,
         };
+        const projPath = document.getElementById('projectPath').value.trim();
+        if (profile.database && projPath) {
+            profile.databaseProjects = {};
+            profile.databaseProjects[profile.database] = projPath;
+        }
         if (isSql) {
             profile.user = document.getElementById('user').value.trim();
             profile.password = document.getElementById('password').value;

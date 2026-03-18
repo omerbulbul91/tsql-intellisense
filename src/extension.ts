@@ -134,32 +134,42 @@ export function activate(context: vscode.ExtensionContext) {
                 return;
             }
 
+            const currentDb = profile.database;
+            if (!currentDb) {
+                vscode.window.showWarningMessage('No database selected');
+                return;
+            }
+
             const result = await vscode.window.showOpenDialog({
                 canSelectFolders: true,
                 canSelectFiles: false,
                 canSelectMany: false,
                 openLabel: 'Select SQL Project Folder',
-                title: `Set project path for ${profile.name}`,
+                title: `Set project path for ${currentDb}`,
             });
 
             if (!result || result.length === 0) { return; }
 
             const selectedPath = result[0].fsPath;
 
-            // Update the connection profile in settings
+            // Update databaseProjects in the connection profile settings
             const config = vscode.workspace.getConfiguration('tsql-intellisense');
             const connections = config.get<any[]>('connections', []);
             const idx = connections.findIndex(
-                c => c.name === profile.name && c.server === profile.server && c.database === profile.database
+                c => c.name === profile.name && c.server === profile.server
             );
 
             if (idx >= 0) {
-                connections[idx].projectPath = selectedPath;
+                if (!connections[idx].databaseProjects) {
+                    connections[idx].databaseProjects = {};
+                }
+                connections[idx].databaseProjects[currentDb] = selectedPath;
                 const target = vscode.workspace.workspaceFolders
                     ? vscode.ConfigurationTarget.Workspace
                     : vscode.ConfigurationTarget.Global;
                 await config.update('connections', connections, target);
-                profile.projectPath = selectedPath;
+                if (!profile.databaseProjects) { profile.databaseProjects = {}; }
+                profile.databaseProjects[currentDb] = selectedPath;
                 connectionManager.refreshStatusBar();
                 vscode.window.showInformationMessage(`Project path set: ${selectedPath}`);
             } else {
@@ -473,10 +483,15 @@ export function activate(context: vscode.ExtensionContext) {
     const projectSync = new ProjectSync(connectionManager, schemaCache);
     queryRunner.onQueryExecuted(async ({ sql }) => {
         const profile = connectionManager.currentProfile;
-        if (!profile?.projectPath) { return; }
+        if (!profile) { return; }
+
+        // Get project path for current database from databaseProjects, fallback to legacy projectPath
+        const currentDb = profile.database;
+        const projectPath = profile.databaseProjects?.[currentDb] || profile.projectPath;
+        if (!projectPath) { return; }
 
         try {
-            await projectSync.syncAfterExecution(sql, profile.projectPath, buildObjectScript);
+            await projectSync.syncAfterExecution(sql, projectPath, buildObjectScript);
         } catch (err: any) {
             vscode.window.showWarningMessage(`Project Sync error: ${err.message}`);
         }

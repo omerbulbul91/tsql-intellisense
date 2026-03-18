@@ -11,6 +11,8 @@ export interface ConnectionProfile {
     trustServerCertificate?: boolean;
     encrypt?: 'optional' | 'mandatory' | 'strict';
     projectPath?: string;
+    /** DB-specific project paths: { "OCTO_AKDENIZ": "c:\\...\\path", "OCTO_CORE": "c:\\...\\path" } */
+    databaseProjects?: Record<string, string>;
 }
 
 export interface QueryResult {

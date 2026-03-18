@@ -98,6 +98,12 @@ export class ConnectionTreeProvider implements vscode.TreeDataProvider<TreeNode>
 
         const connectedDb = activeProfile.database;
 
+        const dbProjects = activeProfile.databaseProjects || {};
+        // Backward compat: if old-style projectPath exists and no databaseProjects entry, use it for the profile's default DB
+        const getProjectPath = (dbName: string): string | undefined => {
+            return dbProjects[dbName] || dbProjects[dbName.toLowerCase()] || undefined;
+        };
+
         // If we have a database list from sys.databases, show all
         if (this.databaseList.length > 0) {
             return this.databaseList.map(dbName => {
@@ -106,13 +112,13 @@ export class ConnectionTreeProvider implements vscode.TreeDataProvider<TreeNode>
                     dbName,
                     isCurrent,
                     folder.parentProfileName,
-                    isCurrent ? activeProfile.projectPath : undefined
+                    getProjectPath(dbName)
                 );
             });
         }
 
         // Fallback: only show the connected database
-        return [new DatabaseItem(connectedDb, true, folder.parentProfileName, activeProfile.projectPath)];
+        return [new DatabaseItem(connectedDb, true, folder.parentProfileName, getProjectPath(connectedDb))];
     }
 
     private getDatabaseChildren(item: DatabaseItem): TreeNode[] {
