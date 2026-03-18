@@ -144,7 +144,7 @@ export class ConnectionManager {
                     trustServerCertificate: profile.trustServerCertificate !== false,
                     encrypt: false,
                     rowCollectionOnRequestCompletion: true,
-                    connectTimeout: 10000,
+                    connectTimeout: 30000,
                     requestTimeout: 30000,
                 },
             };
@@ -350,7 +350,7 @@ export class ConnectionManager {
                     port,
                     trustServerCertificate: profile.trustServerCertificate !== false,
                     encrypt: false,
-                    connectTimeout: 10000,
+                    connectTimeout: 30000,
                 },
             };
 
