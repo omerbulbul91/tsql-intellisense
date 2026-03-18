@@ -9,7 +9,10 @@ export interface ConnectionProfile {
     password?: string;
     port?: number;
     trustServerCertificate?: boolean;
+    encrypt?: 'optional' | 'mandatory' | 'strict';
     projectPath?: string;
+    /** DB-specific project paths: { "OCTO_AKDENIZ": "c:\\...\\path", "OCTO_CORE": "c:\\...\\path" } */
+    databaseProjects?: Record<string, string>;
 }
 
 export interface QueryResult {
@@ -65,6 +68,30 @@ export class ConnectionManager {
         return this.connection !== null;
     }
 
+    /** Map encrypt setting to tedious encrypt option */
+    private getEncrypt(profile: ConnectionProfile): boolean {
+        switch (profile.encrypt) {
+            case 'mandatory': return true;
+            case 'strict': return true; // tedious v18 doesn't support 'strict' as string, use true + cert validation
+            case 'optional': return false;
+            default: return false; // default = optional
+        }
+    }
+
+    /** Parse "server,port" format into separate server and port */
+    private parseServerPort(profile: ConnectionProfile): { server: string; port: number } {
+        let server = profile.server;
+        let port = profile.port || 1433;
+        // Handle "server,port" format (SSMS style)
+        if (server.includes(',')) {
+            const parts = server.split(',');
+            server = parts[0].trim();
+            const parsed = parseInt(parts[1].trim());
+            if (!isNaN(parsed)) { port = parsed; }
+        }
+        return { server, port };
+    }
+
     get currentProfile(): ConnectionProfile | null {
         return this.activeProfile;
     }
@@ -114,8 +141,9 @@ export class ConnectionManager {
         }
 
         return new Promise((resolve, reject) => {
+            const { server, port } = this.parseServerPort(profile);
             const config = {
-                server: profile.server,
+                server,
                 authentication: {
                     type: (profile.user ? 'default' : 'ntlm') as 'default' | 'ntlm',
                     options: {
@@ -125,11 +153,11 @@ export class ConnectionManager {
                 },
                 options: {
                     database: profile.database,
-                    port: profile.port || 1433,
+                    port,
                     trustServerCertificate: profile.trustServerCertificate !== false,
-                    encrypt: false,
+                    encrypt: this.getEncrypt(profile),
                     rowCollectionOnRequestCompletion: true,
-                    connectTimeout: 10000,
+                    connectTimeout: 30000,
                     requestTimeout: 30000,
                 },
             };
@@ -315,6 +343,47 @@ export class ConnectionManager {
         } finally {
             this.releaseRequest();
         }
+    }
+
+    /** Test a connection profile without affecting current connection state */
+    async testConnection(profile: ConnectionProfile): Promise<{ success: boolean; error?: string }> {
+        return new Promise((resolve) => {
+            const { server, port } = this.parseServerPort(profile);
+            const config = {
+                server,
+                authentication: {
+                    type: (profile.user ? 'default' : 'ntlm') as 'default' | 'ntlm',
+                    options: {
+                        userName: profile.user || '',
+                        password: profile.password || '',
+                    },
+                },
+                options: {
+                    database: profile.database,
+                    port,
+                    trustServerCertificate: profile.trustServerCertificate !== false,
+                    encrypt: this.getEncrypt(profile),
+                    connectTimeout: 30000,
+                },
+            };
+
+            const testConn = new Connection(config);
+
+            testConn.on('connect', (err) => {
+                if (err) {
+                    resolve({ success: false, error: err.message });
+                } else {
+                    testConn.close();
+                    resolve({ success: true });
+                }
+            });
+
+            testConn.on('error', () => {
+                // Swallow — handled in connect callback
+            });
+
+            testConn.connect();
+        });
     }
 
     /** Show Quick Pick to select a connection profile */

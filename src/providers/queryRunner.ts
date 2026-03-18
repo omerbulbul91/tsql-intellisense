@@ -4,8 +4,23 @@ import { ConnectionManager, BatchResult, QueryResult } from '../connection/conne
 export class QueryRunner implements vscode.WebviewViewProvider {
     private webviewView: vscode.WebviewView | null = null;
     private lastResult: BatchResult | null = null;
+    private _onQueryExecuted = new vscode.EventEmitter<{ sql: string; result: BatchResult }>();
+    public readonly onQueryExecuted = this._onQueryExecuted.event;
+
+    /** Tracks which database each document belongs to (URI → {profileName, dbName}) */
+    private documentDbMap = new Map<string, { profileName: string; dbName: string } | null>();
 
     constructor(private connectionManager: ConnectionManager) {}
+
+    /** Associate a document with a specific database (or null for server-level) */
+    setDocumentDatabase(uri: vscode.Uri, info: { profileName: string; dbName: string } | null): void {
+        this.documentDbMap.set(uri.toString(), info);
+    }
+
+    /** Get the database association for a document */
+    getDocumentDatabase(uri: vscode.Uri): { profileName: string; dbName: string } | null | undefined {
+        return this.documentDbMap.get(uri.toString());
+    }
 
     /** Called by VS Code when the panel view becomes visible */
     resolveWebviewView(
@@ -38,6 +53,15 @@ export class QueryRunner implements vscode.WebviewViewProvider {
 
     /** Run the current query (selected text or full file) */
     async runQuery(): Promise<void> {
+        const editor = vscode.window.activeTextEditor;
+        if (!editor) {
+            vscode.window.showWarningMessage('No active editor');
+            return;
+        }
+
+        // Check document database association
+        const docDb = this.documentDbMap.get(editor.document.uri.toString());
+
         if (!this.connectionManager.isConnected) {
             const action = await vscode.window.showWarningMessage(
                 'T-SQL IntelliSense: Not connected to a database',
@@ -49,10 +73,26 @@ export class QueryRunner implements vscode.WebviewViewProvider {
             return;
         }
 
-        const editor = vscode.window.activeTextEditor;
-        if (!editor) {
-            vscode.window.showWarningMessage('No active editor');
-            return;
+        // docDb === null means server-level query → ask which DB
+        if (docDb === null) {
+            const picked = await this.promptSelectDatabase();
+            if (!picked) { return; }
+        }
+        // docDb has a specific DB → auto-switch if needed
+        else if (docDb) {
+            const currentProfile = this.connectionManager.currentProfile;
+            if (currentProfile && currentProfile.database.toLowerCase() !== docDb.dbName.toLowerCase()) {
+                // Need to switch database
+                const profiles = this.connectionManager.getSavedProfiles();
+                const baseProfile = profiles.find(p => p.name === docDb.profileName) || currentProfile;
+                const switchedProfile = { ...baseProfile, database: docDb.dbName };
+                try {
+                    await this.connectionManager.connect(switchedProfile);
+                } catch (err: any) {
+                    vscode.window.showErrorMessage(`Failed to switch to ${docDb.dbName}: ${err.message}`);
+                    return;
+                }
+            }
         }
 
         // Get selected text or full document
@@ -78,6 +118,43 @@ export class QueryRunner implements vscode.WebviewViewProvider {
 
         this.lastResult = result;
         this.showResults(result);
+        if (!result.error) {
+            this._onQueryExecuted.fire({ sql, result });
+        }
+    }
+
+    /** Prompt user to select a database from the server's database list */
+    private async promptSelectDatabase(): Promise<boolean> {
+        if (!this.connectionManager.isConnected) { return false; }
+
+        try {
+            const result = await this.connectionManager.executeQuery(
+                `SELECT name FROM sys.databases WHERE state_desc = 'ONLINE' ORDER BY name`
+            );
+            const dbNames = result.rows.map(r => r['name'] as string);
+
+            const picked = await vscode.window.showQuickPick(dbNames, {
+                placeHolder: 'Select database to run query against',
+            });
+
+            if (!picked) { return false; }
+
+            const currentProfile = this.connectionManager.currentProfile;
+            if (currentProfile && currentProfile.database.toLowerCase() !== picked.toLowerCase()) {
+                const switchedProfile = { ...currentProfile, database: picked };
+                await this.connectionManager.connect(switchedProfile);
+            }
+
+            // Associate this document with the chosen DB
+            const editor = vscode.window.activeTextEditor;
+            if (editor && currentProfile) {
+                this.setDocumentDatabase(editor.document.uri, { profileName: currentProfile.name, dbName: picked });
+            }
+
+            return true;
+        } catch {
+            return true; // proceed with current DB on error
+        }
     }
 
     /** Run a specific SQL text (for query shortcuts) */
@@ -106,6 +183,9 @@ export class QueryRunner implements vscode.WebviewViewProvider {
 
         this.lastResult = result;
         this.showResults(result);
+        if (!result.error) {
+            this._onQueryExecuted.fire({ sql, result });
+        }
     }
 
     /** Display results in the bottom panel */

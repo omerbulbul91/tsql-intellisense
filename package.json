@@ -7,7 +7,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/omerbulbul/tsql-intellisense"
+    "url": "https://github.com/omerbulbul91/tsql-intellisense"
   },
   "engines": {
     "vscode": "^1.85.0"
@@ -31,7 +31,8 @@
       },
       {
         "command": "tsql-intellisense.refreshSchema",
-        "title": "T-SQL IntelliSense: Refresh Schema Cache"
+        "title": "T-SQL IntelliSense: Refresh Schema Cache",
+        "icon": "$(sync)"
       },
       {
         "command": "tsql-intellisense.alterProc",
@@ -77,7 +78,16 @@
       {
         "command": "tsql-intellisense.setSnippetFolder",
         "title": "T-SQL IntelliSense: Set Snippet Folder"
-      }
+      },
+      { "command": "tsql-intellisense.addConnection", "title": "T-SQL IntelliSense: Add Connection", "icon": "$(add)" },
+      { "command": "tsql-intellisense.editConnection", "title": "T-SQL IntelliSense: Edit Connection", "icon": "$(edit)" },
+      { "command": "tsql-intellisense.deleteConnection", "title": "T-SQL IntelliSense: Delete Connection", "icon": "$(trash)" },
+      { "command": "tsql-intellisense.treeConnect", "title": "T-SQL IntelliSense: Connect", "icon": "$(plug)" },
+      { "command": "tsql-intellisense.selectTop100", "title": "SELECT TOP 100", "icon": "$(play)" },
+      { "command": "tsql-intellisense.openInExplorer", "title": "Open in Explorer", "icon": "$(folder-opened)" },
+      { "command": "tsql-intellisense.insertSpParams", "title": "T-SQL IntelliSense: EXEC with Params" },
+      { "command": "tsql-intellisense.newQueryFromTree", "title": "New Query", "icon": "$(new-file)" },
+      { "command": "tsql-intellisense.switchDatabase", "title": "Switch Database", "icon": "$(database)" }
     ],
     "menus": {
       "editor/title": [
@@ -86,6 +96,34 @@
           "when": "editorLangId == sql && tsqlIntellisense.active",
           "group": "navigation"
         }
+      ],
+      "view/title": [
+        { "command": "tsql-intellisense.addConnection", "when": "view == tsqlConnections", "group": "navigation" },
+        { "command": "tsql-intellisense.refreshSchema", "when": "view == tsqlConnections", "group": "navigation" }
+      ],
+      "view/item/context": [
+        { "command": "tsql-intellisense.treeConnect", "when": "viewItem == connection.disconnected", "group": "1_connection" },
+        { "command": "tsql-intellisense.newQueryFromTree", "when": "viewItem == connection.connected", "group": "1_connection" },
+        { "command": "tsql-intellisense.disconnect", "when": "viewItem == connection.connected", "group": "1_connection" },
+        { "command": "tsql-intellisense.refreshSchema", "when": "viewItem == connection.connected", "group": "1_connection" },
+        { "command": "tsql-intellisense.editConnection", "when": "viewItem =~ /^connection\\./" , "group": "2_manage" },
+        { "command": "tsql-intellisense.deleteConnection", "when": "viewItem =~ /^connection\\./" , "group": "2_manage" },
+        { "command": "tsql-intellisense.setProjectPath", "when": "viewItem == connection.connected", "group": "2_manage" },
+        { "command": "tsql-intellisense.newQueryFromTree", "when": "viewItem == database.connected", "group": "1_db" },
+        { "command": "tsql-intellisense.switchDatabase", "when": "viewItem == database", "group": "1_db" },
+        { "command": "tsql-intellisense.refreshSchema", "when": "viewItem =~ /^folder\\./" , "group": "1_actions" },
+        { "command": "tsql-intellisense.selectTop100", "when": "viewItem == table", "group": "1_actions" },
+        { "command": "tsql-intellisense.copyTableScript", "when": "viewItem == table", "group": "1_actions" },
+        { "command": "tsql-intellisense.openTableScript", "when": "viewItem == table || viewItem == view || viewItem == func", "group": "1_actions" },
+        { "command": "tsql-intellisense.alterProc", "when": "viewItem == sp", "group": "1_actions" },
+        { "command": "tsql-intellisense.insertSpParams", "when": "viewItem == sp", "group": "1_actions" },
+        { "command": "tsql-intellisense.openInExplorer", "when": "viewItem == projectFolder", "group": "1_actions" },
+        { "command": "tsql-intellisense.newQueryFromTree", "when": "viewItem == connection.connected", "group": "inline" },
+        { "command": "tsql-intellisense.editConnection", "when": "viewItem =~ /^connection\\./", "group": "inline" },
+        { "command": "tsql-intellisense.refreshSchema", "when": "viewItem == connection.connected", "group": "inline" },
+        { "command": "tsql-intellisense.deleteConnection", "when": "viewItem =~ /^connection\\./", "group": "inline" },
+        { "command": "tsql-intellisense.newQueryFromTree", "when": "viewItem == database.connected", "group": "inline" },
+        { "command": "tsql-intellisense.switchDatabase", "when": "viewItem == database", "group": "inline" }
       ]
     },
     "keybindings": [
@@ -121,6 +159,13 @@
       }
     ],
     "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "tsql-explorer",
+          "title": "T-SQL Explorer",
+          "icon": "resources/database.svg"
+        }
+      ],
       "panel": [
         {
           "id": "tsql-results-panel",
@@ -130,6 +175,12 @@
       ]
     },
     "views": {
+      "tsql-explorer": [
+        {
+          "id": "tsqlConnections",
+          "name": "Connections"
+        }
+      ],
       "tsql-results-panel": [
         {
           "id": "tsqlResults",
