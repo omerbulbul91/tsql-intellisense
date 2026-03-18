@@ -361,7 +361,10 @@ export class ConnectionFormProvider {
             </div>
             <div class="form-group">
                 <label>Password *</label>
-                <input id="password" type="password" value="${p?.password ? e(p.password) : ''}" />
+                <div class="browse-group">
+                    <input id="password" type="password" value="${p?.password ? e(p.password) : ''}" />
+                    <button class="btn-secondary" type="button" onclick="togglePwd()" id="eyeBtn" title="Show/Hide">&#128065;</button>
+                </div>
             </div>
         </div>
         <div class="form-group">
@@ -430,6 +433,11 @@ export class ConnectionFormProvider {
             document.querySelectorAll('.tab')[0].classList.add('active');
             document.getElementById('tab-props').classList.add('active');
         }
+    }
+
+    function togglePwd() {
+        const pw = document.getElementById('password');
+        pw.type = pw.type === 'password' ? 'text' : 'password';
     }
 
     function toggleAuth() {

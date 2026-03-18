@@ -65,6 +65,20 @@ export class ConnectionManager {
         return this.connection !== null;
     }
 
+    /** Parse "server,port" format into separate server and port */
+    private parseServerPort(profile: ConnectionProfile): { server: string; port: number } {
+        let server = profile.server;
+        let port = profile.port || 1433;
+        // Handle "server,port" format (SSMS style)
+        if (server.includes(',')) {
+            const parts = server.split(',');
+            server = parts[0].trim();
+            const parsed = parseInt(parts[1].trim());
+            if (!isNaN(parsed)) { port = parsed; }
+        }
+        return { server, port };
+    }
+
     get currentProfile(): ConnectionProfile | null {
         return this.activeProfile;
     }
@@ -114,8 +128,9 @@ export class ConnectionManager {
         }
 
         return new Promise((resolve, reject) => {
+            const { server, port } = this.parseServerPort(profile);
             const config = {
-                server: profile.server,
+                server,
                 authentication: {
                     type: (profile.user ? 'default' : 'ntlm') as 'default' | 'ntlm',
                     options: {
@@ -125,7 +140,7 @@ export class ConnectionManager {
                 },
                 options: {
                     database: profile.database,
-                    port: profile.port || 1433,
+                    port,
                     trustServerCertificate: profile.trustServerCertificate !== false,
                     encrypt: false,
                     rowCollectionOnRequestCompletion: true,
@@ -320,8 +335,9 @@ export class ConnectionManager {
     /** Test a connection profile without affecting current connection state */
     async testConnection(profile: ConnectionProfile): Promise<{ success: boolean; error?: string }> {
         return new Promise((resolve) => {
+            const { server, port } = this.parseServerPort(profile);
             const config = {
-                server: profile.server,
+                server,
                 authentication: {
                     type: (profile.user ? 'default' : 'ntlm') as 'default' | 'ntlm',
                     options: {
@@ -331,7 +347,7 @@ export class ConnectionManager {
                 },
                 options: {
                     database: profile.database,
-                    port: profile.port || 1433,
+                    port,
                     trustServerCertificate: profile.trustServerCertificate !== false,
                     encrypt: false,
                     connectTimeout: 10000,
