@@ -1,8 +1,23 @@
 # T-SQL IntelliSense
 
+![Version](https://img.shields.io/visual-studio-marketplace/v/omerbulbul.tsql-intellisense)
+![Installs](https://img.shields.io/visual-studio-marketplace/i/omerbulbul.tsql-intellisense)
+![Rating](https://img.shields.io/visual-studio-marketplace/r/omerbulbul.tsql-intellisense)
+
 SQL Server IntelliSense for VS Code — a Redgate SQL Prompt alternative.
 
 Connect to SQL Server databases and get intelligent code completion, query execution, and schema navigation.
+
+## Roadmap
+
+- [ ] SQL formatter / code beautifier
+- [ ] Execution plan viewer
+- [ ] Multi-database connection (switch between databases)
+- [ ] Intellisense for temp tables and table variables
+- [ ] CTE and subquery column resolution
+- [ ] Snippet editor UI
+- [ ] Schema compare
+- [ ] Unit test integration (tSQLt)
 
 ## Features
 
