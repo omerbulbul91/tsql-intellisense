@@ -1,124 +1,124 @@
-# Redgate SQL Prompt Snippet Loader
+# Redgate SQL Prompt Snippet Yükleyici
 
-## Summary
+## Özet
 
-Add support for loading Redgate SQL Prompt snippet files from a user-configured directory. Snippets are presented as VS Code completion items, enabling users to reuse their existing Redgate snippet libraries within tsql-intellisense.
+Kullanıcının yapılandırdığı bir dizinden Redgate SQL Prompt snippet dosyalarını yükleme desteği. Snippet'ler VS Code completion öğeleri olarak sunulur ve kullanıcıların mevcut Redgate snippet kütüphanelerini tsql-intellisense içinde kullanmalarını sağlar.
 
-## Motivation
+## Motivasyon
 
-User has 245 Redgate SQL Prompt snippets. Rather than converting them to a different format, the extension should natively read the Redgate JSON format from a configured folder path.
+Kullanıcının 245 adet Redgate SQL Prompt snippet'i var. Bunları farklı bir formata dönüştürmek yerine, eklenti Redgate JSON formatını yapılandırılmış bir dizin yolundan doğrudan okuyacak.
 
-## Redgate Snippet Format
+## Redgate Snippet Formatı
 
 ```json
 {
   "id": "UUID-string",
-  "prefix": "trigger-keyword",
-  "description": "optional description",
-  "body": "SQL template with \\n newlines and $CURSOR$ / $PASTE$ placeholders"
+  "prefix": "tetikleyici-kelime",
+  "description": "opsiyonel açıklama",
+  "body": "\\n satır sonları ve $CURSOR$ / $PASTE$ placeholder'ları içeren SQL şablonu"
 }
 ```
 
-Each `.json` file in the directory contains one snippet.
+Dizindeki her `.json` dosyası bir snippet içerir.
 
-## Design
+## Tasarım
 
-### New File: `src/providers/snippetProvider.ts`
+### Yeni Dosya: `src/providers/snippetProvider.ts`
 
-**Class:** `SnippetProvider implements CompletionItemProvider`
+**Sınıf:** `SnippetProvider implements CompletionItemProvider`
 
-**Responsibilities:**
-- Read `tsql-intellisense.snippetFolder` setting
-- On activation, scan directory for `*.json` files
-- Parse each file as Redgate snippet format
-- Convert to `CompletionItem[]` and cache in memory
-- Provide completions when user types (prefix-based matching by VS Code)
+**Sorumluluklar:**
+- `tsql-intellisense.snippetFolder` ayarını oku
+- Aktivasyonda dizindeki `*.json` dosyalarını tara
+- Her dosyayı Redgate snippet formatı olarak parse et
+- `CompletionItem[]`'e dönüştür ve bellekte cache'le
+- Kullanıcı yazarken tamamlama önerisi sun (VS Code prefix eşleştirmesi)
 
-**Placeholder conversion:**
-- `$CURSOR$` → `$0` (VS Code final cursor position)
-- `$PASTE$` → clipboard content if available, otherwise `$1` (tabstop)
-- `$PASTE$$CURSOR$` → clipboard content + `$0`, or `$1` if clipboard empty
-- Body `\n` → actual newlines in SnippetString
+**Placeholder dönüşümü:**
+- `$CURSOR$` → `$0` (VS Code son cursor pozisyonu)
+- `$PASTE$` → pano içeriği varsa yapıştır, yoksa `$1` (tabstop)
+- `$PASTE$$CURSOR$` → pano içeriği + `$0`, pano boşsa `$1`
+- Body içindeki `\n` → SnippetString'de gerçek satır sonları
 
-**Reload:** Listen to `onDidChangeConfiguration` for `tsql-intellisense.snippetFolder` changes and reload snippets.
+**Yeniden yükleme:** `onDidChangeConfiguration` dinlenir, `tsql-intellisense.snippetFolder` değişince snippet'ler yeniden yüklenir.
 
-### Changes: `package.json`
+### Değişiklik: `package.json`
 
-Add setting:
+Yeni ayar:
 ```json
 "tsql-intellisense.snippetFolder": {
   "type": "string",
   "default": "",
-  "description": "Path to folder containing Redgate SQL Prompt snippet JSON files"
+  "description": "Redgate SQL Prompt snippet JSON dosyalarını içeren dizin yolu"
 }
 ```
 
-### Changes: `extension.ts`
+### Değişiklik: `extension.ts`
 
-- Import and instantiate `SnippetProvider`
-- Register with `vscode.languages.registerCompletionItemProvider('sql', provider)`
-- No trigger characters needed (normal prefix matching)
+- `SnippetProvider` import ve oluşturma
+- `vscode.languages.registerCompletionItemProvider` ile kayıt
+- Trigger karakter gerekmez (normal prefix eşleştirmesi yeterli)
 
-### Data Flow
+### Veri Akışı
 
 ```
-Activation
-  → read snippetFolder setting
-  → scan *.json files in directory
-  → parse each as {id, prefix, description, body}
-  → convert placeholders, create CompletionItem[]
-  → cache in memory
+Aktivasyon
+  → snippetFolder ayarını oku
+  → dizindeki *.json dosyalarını tara
+  → her birini {id, prefix, description, body} olarak parse et
+  → placeholder'ları dönüştür, CompletionItem[] oluştur
+  → bellekte cache'le
 
-User typing
-  → VS Code matches prefix against filterText/label
-  → show matching snippets in completion list
-  → on accept: resolve $PASTE$ (read clipboard), insert SnippetString
+Kullanıcı yazarken
+  → VS Code prefix'i filterText/label ile eşleştirir
+  → eşleşen snippet'leri tamamlama listesinde gösterir
+  → seçilince: $PASTE$ çözümlenir (pano okunur), SnippetString eklenir
 ```
 
-### Completion Item Properties
+### CompletionItem Özellikleri
 
-| Property | Value |
-|----------|-------|
-| label | prefix (e.g. "AP", "loj") |
+| Özellik | Değer |
+|---------|-------|
+| label | prefix (ör. "AP", "loj") |
 | kind | CompletionItemKind.Snippet |
-| detail | description or "SQL Prompt Snippet" |
-| documentation | body preview (first 3 lines) |
-| insertText | SnippetString with converted body |
+| detail | description veya "SQL Prompt Snippet" |
+| documentation | body önizlemesi (ilk 3 satır, SQL syntax highlighting) |
+| insertText | dönüştürülmüş body ile SnippetString |
 | filterText | prefix |
+| sortText | "zz_" prefix (schema completion'larının altında sıralanır) |
 
-### $PASTE$ Resolution
+### $PASTE$ Çözümleme
 
-Since clipboard read (`vscode.env.clipboard.readText()`) is async, resolve it in `resolveCompletionItem`:
+Pano okuma (`vscode.env.clipboard.readText()`) async olduğundan `resolveCompletionItem`'da çözümlenir:
 
-1. **At load time:** Body'deki `$PASTE$` yerinde sentinel placeholder `${1:PASTE}` bırakılır
-2. **resolveCompletionItem'da:** Clipboard okunur, sentinel gerçek değerle veya boşsa `$1` tabstop ile değiştirilir
-3. `$CURSOR$` → `$0` dönüşümü load time'da yapılır (async gerektirmez)
+1. **Yükleme zamanında:** Body'deki `$PASTE$` yerinde sentinel placeholder `${1:PASTE}` bırakılır
+2. **resolveCompletionItem'da:** Pano okunur, sentinel gerçek değerle veya pano boşsa `$1` tabstop ile değiştirilir
+3. `$CURSOR$` → `$0` dönüşümü yükleme zamanında yapılır (async gerektirmez)
 
-### Error Handling
+### Hata Yönetimi
 
-- Geçersiz JSON veya eksik `prefix`/`body` alanı olan dosyalar atlanır, Output Channel'a warning yazılır
+- Geçersiz JSON veya eksik `prefix`/`body` alanı olan dosyalar atlanır, Output Channel'a uyarı yazılır
 - `prefix` ve `body` zorunlu; `id` ve `description` opsiyonel
-- Dizin mevcut değilse veya erişilemezse bir kez warning mesajı gösterilir
-- Unrecognized placeholder'lar (`$SELECTEDTEXT$`, `$DATE$` vb.) literal metin olarak bırakılır
+- Dizin mevcut değilse veya erişilemezse bir kez uyarı mesajı gösterilir
+- Tanınmayan placeholder'lar (`$SELECTEDTEXT$`, `$DATE$` vb.) literal metin olarak bırakılır
 
-### Loading
+### Yükleme Detayları
 
 - Snippet'ler async yüklenir (`fs.promises.readdir` + `fs.promises.readFile`)
-- `sortText: "zz_"` prefix ile snippet'ler schema completion'larının altında sıralanır
 - Dosya isimleri önemsiz, sadece JSON içindeki `prefix` kullanılır
 - `documentation` alanı MarkdownString ile SQL syntax highlighting (```sql fence) kullanır
 - Document selector: `{ language: 'sql', scheme: '*' }` (mevcut provider ile tutarlı)
 - Disposable'lar `context.subscriptions`'a eklenir
 
-### Reload
+### Yeniden Yükleme
 
 - `onDidChangeConfiguration` dinlenir, `snippetFolder` değişince yeniden yüklenir
-- File watcher yok (kapsam dışı) — yeni snippet eklenince setting'i değiştirmek veya window reload yeterli
+- File watcher yok (kapsam dışı) — yeni snippet eklenince ayarı değiştirmek veya pencereyi yeniden yüklemek yeterli
 
-## Out of Scope
+## Kapsam Dışı
 
-- Multiple snippet directories
-- Snippet editing UI
-- File system watcher (snippet dizini değişiklik izleme)
-- Other Redgate-specific placeholders beyond $PASTE$ and $CURSOR$
-- Snippet creation/management commands
+- Birden fazla snippet dizini desteği
+- Snippet düzenleme arayüzü
+- Dosya sistemi izleyici (snippet dizini değişiklik izleme)
+- `$PASTE$` ve `$CURSOR$` dışındaki Redgate placeholder'ları
+- Snippet oluşturma/yönetim komutları
