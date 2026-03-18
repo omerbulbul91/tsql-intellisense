@@ -8,6 +8,7 @@ import { TsqlRenameProvider } from './providers/renameProvider';
 import { TsqlDefinitionProvider } from './providers/definitionProvider';
 import { ProjectSync } from './sync/projectSync';
 import { SnippetProvider } from './providers/snippetProvider';
+import { ConnectionTreeProvider } from './providers/connectionTreeProvider';
 
 let connectionManager: ConnectionManager;
 let schemaCache: SchemaCache;
@@ -23,6 +24,14 @@ export function activate(context: vscode.ExtensionContext) {
     schemaCache = new SchemaCache(connectionManager);
     alterProcProvider = new AlterProcProvider(connectionManager, schemaCache);
     queryRunner = new QueryRunner(connectionManager);
+
+    // Register sidebar tree view
+    const treeProvider = new ConnectionTreeProvider(connectionManager, schemaCache);
+    const treeView = vscode.window.createTreeView('tsqlConnections', {
+        treeDataProvider: treeProvider,
+        showCollapseAll: true,
+    });
+    context.subscriptions.push(treeView);
 
     // Register query results panel in bottom area
     context.subscriptions.push(
@@ -175,8 +184,12 @@ export function activate(context: vscode.ExtensionContext) {
     );
 
     context.subscriptions.push(
-        vscode.commands.registerCommand('tsql-intellisense.alterProc', () => {
-            alterProcProvider.showAlterProcPicker();
+        vscode.commands.registerCommand('tsql-intellisense.alterProc', (arg: any) => {
+            if (arg?.objectName) {
+                vscode.commands.executeCommand('tsql-intellisense.fetchProcCode', arg.objectName);
+            } else {
+                alterProcProvider.showAlterProcPicker();
+            }
         })
     );
 
@@ -234,7 +247,9 @@ export function activate(context: vscode.ExtensionContext) {
 
     // Insert SP parameters when SP is selected from completion
     context.subscriptions.push(
-        vscode.commands.registerCommand('tsql-intellisense.insertSpParams', async (spName: string) => {
+        vscode.commands.registerCommand('tsql-intellisense.insertSpParams', async (arg: any) => {
+            const spName = typeof arg === 'string' ? arg : arg?.objectName;
+            if (!spName) { return; }
             const editor = vscode.window.activeTextEditor;
             if (!editor || !connectionManager.isConnected) { return; }
 
@@ -356,7 +371,9 @@ export function activate(context: vscode.ExtensionContext) {
 
     // Copy table/view script to clipboard
     context.subscriptions.push(
-        vscode.commands.registerCommand('tsql-intellisense.copyTableScript', async (tableName: string) => {
+        vscode.commands.registerCommand('tsql-intellisense.copyTableScript', async (arg: any) => {
+            const tableName = typeof arg === 'string' ? arg : arg?.objectName;
+            if (!tableName) { return; }
             const script = buildObjectScript(tableName);
             if (!script) {
                 vscode.window.showWarningMessage(`No schema info for ${tableName}`);
@@ -369,7 +386,9 @@ export function activate(context: vscode.ExtensionContext) {
 
     // Open table/view script in new editor tab
     context.subscriptions.push(
-        vscode.commands.registerCommand('tsql-intellisense.openTableScript', async (tableName: string) => {
+        vscode.commands.registerCommand('tsql-intellisense.openTableScript', async (arg: any) => {
+            const tableName = typeof arg === 'string' ? arg : arg?.objectName;
+            if (!tableName) { return; }
             const script = buildObjectScript(tableName);
             if (!script) {
                 vscode.window.showWarningMessage(`No schema info for ${tableName}`);
@@ -484,8 +503,89 @@ export function activate(context: vscode.ExtensionContext) {
         })
     );
 
+    // Tree: Add Connection — placeholder until Task 6 adds ConnectionFormProvider
+    context.subscriptions.push(
+        vscode.commands.registerCommand('tsql-intellisense.addConnection', () => {
+            vscode.window.showInformationMessage('Connection form loading...');
+        })
+    );
+
+    // Tree: Edit Connection — placeholder until Task 6
+    context.subscriptions.push(
+        vscode.commands.registerCommand('tsql-intellisense.editConnection', (item: any) => {
+            vscode.window.showInformationMessage('Connection form loading...');
+        })
+    );
+
+    // Tree: Delete Connection
+    context.subscriptions.push(
+        vscode.commands.registerCommand('tsql-intellisense.deleteConnection', async (item: any) => {
+            if (!item?.profileName) { return; }
+            const activeProfile = connectionManager.currentProfile;
+            const isActive = activeProfile && activeProfile.name === item.profileName;
+
+            const confirmMsg = isActive
+                ? `This connection is active. Disconnect and delete "${item.profileName}"?`
+                : `Delete connection "${item.profileName}"?`;
+
+            const answer = await vscode.window.showWarningMessage(confirmMsg, { modal: true }, 'Delete');
+            if (answer !== 'Delete') { return; }
+
+            if (isActive) {
+                await connectionManager.disconnect();
+            }
+
+            const config = vscode.workspace.getConfiguration('tsql-intellisense');
+            const connections = config.get<any[]>('connections', []);
+            const filtered = connections.filter(c => c.name !== item.profileName);
+            const target = vscode.workspace.workspaceFolders
+                ? vscode.ConfigurationTarget.Workspace
+                : vscode.ConfigurationTarget.Global;
+            await config.update('connections', filtered, target);
+            treeProvider.refresh();
+        })
+    );
+
+    // Tree: Connect to a profile (handles both string from TreeItem.command and ConnectionItem from context menu)
+    context.subscriptions.push(
+        vscode.commands.registerCommand('tsql-intellisense.treeConnect', async (arg: any) => {
+            const profileName = typeof arg === 'string' ? arg : arg?.profileName;
+            if (!profileName) { return; }
+            const profiles = connectionManager.getSavedProfiles();
+            const profile = profiles.find(p => p.name === profileName);
+            if (!profile) { return; }
+
+            try {
+                await vscode.window.withProgress(
+                    { location: vscode.ProgressLocation.Notification, title: `Connecting to ${profileName}...` },
+                    () => connectionManager.connect(profile)
+                );
+            } catch (err: any) {
+                treeProvider.setConnectionError(err.message);
+                vscode.window.showErrorMessage(err.message);
+            }
+        })
+    );
+
+    // Tree: SELECT TOP 100 from table
+    context.subscriptions.push(
+        vscode.commands.registerCommand('tsql-intellisense.selectTop100', async (item: any) => {
+            if (!item?.objectName || !connectionManager.isConnected) { return; }
+            await queryRunner.runQueryText(`SELECT TOP 100 * FROM [${item.objectName}]`);
+        })
+    );
+
+    // Tree: Open project folder in Explorer
+    context.subscriptions.push(
+        vscode.commands.registerCommand('tsql-intellisense.openInExplorer', (item: any) => {
+            if (!item?.projectPath) { return; }
+            vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(item.projectPath));
+        })
+    );
+
     // When connection changes, load schema and remember last profile
     connectionManager.onConnectionChanged(async (profile) => {
+        treeProvider.refresh();
         vscode.commands.executeCommand('setContext', 'tsqlIntellisense.connected', !!profile);
         if (profile) {
             // Remember last connected profile name
@@ -510,6 +610,7 @@ export function activate(context: vscode.ExtensionContext) {
                     ? '$(check) T-SQL: Schema ready'
                     : '$(warning) T-SQL: Schema partially loaded';
                 setTimeout(() => statusItem.dispose(), 5000);
+                treeProvider.refresh(); // refresh tree after schema fully loaded
             } catch (err: any) {
                 vscode.window.showErrorMessage(`Failed to load schema: ${err.message}`);
             }
@@ -534,6 +635,7 @@ export function activate(context: vscode.ExtensionContext) {
             connectionManager.dispose();
             schemaCache.dispose();
             queryRunner.dispose();
+            treeProvider.dispose();
         }
     });
 
