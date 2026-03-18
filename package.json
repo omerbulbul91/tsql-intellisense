@@ -2,7 +2,7 @@
   "name": "tsql-intellisense",
   "displayName": "T-SQL IntelliSense (Beta)",
   "description": "⚠️ Beta — SQL Prompt-like IntelliSense for T-SQL in VS Code. Features may change.",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "publisher": "omerbulbul",
   "license": "MIT",
   "repository": {
@@ -87,7 +87,9 @@
       { "command": "tsql-intellisense.openInExplorer", "title": "Open in Explorer", "icon": "$(folder-opened)" },
       { "command": "tsql-intellisense.insertSpParams", "title": "T-SQL IntelliSense: EXEC with Params" },
       { "command": "tsql-intellisense.newQueryFromTree", "title": "New Query", "icon": "$(new-file)" },
-      { "command": "tsql-intellisense.switchDatabase", "title": "Switch Database", "icon": "$(database)" }
+      { "command": "tsql-intellisense.switchDatabase", "title": "Switch Database", "icon": "$(database)" },
+      { "command": "tsql-intellisense.filterItems", "title": "Filter...", "icon": "$(filter)" },
+      { "command": "tsql-intellisense.clearFilter", "title": "Clear Filter", "icon": "$(filter-filled)" }
     ],
     "menus": {
       "editor/title": [
@@ -111,6 +113,9 @@
         { "command": "tsql-intellisense.setProjectPath", "when": "viewItem == connection.connected", "group": "2_manage" },
         { "command": "tsql-intellisense.newQueryFromTree", "when": "viewItem == database.connected", "group": "1_db" },
         { "command": "tsql-intellisense.switchDatabase", "when": "viewItem == database", "group": "1_db" },
+        { "command": "tsql-intellisense.editConnection", "when": "viewItem =~ /^database/", "group": "2_manage" },
+        { "command": "tsql-intellisense.filterItems", "when": "viewItem =~ /^folder\\./" , "group": "0_filter" },
+        { "command": "tsql-intellisense.clearFilter", "when": "viewItem =~ /^folder\\./" , "group": "0_filter" },
         { "command": "tsql-intellisense.refreshSchema", "when": "viewItem =~ /^folder\\./" , "group": "1_actions" },
         { "command": "tsql-intellisense.selectTop100", "when": "viewItem == table", "group": "1_actions" },
         { "command": "tsql-intellisense.copyTableScript", "when": "viewItem == table", "group": "1_actions" },
@@ -123,7 +128,8 @@
         { "command": "tsql-intellisense.refreshSchema", "when": "viewItem == connection.connected", "group": "inline" },
         { "command": "tsql-intellisense.deleteConnection", "when": "viewItem =~ /^connection\\./", "group": "inline" },
         { "command": "tsql-intellisense.newQueryFromTree", "when": "viewItem == database.connected", "group": "inline" },
-        { "command": "tsql-intellisense.switchDatabase", "when": "viewItem == database", "group": "inline" }
+        { "command": "tsql-intellisense.switchDatabase", "when": "viewItem == database", "group": "inline" },
+        { "command": "tsql-intellisense.filterItems", "when": "viewItem =~ /^folder\\./", "group": "inline" }
       ]
     },
     "keybindings": [

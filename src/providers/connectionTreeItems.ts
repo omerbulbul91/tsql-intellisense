@@ -104,6 +104,14 @@ export class ObjectFolderItem extends vscode.TreeItem {
         this.contextValue = `folder.${folderType}`;
         this.iconPath = new vscode.ThemeIcon(icons[folderType]);
     }
+
+    updateDescription(totalCount: number, filteredCount: number, filterText?: string): void {
+        if (filterText) {
+            this.description = `(${filteredCount}/${totalCount}) 🔍 ${filterText}`;
+        } else {
+            this.description = `(${totalCount})`;
+        }
+    }
 }
 
 export type ObjectType = 'table' | 'view' | 'sp' | 'func';

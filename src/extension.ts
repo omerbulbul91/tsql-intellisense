@@ -8,7 +8,7 @@ import { TsqlRenameProvider } from './providers/renameProvider';
 import { TsqlDefinitionProvider } from './providers/definitionProvider';
 import { ProjectSync } from './sync/projectSync';
 import { SnippetProvider } from './providers/snippetProvider';
-import { ConnectionTreeProvider } from './providers/connectionTreeProvider';
+import { ConnectionTreeProvider, FilterTarget } from './providers/connectionTreeProvider';
 import { ConnectionFormProvider } from './providers/connectionFormProvider';
 
 let connectionManager: ConnectionManager;
@@ -485,10 +485,25 @@ export function activate(context: vscode.ExtensionContext) {
         const profile = connectionManager.currentProfile;
         if (!profile) { return; }
 
-        // Get project path for current database from databaseProjects, fallback to legacy projectPath
+        // Get project path for current database from databaseProjects only (no legacy fallback)
         const currentDb = profile.database;
-        const projectPath = profile.databaseProjects?.[currentDb] || profile.projectPath;
-        if (!projectPath) { return; }
+        const projectPath = profile.databaseProjects?.[currentDb];
+
+        if (!projectPath) {
+            // Check if SQL contains DDL — only warn for DDL statements
+            const ddlPattern = /^\s*(CREATE|ALTER|CREATE\s+OR\s+ALTER)\s+(PROC(EDURE)?|VIEW|FUNCTION|TRIGGER|TABLE)\b/im;
+            if (ddlPattern.test(sql)) {
+                const action = await vscode.window.showWarningMessage(
+                    `"${currentDb}" için proje klasörü tanımlı değil. DDL değişiklikleri senkronize edilemez.`,
+                    'Set Project Path'
+                );
+                if (action === 'Set Project Path') {
+                    const editCopy = { ...profile, database: currentDb };
+                    ConnectionFormProvider.show(context, connectionManager, treeProvider, editCopy);
+                }
+            }
+            return;
+        }
 
         try {
             await projectSync.syncAfterExecution(sql, projectPath, buildObjectScript);
@@ -538,14 +553,22 @@ export function activate(context: vscode.ExtensionContext) {
         })
     );
 
-    // Tree: Edit Connection
+    // Tree: Edit Connection (from ConnectionItem or DatabaseItem)
     context.subscriptions.push(
         vscode.commands.registerCommand('tsql-intellisense.editConnection', (item: any) => {
-            if (!item?.profileName) { return; }
+            // DatabaseItem has parentProfileName + dbName; ConnectionItem has profileName
+            const profileName = item?.profileName || item?.parentProfileName;
+            if (!profileName) { return; }
             const profiles = connectionManager.getSavedProfiles();
-            const profile = profiles.find(p => p.name === item.profileName);
+            const profile = profiles.find(p => p.name === profileName);
             if (profile) {
-                ConnectionFormProvider.show(context, connectionManager, treeProvider, profile);
+                // If triggered from a DatabaseItem, override database to that DB
+                if (item?.dbName && item?.parentProfileName) {
+                    const editCopy = { ...profile, database: item.dbName };
+                    ConnectionFormProvider.show(context, connectionManager, treeProvider, editCopy);
+                } else {
+                    ConnectionFormProvider.show(context, connectionManager, treeProvider, profile);
+                }
             }
         })
     );
@@ -580,14 +603,17 @@ export function activate(context: vscode.ExtensionContext) {
     );
 
     // Tree: Connect to a profile (handles both string from TreeItem.command and ConnectionItem from context menu)
+    let connectingInProgress = false;
     context.subscriptions.push(
         vscode.commands.registerCommand('tsql-intellisense.treeConnect', async (arg: any) => {
+            if (connectingInProgress) { return; }
             const profileName = typeof arg === 'string' ? arg : arg?.profileName;
             if (!profileName) { return; }
             const profiles = connectionManager.getSavedProfiles();
             const profile = profiles.find(p => p.name === profileName);
             if (!profile) { return; }
 
+            connectingInProgress = true;
             try {
                 await vscode.window.withProgress(
                     { location: vscode.ProgressLocation.Notification, title: `Connecting to ${profileName}...` },
@@ -596,6 +622,8 @@ export function activate(context: vscode.ExtensionContext) {
             } catch (err: any) {
                 treeProvider.setConnectionError(err.message);
                 vscode.window.showErrorMessage(err.message);
+            } finally {
+                connectingInProgress = false;
             }
         })
     );
@@ -609,23 +637,66 @@ export function activate(context: vscode.ExtensionContext) {
         })
     );
 
-    // Tree: New Query — from DB node (remembers which DB) or server node (DB null → F5 asks)
+    // Tree: New Query — from DB node (remembers which DB) or server node (asks DB with picker)
     context.subscriptions.push(
         vscode.commands.registerCommand('tsql-intellisense.newQueryFromTree', async (arg: any) => {
-            const doc = await vscode.workspace.openTextDocument({ language: 'sql', content: '' });
-            await vscode.window.showTextDocument(doc);
-
             if (arg?.dbName && arg?.parentProfileName) {
-                // Opened from a DatabaseItem → bind to that DB
+                // Opened from a DatabaseItem → bind to that DB directly
+                const doc = await vscode.workspace.openTextDocument({ language: 'sql', content: '' });
+                await vscode.window.showTextDocument(doc);
                 queryRunner.setDocumentDatabase(doc.uri, {
                     profileName: arg.parentProfileName,
                     dbName: arg.dbName,
                 });
             } else if (arg?.profileName) {
-                // Opened from a ConnectionItem (server level) → DB null, F5 will ask
-                queryRunner.setDocumentDatabase(doc.uri, null);
+                // Opened from a ConnectionItem (server level) → ask which DB
+                const currentProfile = connectionManager.currentProfile;
+                let dbName = currentProfile?.database || '';
+
+                try {
+                    const dbResult = await connectionManager.executeQuery(
+                        `SELECT name FROM sys.databases WHERE state_desc = 'ONLINE' ORDER BY name`
+                    );
+                    const dbNames = dbResult.rows.map(r => r['name'] as string);
+                    // Build QuickPickItems with current DB marked as default
+                    const items: vscode.QuickPickItem[] = dbNames.map(name => ({
+                        label: name,
+                        description: name.toLowerCase() === dbName.toLowerCase() ? '(current)' : '',
+                    }));
+                    const picked = await vscode.window.showQuickPick(items, {
+                        placeHolder: 'Select database for this query',
+                        title: 'New Query — Select Database',
+                    });
+                    if (!picked) { return; } // cancelled
+                    dbName = picked.label;
+                } catch {
+                    // If DB list fails, use current DB
+                }
+
+                if (!dbName) { return; }
+
+                // Switch DB if needed
+                if (currentProfile && currentProfile.database.toLowerCase() !== dbName.toLowerCase()) {
+                    const switchedProfile = { ...currentProfile, database: dbName };
+                    try {
+                        await connectionManager.connect(switchedProfile);
+                    } catch (err: any) {
+                        vscode.window.showErrorMessage(`Failed to switch to ${dbName}: ${err.message}`);
+                        return;
+                    }
+                }
+
+                const doc = await vscode.workspace.openTextDocument({ language: 'sql', content: '' });
+                await vscode.window.showTextDocument(doc);
+                queryRunner.setDocumentDatabase(doc.uri, {
+                    profileName: arg.profileName,
+                    dbName,
+                });
+            } else {
+                // Command palette — no association, runs against current DB
+                const doc = await vscode.workspace.openTextDocument({ language: 'sql', content: '' });
+                await vscode.window.showTextDocument(doc);
             }
-            // else: opened from command palette — no association, runs against current DB
         })
     );
 
@@ -666,6 +737,53 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.commands.registerCommand('tsql-intellisense.openInExplorer', (item: any) => {
             if (!item?.projectPath) { return; }
             vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(item.projectPath));
+        })
+    );
+
+    // Tree: Filter items in a folder
+    context.subscriptions.push(
+        vscode.commands.registerCommand('tsql-intellisense.filterItems', async (item: any) => {
+            // Determine filter target from contextValue
+            let target: FilterTarget | undefined;
+            if (item?.contextValue === 'folder.databases') {
+                target = 'databases';
+            } else if (item?.folderType) {
+                target = item.folderType as FilterTarget;
+            }
+            if (!target) { return; }
+
+            const labels: Record<FilterTarget, string> = {
+                databases: 'Databases',
+                tables: 'Tables',
+                views: 'Views',
+                sps: 'Stored Procedures',
+                functions: 'Functions',
+            };
+
+            const current = treeProvider.getFilter(target) || '';
+            const value = await vscode.window.showInputBox({
+                prompt: `Filter ${labels[target]} — Name Contains`,
+                value: current,
+                placeHolder: 'Type to filter by name (leave empty to clear)',
+            });
+
+            if (value === undefined) { return; } // cancelled
+            treeProvider.setFilter(target, value);
+        })
+    );
+
+    // Tree: Clear filter
+    context.subscriptions.push(
+        vscode.commands.registerCommand('tsql-intellisense.clearFilter', (item: any) => {
+            let target: FilterTarget | undefined;
+            if (item?.contextValue === 'folder.databases') {
+                target = 'databases';
+            } else if (item?.folderType) {
+                target = item.folderType as FilterTarget;
+            }
+            if (target) {
+                treeProvider.clearFilter(target);
+            }
         })
     );
 

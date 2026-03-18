@@ -47,14 +47,42 @@ export class ConnectionFormProvider {
                     break;
                 }
                 case 'save': {
-                    await ConnectionFormProvider.saveProfile(msg.profile, msg.originalName);
+                    const dupName = ConnectionFormProvider.findDuplicate(msg.profile, msg.originalName);
+                    if (dupName) {
+                        const answer = await vscode.window.showWarningMessage(
+                            `Bu sunucu/port/login zaten "${dupName}" profilinde kayıtlı. Mevcut profili güncellesin mi?`,
+                            { modal: true },
+                            'Güncelle'
+                        );
+                        if (answer !== 'Güncelle') {
+                            panel.webview.postMessage({ cmd: 'testResult', success: false, error: `"${dupName}" profili zaten aynı sunucuya bağlı.` });
+                            break;
+                        }
+                        await ConnectionFormProvider.saveProfile(msg.profile, msg.originalName, dupName);
+                    } else {
+                        await ConnectionFormProvider.saveProfile(msg.profile, msg.originalName);
+                    }
                     treeProvider.refresh();
                     const updatedSaved = connectionManager.getSavedProfiles();
                     panel.webview.postMessage({ cmd: 'saved', saved: updatedSaved });
                     break;
                 }
                 case 'saveAndConnect': {
-                    await ConnectionFormProvider.saveProfile(msg.profile, msg.originalName);
+                    const dupName2 = ConnectionFormProvider.findDuplicate(msg.profile, msg.originalName);
+                    if (dupName2) {
+                        const answer = await vscode.window.showWarningMessage(
+                            `Bu sunucu/port/login zaten "${dupName2}" profilinde kayıtlı. Mevcut profili güncellesin mi?`,
+                            { modal: true },
+                            'Güncelle'
+                        );
+                        if (answer !== 'Güncelle') {
+                            panel.webview.postMessage({ cmd: 'testResult', success: false, error: `"${dupName2}" profili zaten aynı sunucuya bağlı.` });
+                            break;
+                        }
+                        await ConnectionFormProvider.saveProfile(msg.profile, msg.originalName, dupName2);
+                    } else {
+                        await ConnectionFormProvider.saveProfile(msg.profile, msg.originalName);
+                    }
                     ConnectionFormProvider.addRecent(context, msg.profile);
                     treeProvider.refresh();
                     try {
@@ -173,17 +201,41 @@ export class ConnectionFormProvider {
         return result;
     }
 
-    private static async saveProfile(profile: ConnectionProfile, originalName?: string): Promise<void> {
+    /** Check for duplicate server+port+user. Returns the duplicate profile name or null. */
+    static findDuplicate(profile: ConnectionProfile, originalName?: string): string | null {
+        const config = vscode.workspace.getConfiguration('tsql-intellisense');
+        const connections = config.get<any[]>('connections', []);
+
+        const sameServer = (c: any) =>
+            (c.server || '').toLowerCase() === (profile.server || '').toLowerCase()
+            && (c.port || 1433) === (profile.port || 1433)
+            && (c.user || '').toLowerCase() === (profile.user || '').toLowerCase();
+
+        const dup = connections.find(c => c.name !== originalName && sameServer(c));
+        return dup ? dup.name : null;
+    }
+
+    private static async saveProfile(profile: ConnectionProfile, originalName?: string, mergeInto?: string): Promise<void> {
         const config = vscode.workspace.getConfiguration('tsql-intellisense');
         const connections = config.get<any[]>('connections', []);
         const target = vscode.workspace.workspaceFolders
             ? vscode.ConfigurationTarget.Workspace
             : vscode.ConfigurationTarget.Global;
 
-        if (originalName) {
+        if (mergeInto) {
+            // Merge into existing duplicate profile
+            const idx = connections.findIndex(c => c.name === mergeInto);
+            if (idx >= 0) {
+                const existingDbProjects = connections[idx].databaseProjects || {};
+                const newDbProjects = profile.databaseProjects || {};
+                connections[idx].databaseProjects = { ...existingDbProjects, ...newDbProjects };
+                if (profile.database) {
+                    connections[idx].database = profile.database;
+                }
+            }
+        } else if (originalName) {
             const idx = connections.findIndex(c => c.name === originalName);
             if (idx >= 0) {
-                // Merge databaseProjects — don't overwrite other DB paths
                 const existingDbProjects = connections[idx].databaseProjects || {};
                 const newDbProjects = profile.databaseProjects || {};
                 profile.databaseProjects = { ...existingDbProjects, ...newDbProjects };

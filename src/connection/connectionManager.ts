@@ -430,12 +430,15 @@ export class ConnectionManager {
 
     private updateStatusBar(): void {
         if (this.activeProfile) {
-            const folderIcon = this.activeProfile.projectPath ? '$(folder)' : '$(folder-x)';
-            this.statusBarItem.text = `$(database) ${folderIcon} ${this.activeProfile.name}`;
-            const projectInfo = this.activeProfile.projectPath
-                ? `Project: ${this.activeProfile.projectPath}`
+            const db = this.activeProfile.database;
+            const projectPath = this.activeProfile.databaseProjects?.[db];
+            const folderIcon = projectPath ? '$(folder)' : '$(folder-x)';
+            const shortName = this.activeProfile.name.substring(0, 3).toUpperCase();
+            this.statusBarItem.text = `$(database) ${folderIcon} ${shortName} / ${db}`;
+            const projectInfo = projectPath
+                ? `Project: ${projectPath}`
                 : 'Project: Not configured';
-            this.statusBarItem.tooltip = `${this.activeProfile.server} / ${this.activeProfile.database}\n${projectInfo}\nClick to switch connection`;
+            this.statusBarItem.tooltip = `${this.activeProfile.name}\n${this.activeProfile.server} / ${db}\n${projectInfo}\nClick to switch connection`;
             this.statusBarItem.backgroundColor = undefined;
         } else {
             this.statusBarItem.text = '$(database) DB: Not connected';

@@ -104,10 +104,9 @@ export class ProjectSync {
             await this.addToSqlproj(projectPath, ddl.schema, subDir, ddl.objectName);
         }
 
-        // Notify user
+        // Notify user with full path
         const action = fileExists ? 'Updated' : 'Created';
-        const relativePath = `${ddl.schema}/${subDir}/${ddl.objectName}.sql`;
-        vscode.window.showInformationMessage(`Project Sync: ${action} ${relativePath}`);
+        vscode.window.showInformationMessage(`Project Sync: ${action} ${filePath}`);
     }
 
     private async fetchObjectDefinition(objectName: string): Promise<string | null> {

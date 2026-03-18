@@ -15,17 +15,38 @@ import {
 
 type TreeNode = ConnectionItem | DatabasesFolderItem | DatabaseItem | ProjectFolderItem | ObjectFolderItem | ObjectItem | ColumnItem | ErrorItem;
 
+export type FilterTarget = 'databases' | 'tables' | 'views' | 'sps' | 'functions';
+
 export class ConnectionTreeProvider implements vscode.TreeDataProvider<TreeNode> {
     private _onDidChangeTreeData = new vscode.EventEmitter<TreeNode | undefined | void>();
     readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
 
     private connectionError: string | null = null;
     private databaseList: string[] = [];
+    private filters = new Map<FilterTarget, string>();
 
     constructor(
         private connectionManager: ConnectionManager,
         private schemaCache: SchemaCache
     ) {}
+
+    setFilter(target: FilterTarget, value: string): void {
+        if (value) {
+            this.filters.set(target, value.toLowerCase());
+        } else {
+            this.filters.delete(target);
+        }
+        this._onDidChangeTreeData.fire();
+    }
+
+    clearFilter(target: FilterTarget): void {
+        this.filters.delete(target);
+        this._onDidChangeTreeData.fire();
+    }
+
+    getFilter(target: FilterTarget): string | undefined {
+        return this.filters.get(target);
+    }
 
     refresh(): void {
         this.connectionError = null;
@@ -97,16 +118,24 @@ export class ConnectionTreeProvider implements vscode.TreeDataProvider<TreeNode>
         if (!activeProfile) { return []; }
 
         const connectedDb = activeProfile.database;
+        const dbFilter = this.filters.get('databases');
 
         const dbProjects = activeProfile.databaseProjects || {};
-        // Backward compat: if old-style projectPath exists and no databaseProjects entry, use it for the profile's default DB
         const getProjectPath = (dbName: string): string | undefined => {
             return dbProjects[dbName] || dbProjects[dbName.toLowerCase()] || undefined;
         };
 
-        // If we have a database list from sys.databases, show all
+        // Update folder description with filter info
+        folder.description = dbFilter
+            ? `(${this.databaseList.length}) 🔍 ${this.filters.get('databases')}`
+            : `(${this.databaseList.length})`;
+
         if (this.databaseList.length > 0) {
-            return this.databaseList.map(dbName => {
+            let dbs = this.databaseList;
+            if (dbFilter) {
+                dbs = dbs.filter(name => name.toLowerCase().includes(dbFilter));
+            }
+            return dbs.map(dbName => {
                 const isCurrent = dbName.toLowerCase() === connectedDb.toLowerCase();
                 return new DatabaseItem(
                     dbName,
@@ -117,7 +146,6 @@ export class ConnectionTreeProvider implements vscode.TreeDataProvider<TreeNode>
             });
         }
 
-        // Fallback: only show the connected database
         return [new DatabaseItem(connectedDb, true, folder.parentProfileName, getProjectPath(connectedDb))];
     }
 
@@ -157,26 +185,42 @@ export class ConnectionTreeProvider implements vscode.TreeDataProvider<TreeNode>
             return [new ErrorItem('Schema loading...', false)];
         }
 
+        const filterText = this.filters.get(folder.folderType);
+        const applyFilter = (items: { name: string }[]) => {
+            if (!filterText) { return items; }
+            return items.filter(o => o.name.toLowerCase().includes(filterText));
+        };
+
         const typeMap: Record<ObjectFolderType, () => TreeNode[]> = {
             tables: () => {
-                const items = this.schemaCache.getTablesAndViews().filter(o => o.type === 'TABLE');
+                const all = this.schemaCache.getTablesAndViews().filter(o => o.type === 'TABLE');
+                const items = applyFilter(all);
+                folder.updateDescription(all.length, items.length, filterText);
                 return items
                     .sort((a, b) => a.name.localeCompare(b.name))
                     .map(o => new ObjectItem(o.name, 'table', this.schemaCache.hasTriggers(o.name)));
             },
             views: () => {
-                const items = this.schemaCache.getTablesAndViews().filter(o => o.type === 'VIEW');
+                const all = this.schemaCache.getTablesAndViews().filter(o => o.type === 'VIEW');
+                const items = applyFilter(all);
+                folder.updateDescription(all.length, items.length, filterText);
                 return items
                     .sort((a, b) => a.name.localeCompare(b.name))
                     .map(o => new ObjectItem(o.name, 'view'));
             },
             sps: () => {
-                return this.schemaCache.getProcedures()
+                const all = this.schemaCache.getProcedures();
+                const items = applyFilter(all);
+                folder.updateDescription(all.length, items.length, filterText);
+                return items
                     .sort((a, b) => a.name.localeCompare(b.name))
                     .map(o => new ObjectItem(o.name, 'sp'));
             },
             functions: () => {
-                return this.schemaCache.getFunctions()
+                const all = this.schemaCache.getFunctions();
+                const items = applyFilter(all);
+                folder.updateDescription(all.length, items.length, filterText);
+                return items
                     .sort((a, b) => a.name.localeCompare(b.name))
                     .map(o => new ObjectItem(o.name, 'func'));
             },
