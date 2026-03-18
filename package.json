@@ -31,7 +31,8 @@
       },
       {
         "command": "tsql-intellisense.refreshSchema",
-        "title": "T-SQL IntelliSense: Refresh Schema Cache"
+        "title": "T-SQL IntelliSense: Refresh Schema Cache",
+        "icon": "$(sync)"
       },
       {
         "command": "tsql-intellisense.alterProc",
