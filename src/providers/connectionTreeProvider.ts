@@ -72,10 +72,10 @@ export class ConnectionTreeProvider implements vscode.TreeDataProvider<TreeNode>
         const activeProfile = this.connectionManager.currentProfile;
 
         return profiles.map(p => {
+            // Match by name + server (not database — DB can change via switchDatabase)
             const isActive = !!activeProfile
                 && p.name === activeProfile.name
-                && p.server === activeProfile.server
-                && p.database === activeProfile.database;
+                && p.server === activeProfile.server;
             return new ConnectionItem(p.name, p.server, p.database, isActive, p.projectPath);
         });
     }

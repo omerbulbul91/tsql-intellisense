@@ -616,16 +616,28 @@ export function activate(context: vscode.ExtensionContext) {
 
     // Tree: Switch database (click on a different DB in the Databases folder)
     context.subscriptions.push(
-        vscode.commands.registerCommand('tsql-intellisense.switchDatabase', async (profileName: string, dbName: string) => {
+        vscode.commands.registerCommand('tsql-intellisense.switchDatabase', async (profileNameOrItem: any, dbName?: string) => {
+            // Handle both (profileName, dbName) from tree command and (DatabaseItem) from context menu
+            let targetProfileName: string;
+            let targetDb: string;
+            if (typeof profileNameOrItem === 'string') {
+                targetProfileName = profileNameOrItem;
+                targetDb = dbName || '';
+            } else {
+                targetProfileName = profileNameOrItem?.parentProfileName;
+                targetDb = profileNameOrItem?.dbName;
+            }
+            if (!targetProfileName || !targetDb) { return; }
+
             const profiles = connectionManager.getSavedProfiles();
-            const profile = profiles.find(p => p.name === profileName);
+            const profile = profiles.find(p => p.name === targetProfileName);
             if (!profile) { return; }
 
-            // Create a modified profile pointing to the new database
-            const switchedProfile = { ...profile, database: dbName };
+            // Keep the same profile name — just switch database
+            const switchedProfile = { ...profile, database: targetDb };
             try {
                 await vscode.window.withProgress(
-                    { location: vscode.ProgressLocation.Notification, title: `Switching to ${dbName}...` },
+                    { location: vscode.ProgressLocation.Notification, title: `Switching to ${targetDb}...` },
                     () => connectionManager.connect(switchedProfile)
                 );
             } catch (err: any) {
