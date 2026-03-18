@@ -1,8 +1,10 @@
 import * as vscode from 'vscode';
-import { ConnectionManager, ConnectionProfile } from '../connection/connectionManager';
+import { ConnectionManager } from '../connection/connectionManager';
 import { SchemaCache } from '../cache/schemaCache';
 import {
     ConnectionItem,
+    DatabasesFolderItem,
+    DatabaseItem,
     ProjectFolderItem,
     ObjectFolderItem,
     ObjectFolderType,
@@ -11,13 +13,14 @@ import {
     ErrorItem,
 } from './connectionTreeItems';
 
-type TreeNode = ConnectionItem | ProjectFolderItem | ObjectFolderItem | ObjectItem | ColumnItem | ErrorItem;
+type TreeNode = ConnectionItem | DatabasesFolderItem | DatabaseItem | ProjectFolderItem | ObjectFolderItem | ObjectItem | ColumnItem | ErrorItem;
 
 export class ConnectionTreeProvider implements vscode.TreeDataProvider<TreeNode> {
     private _onDidChangeTreeData = new vscode.EventEmitter<TreeNode | undefined | void>();
     readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
 
     private connectionError: string | null = null;
+    private databaseList: string[] = [];
 
     constructor(
         private connectionManager: ConnectionManager,
@@ -34,6 +37,10 @@ export class ConnectionTreeProvider implements vscode.TreeDataProvider<TreeNode>
         this._onDidChangeTreeData.fire();
     }
 
+    setDatabaseList(databases: string[]): void {
+        this.databaseList = databases;
+    }
+
     getTreeItem(element: TreeNode): vscode.TreeItem {
         return element;
     }
@@ -44,6 +51,12 @@ export class ConnectionTreeProvider implements vscode.TreeDataProvider<TreeNode>
         }
         if (element instanceof ConnectionItem) {
             return this.getConnectionChildren(element);
+        }
+        if (element instanceof DatabasesFolderItem) {
+            return this.getDatabasesFolderChildren(element);
+        }
+        if (element instanceof DatabaseItem) {
+            return this.getDatabaseChildren(element);
         }
         if (element instanceof ObjectFolderItem) {
             return this.getObjectFolderChildren(element);
@@ -76,13 +89,44 @@ export class ConnectionTreeProvider implements vscode.TreeDataProvider<TreeNode>
             return [new ErrorItem(`Connection failed: ${this.connectionError}`)];
         }
 
+        return [new DatabasesFolderItem(item.profileName)];
+    }
+
+    private getDatabasesFolderChildren(folder: DatabasesFolderItem): TreeNode[] {
+        const activeProfile = this.connectionManager.currentProfile;
+        if (!activeProfile) { return []; }
+
+        const connectedDb = activeProfile.database;
+
+        // If we have a database list from sys.databases, show all
+        if (this.databaseList.length > 0) {
+            return this.databaseList.map(dbName => {
+                const isCurrent = dbName.toLowerCase() === connectedDb.toLowerCase();
+                return new DatabaseItem(
+                    dbName,
+                    isCurrent,
+                    folder.parentProfileName,
+                    isCurrent ? activeProfile.projectPath : undefined
+                );
+            });
+        }
+
+        // Fallback: only show the connected database
+        return [new DatabaseItem(connectedDb, true, folder.parentProfileName, activeProfile.projectPath)];
+    }
+
+    private getDatabaseChildren(item: DatabaseItem): TreeNode[] {
+        if (!item.isConnected) {
+            return [];
+        }
+
         const children: TreeNode[] = [];
 
+        // Project folder inside the connected database
         if (item.projectPath) {
             children.push(new ProjectFolderItem(item.projectPath));
         }
 
-        // If schema not yet loaded, show loading indicator
         if (!this.schemaCache.isLoaded) {
             children.push(new ErrorItem('$(sync~spin) Loading schema...', false));
             return children;

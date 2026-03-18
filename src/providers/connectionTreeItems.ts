@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 
-/** Root-level connection profile node */
+/** Root-level server/connection node */
 export class ConnectionItem extends vscode.TreeItem {
     constructor(
         public readonly profileName: string,
@@ -11,19 +11,58 @@ export class ConnectionItem extends vscode.TreeItem {
     ) {
         super(profileName, vscode.TreeItemCollapsibleState.Collapsed);
 
-        this.description = database;
+        this.description = server;
         this.contextValue = isActive ? 'connection.connected' : 'connection.disconnected';
 
         if (isActive) {
-            this.iconPath = new vscode.ThemeIcon('database', new vscode.ThemeColor('testing.iconPassed'));
-            this.tooltip = `${server}/${database}`;
+            this.iconPath = new vscode.ThemeIcon('server-process', new vscode.ThemeColor('testing.iconPassed'));
+            this.tooltip = server;
         } else {
-            this.iconPath = new vscode.ThemeIcon('database', new vscode.ThemeColor('disabledForeground'));
-            this.tooltip = `${server}/${database} — click to connect`;
+            this.iconPath = new vscode.ThemeIcon('server-process', new vscode.ThemeColor('disabledForeground'));
+            this.tooltip = `${server} — click to connect`;
             this.command = {
                 command: 'tsql-intellisense.treeConnect',
                 title: 'Connect',
                 arguments: [profileName]
+            };
+        }
+    }
+}
+
+/** "Databases" folder under a server */
+export class DatabasesFolderItem extends vscode.TreeItem {
+    constructor(public readonly parentProfileName: string) {
+        super('Databases', vscode.TreeItemCollapsibleState.Expanded);
+        this.contextValue = 'folder.databases';
+        this.iconPath = new vscode.ThemeIcon('database');
+    }
+}
+
+/** Individual database node under Databases folder */
+export class DatabaseItem extends vscode.TreeItem {
+    constructor(
+        public readonly dbName: string,
+        public readonly isConnected: boolean,
+        public readonly parentProfileName: string,
+        public readonly projectPath?: string
+    ) {
+        super(
+            dbName,
+            isConnected ? vscode.TreeItemCollapsibleState.Expanded : vscode.TreeItemCollapsibleState.None
+        );
+
+        this.contextValue = isConnected ? 'database.connected' : 'database';
+
+        if (isConnected) {
+            this.iconPath = new vscode.ThemeIcon('database', new vscode.ThemeColor('testing.iconPassed'));
+            this.tooltip = `${dbName} (connected)`;
+        } else {
+            this.iconPath = new vscode.ThemeIcon('database', new vscode.ThemeColor('disabledForeground'));
+            this.tooltip = `${dbName} — click to switch`;
+            this.command = {
+                command: 'tsql-intellisense.switchDatabase',
+                title: 'Switch Database',
+                arguments: [parentProfileName, dbName]
             };
         }
     }

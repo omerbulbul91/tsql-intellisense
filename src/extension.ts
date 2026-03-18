@@ -602,6 +602,26 @@ export function activate(context: vscode.ExtensionContext) {
         })
     );
 
+    // Tree: Switch database (click on a different DB in the Databases folder)
+    context.subscriptions.push(
+        vscode.commands.registerCommand('tsql-intellisense.switchDatabase', async (profileName: string, dbName: string) => {
+            const profiles = connectionManager.getSavedProfiles();
+            const profile = profiles.find(p => p.name === profileName);
+            if (!profile) { return; }
+
+            // Create a modified profile pointing to the new database
+            const switchedProfile = { ...profile, database: dbName };
+            try {
+                await vscode.window.withProgress(
+                    { location: vscode.ProgressLocation.Notification, title: `Switching to ${dbName}...` },
+                    () => connectionManager.connect(switchedProfile)
+                );
+            } catch (err: any) {
+                vscode.window.showErrorMessage(err.message);
+            }
+        })
+    );
+
     // Tree: Open project folder in Explorer
     context.subscriptions.push(
         vscode.commands.registerCommand('tsql-intellisense.openInExplorer', (item: any) => {
@@ -618,6 +638,17 @@ export function activate(context: vscode.ExtensionContext) {
             // Remember last connected profile name
             context.globalState.update('lastConnectionName', profile.name);
             try {
+                // Load database list for the Databases folder in tree
+                try {
+                    const dbResult = await connectionManager.executeQuery(
+                        `SELECT name FROM sys.databases WHERE state_desc = 'ONLINE' ORDER BY name`
+                    );
+                    treeProvider.setDatabaseList(dbResult.rows.map(r => r['name'] as string));
+                } catch {
+                    treeProvider.setDatabaseList([]);
+                }
+                treeProvider.refresh();
+
                 await schemaCache.loadObjectNames();
                 schemaCache.startAutoRefresh();
                 vscode.window.showInformationMessage(

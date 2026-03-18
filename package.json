@@ -86,7 +86,8 @@
       { "command": "tsql-intellisense.selectTop100", "title": "SELECT TOP 100", "icon": "$(play)" },
       { "command": "tsql-intellisense.openInExplorer", "title": "Open in Explorer", "icon": "$(folder-opened)" },
       { "command": "tsql-intellisense.insertSpParams", "title": "T-SQL IntelliSense: EXEC with Params" },
-      { "command": "tsql-intellisense.newQueryFromTree", "title": "New Query", "icon": "$(new-file)" }
+      { "command": "tsql-intellisense.newQueryFromTree", "title": "New Query", "icon": "$(new-file)" },
+      { "command": "tsql-intellisense.switchDatabase", "title": "Switch Database", "icon": "$(database)" }
     ],
     "menus": {
       "editor/title": [
