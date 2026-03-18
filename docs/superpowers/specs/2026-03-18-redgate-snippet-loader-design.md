@@ -81,8 +81,8 @@ Kullanıcı yazarken
 |---------|-------|
 | label | prefix (ör. "AP", "loj") |
 | kind | CompletionItemKind.Snippet |
-| detail | description veya "SQL Prompt Snippet" |
-| documentation | body önizlemesi (ilk 3 satır, SQL syntax highlighting) |
+| detail | `"SQL Prompt"` + varsa description (ör. `"SQL Prompt: açıklama"`) |
+| documentation | MarkdownString: üstte **SQL Prompt Snippet** kaynak etiketi, altında body önizlemesi (```sql fence ile syntax highlighting) |
 | insertText | dönüştürülmüş body ile SnippetString |
 | filterText | prefix |
 | sortText | "zz_" prefix (schema completion'larının altında sıralanır) |
