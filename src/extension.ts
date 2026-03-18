@@ -390,7 +390,19 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.commands.registerCommand('tsql-intellisense.openTableScript', async (arg: any) => {
             const tableName = typeof arg === 'string' ? arg : arg?.objectName;
             if (!tableName) { return; }
-            const script = buildObjectScript(tableName);
+            let script = buildObjectScript(tableName);
+            // For functions/SPs — buildObjectScript only handles TABLE/VIEW, fallback to OBJECT_DEFINITION
+            if (!script && connectionManager.isConnected) {
+                try {
+                    const result = await connectionManager.executeQuery(
+                        `SELECT OBJECT_DEFINITION(OBJECT_ID(@objectName)) AS [definition]`,
+                        { objectName: { type: TYPES.NVarChar, value: tableName } }
+                    );
+                    if (result.rows.length > 0 && result.rows[0]['definition']) {
+                        script = result.rows[0]['definition'] as string;
+                    }
+                } catch {}
+            }
             if (!script) {
                 vscode.window.showWarningMessage(`No schema info for ${tableName}`);
                 return;
@@ -577,7 +589,8 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(
         vscode.commands.registerCommand('tsql-intellisense.selectTop100', async (item: any) => {
             if (!item?.objectName || !connectionManager.isConnected) { return; }
-            await queryRunner.runQueryText(`SELECT TOP 100 * FROM [${item.objectName}]`);
+            const safeName = item.objectName.replace(/\]/g, ']]');
+            await queryRunner.runQueryText(`SELECT TOP 100 * FROM [${safeName}]`);
         })
     );
 
