@@ -386,15 +386,11 @@ export class ConnectionFormProvider {
     <!-- Tab 2: Connection String -->
     <div class="tab-content" id="tab-connstr">
         <div class="conn-str-hint">
-            Paste a connection string below. Fields will be parsed and filled automatically.<br>
-            You can then edit individual fields in the Connection Properties tab.
+            Paste a connection string below. Form fields will update automatically as you type.
         </div>
         <div class="form-group">
             <label>Connection String</label>
-            <textarea id="connString" placeholder="Server=myserver,1433;Database=mydb;User Id=sa;Password=***;TrustServerCertificate=True"></textarea>
-        </div>
-        <div class="button-row">
-            <button class="btn-secondary" onclick="parseConnStr()">Parse & Fill Form</button>
+            <textarea id="connString" oninput="onConnStrInput()" placeholder="Data Source=myserver,1433;Initial Catalog=mydb;User Id=sa;Password=***;TrustServerCertificate=True"></textarea>
         </div>
     </div>
 
@@ -537,14 +533,21 @@ export class ConnectionFormProvider {
         vscode.postMessage({ cmd: 'browse' });
     }
 
-    function parseConnStr() {
-        const cs = document.getElementById('connString').value.trim();
-        if (!cs) { showStatus('Please paste a connection string.', 'error'); return; }
-        vscode.postMessage({ cmd: 'parseConnectionString', connectionString: cs });
+    let connStrTimer = null;
+    function onConnStrInput() {
+        clearTimeout(connStrTimer);
+        connStrTimer = setTimeout(() => {
+            const cs = document.getElementById('connString').value.trim();
+            if (cs.length > 10) {
+                vscode.postMessage({ cmd: 'parseConnectionString', connectionString: cs });
+            }
+        }, 400);
     }
 
-    function removeRecent(name, server, database) {
-        vscode.postMessage({ cmd: 'removeRecent', name, server, database });
+    function removeRecent(idx) {
+        const c = recentConns[idx];
+        if (!c) return;
+        vscode.postMessage({ cmd: 'removeRecent', name: c.name, server: c.server, database: c.database || '' });
     }
 
     function renderSidebar() {
@@ -554,24 +557,30 @@ export class ConnectionFormProvider {
         if (savedConns.length === 0) {
             savedEl.innerHTML = '<div style="color:var(--vscode-descriptionForeground);font-size:12px;padding:4px 8px;">No saved connections</div>';
         } else {
-            savedEl.innerHTML = savedConns.map((c, i) =>
-                '<div class="conn-item" onclick="fillForm(savedConns[' + i + '])" title="' + esc(c.server) + '/' + esc(c.database || '') + '">' +
-                '<span class="conn-name">' + esc(c.name) + '</span>' +
-                '<span class="conn-detail">' + esc(c.database || '') + '</span>' +
-                '</div>'
-            ).join('');
+            let html = '';
+            for (let i = 0; i < savedConns.length; i++) {
+                const c = savedConns[i];
+                html += '<div class="conn-item" onclick="fillForm(savedConns[' + i + '])" title="' + esc(c.server) + '/' + esc(c.database || '') + '">'
+                    + '<span class="conn-name">' + esc(c.name) + '</span> '
+                    + '<span class="conn-detail">' + esc(c.database || '') + '</span>'
+                    + '</div>';
+            }
+            savedEl.innerHTML = html;
         }
 
         if (recentConns.length === 0) {
             recentEl.innerHTML = '<div style="color:var(--vscode-descriptionForeground);font-size:12px;padding:4px 8px;">No recent connections</div>';
         } else {
-            recentEl.innerHTML = recentConns.map((c, i) =>
-                '<div class="conn-item" onclick="fillForm(recentConns[' + i + '])" title="' + esc(c.server) + '/' + esc(c.database || '') + '">' +
-                '<span class="conn-name">' + esc(c.name) + '</span>' +
-                '<span class="conn-detail">' + esc(c.server) + '/' + esc(c.database || '') + '</span>' +
-                '<span class="conn-remove" onclick="event.stopPropagation();removeRecent(\\''+esc(c.name)+'\\',\\''+esc(c.server)+'\\',\\''+esc(c.database||'')+'\\')">×</span>' +
-                '</div>'
-            ).join('');
+            let html = '';
+            for (let i = 0; i < recentConns.length; i++) {
+                const c = recentConns[i];
+                html += '<div class="conn-item" onclick="fillForm(recentConns[' + i + '])" title="' + esc(c.server) + '/' + esc(c.database || '') + '">'
+                    + '<span class="conn-name">' + esc(c.name) + '</span> '
+                    + '<span class="conn-detail">' + esc(c.server) + '/' + esc(c.database || '') + '</span>'
+                    + '<span class="conn-remove" onclick="event.stopPropagation();removeRecent(' + i + ')">×</span>'
+                    + '</div>';
+            }
+            recentEl.innerHTML = html;
         }
     }
 
@@ -594,8 +603,15 @@ export class ConnectionFormProvider {
             document.getElementById('projectPath').value = msg.path;
         } else if (msg.cmd === 'parsedConnectionString') {
             if (msg.profile) {
-                fillForm(msg.profile);
-                showStatus('Connection string parsed. Review fields and click Save or Connect.', 'success');
+                // Fill form fields without switching tab — user stays on conn string tab
+                const pr = msg.profile;
+                if (pr.name) document.getElementById('name').value = pr.name;
+                if (pr.server) document.getElementById('server').value = pr.server;
+                if (pr.port) document.getElementById('port').value = pr.port;
+                if (pr.database) document.getElementById('database').value = pr.database;
+                if (pr.user) { document.getElementById('user').value = pr.user; document.getElementById('authType').value = 'sql'; toggleAuth(); }
+                if (pr.password) document.getElementById('password').value = pr.password;
+                if (pr.trustServerCertificate !== undefined) document.getElementById('trustCert').checked = pr.trustServerCertificate;
             }
         } else if (msg.cmd === 'updatedRecent') {
             recentConns = msg.recent || [];
