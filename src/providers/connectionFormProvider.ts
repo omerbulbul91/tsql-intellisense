@@ -341,15 +341,15 @@ export class ConnectionFormProvider {
         </div>
         <div class="form-group">
             <label>Server *</label>
-            <input id="server" value="${p ? e(p.server) : ''}" placeholder="localhost or 192.168.1.100,1433" />
+            <input id="server" value="${p ? e(p.server) : ''}" placeholder="localhost or 192.168.1.100,1433" oninput="updateConnStr()" />
         </div>
         <div class="form-group">
             <label>Port</label>
-            <input id="port" type="number" value="${p?.port || 1433}" />
+            <input id="port" type="number" value="${p?.port || 1433}" oninput="updateConnStr()" />
         </div>
         <div class="form-group">
             <label>Authentication</label>
-            <select id="authType" onchange="toggleAuth()">
+            <select id="authType" onchange="toggleAuth();updateConnStr()">
                 <option value="sql" ${!isWindows ? 'selected' : ''}>SQL Login</option>
                 <option value="windows" ${isWindows ? 'selected' : ''}>Windows Authentication</option>
             </select>
@@ -357,23 +357,23 @@ export class ConnectionFormProvider {
         <div class="sql-fields" id="sqlFields">
             <div class="form-group">
                 <label>User Name *</label>
-                <input id="user" value="${p?.user ? e(p.user) : ''}" placeholder="sa" />
+                <input id="user" value="${p?.user ? e(p.user) : ''}" placeholder="sa" oninput="updateConnStr()" />
             </div>
             <div class="form-group">
                 <label>Password *</label>
                 <div class="browse-group">
-                    <input id="password" type="password" value="${p?.password ? e(p.password) : ''}" />
+                    <input id="password" type="password" value="${p?.password ? e(p.password) : ''}" oninput="updateConnStr()" />
                     <button class="btn-secondary" type="button" onclick="togglePwd()" id="eyeBtn" title="Show/Hide">&#128065;</button>
                 </div>
             </div>
         </div>
         <div class="form-group">
             <label>Database</label>
-            <input id="database" value="${p ? e(p.database) : ''}" placeholder="MyDatabase or &lt;default&gt;" />
+            <input id="database" value="${p ? e(p.database) : ''}" placeholder="MyDatabase or &lt;default&gt;" oninput="updateConnStr()" />
         </div>
         <div class="form-group">
             <div class="checkbox-group">
-                <input id="trustCert" type="checkbox" ${(!p || p.trustServerCertificate !== false) ? 'checked' : ''} />
+                <input id="trustCert" type="checkbox" ${(!p || p.trustServerCertificate !== false) ? 'checked' : ''} onchange="updateConnStr()" />
                 <label for="trustCert" style="margin:0;font-weight:normal;text-transform:none;letter-spacing:0">Trust Server Certificate</label>
             </div>
         </div>
@@ -435,6 +435,31 @@ export class ConnectionFormProvider {
         }
     }
 
+    function updateConnStr() {
+        const srv = document.getElementById('server').value.trim();
+        const port = document.getElementById('port').value.trim();
+        const db = document.getElementById('database').value.trim();
+        const isSql = document.getElementById('authType').value === 'sql';
+        const user = document.getElementById('user').value.trim();
+        const pwd = document.getElementById('password').value;
+        const trust = document.getElementById('trustCert').checked;
+
+        const parts = [];
+        if (srv) {
+            parts.push('Data Source=' + srv + (port && port !== '1433' ? ',' + port : ''));
+        }
+        if (db) parts.push('Initial Catalog=' + db);
+        if (isSql) {
+            if (user) parts.push('User Id=' + user);
+            if (pwd) parts.push('Password=' + pwd);
+        } else {
+            parts.push('Integrated Security=True');
+        }
+        parts.push('TrustServerCertificate=' + (trust ? 'True' : 'False'));
+
+        document.getElementById('connString').value = parts.join(';');
+    }
+
     function togglePwd() {
         const pw = document.getElementById('password');
         pw.type = pw.type === 'password' ? 'text' : 'password';
@@ -457,6 +482,7 @@ export class ConnectionFormProvider {
         document.getElementById('authType').value = profile.user ? 'sql' : 'windows';
         originalName = profile.name || null;
         toggleAuth();
+        updateConnStr();
         switchTab('props');
     }
 
