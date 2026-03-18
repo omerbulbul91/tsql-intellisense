@@ -15,10 +15,10 @@ export class ConnectionItem extends vscode.TreeItem {
         this.contextValue = isActive ? 'connection.connected' : 'connection.disconnected';
 
         if (isActive) {
-            this.iconPath = new vscode.ThemeIcon('server-process', new vscode.ThemeColor('testing.iconPassed'));
+            this.iconPath = new vscode.ThemeIcon('server', new vscode.ThemeColor('testing.iconPassed'));
             this.tooltip = server;
         } else {
-            this.iconPath = new vscode.ThemeIcon('server-process', new vscode.ThemeColor('disabledForeground'));
+            this.iconPath = new vscode.ThemeIcon('server', new vscode.ThemeColor('disabledForeground'));
             this.tooltip = `${server} — click to connect`;
             this.command = {
                 command: 'tsql-intellisense.treeConnect',
@@ -34,7 +34,11 @@ export class DatabasesFolderItem extends vscode.TreeItem {
     constructor(public readonly parentProfileName: string) {
         super('Databases', vscode.TreeItemCollapsibleState.Expanded);
         this.contextValue = 'folder.databases';
-        this.iconPath = new vscode.ThemeIcon('database');
+        this.iconPath = new vscode.ThemeIcon('folder-opened');
+    }
+
+    setExpanded(expanded: boolean): void {
+        this.iconPath = new vscode.ThemeIcon(expanded ? 'folder-opened' : 'folder');
     }
 }
 
@@ -92,17 +96,15 @@ export class ObjectFolderItem extends vscode.TreeItem {
             sps: 'Stored Procedures',
             functions: 'Functions',
         };
-        const icons: Record<ObjectFolderType, string> = {
-            tables: 'symbol-class',
-            views: 'symbol-interface',
-            sps: 'symbol-method',
-            functions: 'symbol-function',
-        };
 
         super(labels[folderType], vscode.TreeItemCollapsibleState.Collapsed);
         this.description = `(${count})`;
         this.contextValue = `folder.${folderType}`;
-        this.iconPath = new vscode.ThemeIcon(icons[folderType]);
+        this.iconPath = new vscode.ThemeIcon('folder');
+    }
+
+    setExpanded(expanded: boolean): void {
+        this.iconPath = new vscode.ThemeIcon(expanded ? 'folder-opened' : 'folder');
     }
 
     updateDescription(totalCount: number, filteredCount: number, filterText?: string): void {
@@ -131,10 +133,10 @@ export class ObjectItem extends vscode.TreeItem {
 
         this.contextValue = objectType;
         const icons: Record<ObjectType, string> = {
-            table: 'symbol-class',
-            view: 'symbol-interface',
-            sp: 'symbol-method',
-            func: 'symbol-function',
+            table: 'table',
+            view: 'window',
+            sp: 'symbol-event',
+            func: 'symbol-namespace',
         };
         this.iconPath = new vscode.ThemeIcon(icons[objectType]);
         this.tooltip = hasTrigger ? `${objectName} ⚡ (has triggers)` : objectName;

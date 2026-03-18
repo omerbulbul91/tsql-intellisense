@@ -30,6 +30,11 @@ export class ConnectionTreeProvider implements vscode.TreeDataProvider<TreeNode>
         private schemaCache: SchemaCache
     ) {}
 
+    /** Fire change for a specific node (used for icon updates) */
+    fireChange(node: TreeNode): void {
+        this._onDidChangeTreeData.fire(node);
+    }
+
     setFilter(target: FilterTarget, value: string): void {
         if (value) {
             this.filters.set(target, value.toLowerCase());

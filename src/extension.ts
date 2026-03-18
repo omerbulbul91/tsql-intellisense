@@ -34,6 +34,22 @@ export function activate(context: vscode.ExtensionContext) {
     });
     context.subscriptions.push(treeView);
 
+    // Track folder expand/collapse for icon changes
+    treeView.onDidExpandElement(e => {
+        const item = e.element;
+        if ('setExpanded' in item && typeof (item as any).setExpanded === 'function') {
+            (item as any).setExpanded(true);
+            treeProvider.fireChange(item);
+        }
+    });
+    treeView.onDidCollapseElement(e => {
+        const item = e.element;
+        if ('setExpanded' in item && typeof (item as any).setExpanded === 'function') {
+            (item as any).setExpanded(false);
+            treeProvider.fireChange(item);
+        }
+    });
+
     // Register query results panel in bottom area
     context.subscriptions.push(
         vscode.window.registerWebviewViewProvider('tsqlResults', queryRunner)
