@@ -317,6 +317,46 @@ export class ConnectionManager {
         }
     }
 
+    /** Test a connection profile without affecting current connection state */
+    async testConnection(profile: ConnectionProfile): Promise<{ success: boolean; error?: string }> {
+        return new Promise((resolve) => {
+            const config = {
+                server: profile.server,
+                authentication: {
+                    type: (profile.user ? 'default' : 'ntlm') as 'default' | 'ntlm',
+                    options: {
+                        userName: profile.user || '',
+                        password: profile.password || '',
+                    },
+                },
+                options: {
+                    database: profile.database,
+                    port: profile.port || 1433,
+                    trustServerCertificate: profile.trustServerCertificate !== false,
+                    encrypt: false,
+                    connectTimeout: 10000,
+                },
+            };
+
+            const testConn = new Connection(config);
+
+            testConn.on('connect', (err) => {
+                if (err) {
+                    resolve({ success: false, error: err.message });
+                } else {
+                    testConn.close();
+                    resolve({ success: true });
+                }
+            });
+
+            testConn.on('error', () => {
+                // Swallow — handled in connect callback
+            });
+
+            testConn.connect();
+        });
+    }
+
     /** Show Quick Pick to select a connection profile */
     async promptConnect(): Promise<void> {
         const profiles = this.getSavedProfiles();
