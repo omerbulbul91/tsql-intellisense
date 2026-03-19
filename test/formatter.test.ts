@@ -329,6 +329,42 @@ assertLayout(
     defaultLayout, 'SELECT without FROM'
 );
 
+// --- JOIN formatting ---
+const joinLayout: LayoutOptions = {
+    maxLineLength: 120, placeCommasBeforeItems: true, alignItemsToTabStops: true,
+    join: { placeOnNewLine: false, placeConditionOnNewLine: true, conditionAlignment: 'toTable' }
+};
+
+assertLayout(
+    'select a from T1 inner join T2 on T1.id = T2.id',
+    'Select  a\nFrom    T1\n        Inner Join T2 On\n                   T1.id = T2.id',
+    joinLayout, 'basic INNER JOIN with condition on new line'
+);
+
+assertLayout(
+    'select a from T1 left join T2 on T1.id = T2.id inner join T3 on T2.fk = T3.id',
+    'Select  a\nFrom    T1\n        Left Join T2 On\n                  T1.id = T2.id\n        Inner Join T3 On\n                   T2.fk = T3.id',
+    joinLayout, 'multiple JOINs'
+);
+
+assertLayout(
+    'select a from T1 cross join T2',
+    'Select  a\nFrom    T1\n        Cross Join T2',
+    joinLayout, 'CROSS JOIN (no ON)'
+);
+
+// --- JOIN condition inline ---
+const joinInline: LayoutOptions = {
+    maxLineLength: 120, placeCommasBeforeItems: true, alignItemsToTabStops: true,
+    join: { placeOnNewLine: false, placeConditionOnNewLine: false, conditionAlignment: 'toTable' }
+};
+
+assertLayout(
+    'select a from T1 inner join T2 on T1.id = T2.id',
+    'Select  a\nFrom    T1\n        Inner Join T2 On T1.id = T2.id',
+    joinInline, 'JOIN condition inline'
+);
+
 console.log(`\nLayout: ${layoutPassed} passed, ${layoutFailed} failed\n`);
 
 // ===================== CASE FORMATTING TESTS =====================

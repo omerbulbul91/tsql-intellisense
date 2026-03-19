@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import { CasingOptions, CasingMode } from './casingRule';
-import { LayoutOptions } from './layoutRule';
+import { LayoutOptions, JoinOptions } from './layoutRule';
 import { CaseOptions, DEFAULT_CASE_OPTIONS } from './caseRule';
 
 export interface SqlStyle {
@@ -15,6 +15,13 @@ export interface SqlStyle {
         placeCommasBeforeItems?: boolean;
         alignItemsToTabStops?: boolean;
     };
+    joinStatements?: {
+        on?: {
+            placeOnNewLine?: boolean;
+            placeConditionOnNewLine?: boolean;
+            conditionAlignment?: string;
+        };
+    };
 }
 
 const DEFAULT_CASING: CasingOptions = {
@@ -23,10 +30,17 @@ const DEFAULT_CASING: CasingOptions = {
     builtInDataTypes: 'upperCamelCase',
 };
 
+const DEFAULT_JOIN: JoinOptions = {
+    placeOnNewLine: false,
+    placeConditionOnNewLine: true,
+    conditionAlignment: 'toTable',
+};
+
 const DEFAULT_LAYOUT: LayoutOptions = {
     maxLineLength: 120,
     placeCommasBeforeItems: true,
     alignItemsToTabStops: true,
+    join: { ...DEFAULT_JOIN },
 };
 
 const VALID_MODES: Set<string> = new Set(['uppercase', 'lowercase', 'upperCamelCase', 'leaveAsIs']);
@@ -80,6 +94,16 @@ export class StyleLoader {
                 };
             } else {
                 this.layoutOptions = { ...DEFAULT_LAYOUT, maxLineLength: this.layoutOptions.maxLineLength };
+            }
+
+            // Join options from style file
+            if (style.joinStatements?.on) {
+                const on = style.joinStatements.on;
+                this.layoutOptions.join = {
+                    placeOnNewLine: on.placeOnNewLine ?? DEFAULT_JOIN.placeOnNewLine,
+                    placeConditionOnNewLine: on.placeConditionOnNewLine ?? DEFAULT_JOIN.placeConditionOnNewLine,
+                    conditionAlignment: (on.conditionAlignment as any) ?? DEFAULT_JOIN.conditionAlignment,
+                };
             }
 
             this.log(`Loaded style "${this.styleName}" from ${filePath}`);

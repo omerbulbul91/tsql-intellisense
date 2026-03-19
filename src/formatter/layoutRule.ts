@@ -1,19 +1,28 @@
 import { Token } from './sqlTokenizer';
 
+export interface JoinOptions {
+    placeOnNewLine: boolean;          // ON aynı satırda mı
+    placeConditionOnNewLine: boolean; // ON condition yeni satırda mı
+    conditionAlignment: 'toTable' | 'toInner' | 'indented'; // condition hizalama
+}
+
 export interface LayoutOptions {
     maxLineLength: number;
     placeCommasBeforeItems: boolean;
     alignItemsToTabStops: boolean;
+    join?: JoinOptions;
 }
 
 const CLAUSE_KEYWORDS = new Set(['SELECT', 'FROM', 'WHERE', 'HAVING']);
 const COMPOUND_FIRST = new Set(['ORDER', 'GROUP']);
+const JOIN_KEYWORDS = new Set(['INNER', 'LEFT', 'RIGHT', 'CROSS', 'FULL']);
 
 interface Clause {
     keyword: string;       // e.g. "Select", "Order By"
     keywordLength: number; // display length
     items: string[];       // comma-separated items (trimmed)
     prefix: string;        // e.g. "Distinct", "Top 100" for SELECT
+    rawTokens: Token[];    // raw tokens for this clause's content
 }
 
 interface StatementParts {
@@ -47,6 +56,12 @@ export function applyLayout(tokens: Token[], options: LayoutOptions): string {
                 ? clause.keyword + ' '.repeat(paddingWidth - clause.keywordLength)
                 : clause.keyword + ' ';
             const prefix = clause.prefix ? clause.prefix + ' ' : '';
+
+            // FROM clause with JOINs — special handling
+            if (clause.keyword.toUpperCase() === 'FROM' && options.join && hasJoinTokens(clause.rawTokens)) {
+                formattedClauses.push(formatFromWithJoins(clause, kwPadded, paddingWidth, options));
+                continue;
+            }
 
             if (clause.items.length === 0) {
                 formattedClauses.push(kwPadded + prefix);
@@ -112,6 +127,7 @@ function splitStatements(tokens: Token[]): StatementParts[] {
                 keywordLength: currentClause.keywordLength,
                 items,
                 prefix: currentClause.prefix,
+                rawTokens: [...currentClause.tokens],
             });
             currentClause = null;
         }
@@ -347,4 +363,157 @@ function rebuildRaw(clauses: Clause[], suffixTokens: Token[]): string {
         result += t.value;
     }
     return result;
+}
+
+// ─── JOIN formatting helpers ───
+
+function hasJoinTokens(tokens: Token[]): boolean {
+    return tokens.some(t => t.type === 'keyword' && (JOIN_KEYWORDS.has(t.value.toUpperCase()) || t.value.toUpperCase() === 'JOIN'));
+}
+
+interface JoinPart {
+    joinKeyword: string;  // "Inner Join", "Left Join", "Left Outer Join", etc.
+    table: string;        // table name + alias
+    onKeyword: string;    // "On"
+    condition: string;    // join condition
+}
+
+/**
+ * Format FROM clause with JOINs.
+ * Splits: FROM table alias \n JOIN table alias ON \n condition
+ */
+function formatFromWithJoins(clause: Clause, kwPadded: string, paddingWidth: number, options: LayoutOptions): string {
+    const joinOpts = options.join!;
+    const parts = parseJoinParts(clause.rawTokens);
+
+    if (parts.length === 0) {
+        // No joins found, fall back to simple format
+        return kwPadded + clause.items.join(', ');
+    }
+
+    const joinIndent = ' '.repeat(paddingWidth);
+    const lines: string[] = [];
+
+    // First part: FROM table
+    lines.push(kwPadded + parts[0].table);
+
+    // Each JOIN
+    for (let i = 1; i < parts.length; i++) {
+        const p = parts[i];
+        const joinLine = joinIndent + p.joinKeyword + ' ' + p.table;
+
+        if (p.onKeyword && p.condition) {
+            if (joinOpts.placeConditionOnNewLine) {
+                // ON on same line, condition on next line
+                lines.push(joinLine + ' ' + p.onKeyword);
+                // Condition aligned to table start
+                const condIndent = joinIndent + ' '.repeat(p.joinKeyword.length + 1);
+                lines.push(condIndent + p.condition);
+            } else {
+                // Everything on one line
+                lines.push(joinLine + ' ' + p.onKeyword + ' ' + p.condition);
+            }
+        } else {
+            // CROSS JOIN (no ON)
+            lines.push(joinLine);
+        }
+    }
+
+    return lines.join('\n');
+}
+
+function parseJoinParts(tokens: Token[]): JoinPart[] {
+    const parts: JoinPart[] = [];
+    let i = 0;
+    const len = tokens.length;
+
+    // Skip leading whitespace
+    while (i < len && tokens[i].type === 'whitespace') i++;
+
+    // First part: the FROM table (everything before first JOIN keyword)
+    let tableTokens: Token[] = [];
+    while (i < len) {
+        const upper = tokens[i].type === 'keyword' ? tokens[i].value.toUpperCase() : '';
+        if (JOIN_KEYWORDS.has(upper) || upper === 'JOIN') break;
+        tableTokens.push(tokens[i]);
+        i++;
+    }
+    parts.push({
+        joinKeyword: '',
+        table: trimTokens(tableTokens),
+        onKeyword: '',
+        condition: '',
+    });
+
+    // Parse each JOIN
+    while (i < len) {
+        const upper = tokens[i].type === 'keyword' ? tokens[i].value.toUpperCase() : '';
+        if (!JOIN_KEYWORDS.has(upper) && upper !== 'JOIN') { i++; continue; }
+
+        // Collect JOIN keyword parts: INNER JOIN, LEFT OUTER JOIN, etc.
+        let joinKw = tokens[i].value;
+        i++;
+        while (i < len && tokens[i].type === 'whitespace') i++;
+
+        // Check for OUTER or JOIN
+        if (i < len && tokens[i].type === 'keyword') {
+            const next = tokens[i].value.toUpperCase();
+            if (next === 'OUTER') {
+                joinKw += ' ' + tokens[i].value;
+                i++;
+                while (i < len && tokens[i].type === 'whitespace') i++;
+            }
+            if (i < len && tokens[i].type === 'keyword' && tokens[i].value.toUpperCase() === 'JOIN') {
+                joinKw += ' ' + tokens[i].value;
+                i++;
+            }
+        }
+
+        while (i < len && tokens[i].type === 'whitespace') i++;
+
+        // Collect table + alias (until ON or next JOIN)
+        tableTokens = [];
+        let onKeyword = '';
+        let condition = '';
+        let depth = 0;
+
+        while (i < len) {
+            if (tokens[i].type === 'punctuation' && tokens[i].value === '(') depth++;
+            if (tokens[i].type === 'punctuation' && tokens[i].value === ')') depth = Math.max(0, depth - 1);
+
+            if (depth === 0 && tokens[i].type === 'keyword') {
+                const kw = tokens[i].value.toUpperCase();
+                if (kw === 'ON') {
+                    onKeyword = tokens[i].value;
+                    i++;
+                    // Collect condition (until next JOIN or end)
+                    const condTokens: Token[] = [];
+                    while (i < len) {
+                        if (tokens[i].type === 'punctuation' && tokens[i].value === '(') depth++;
+                        if (tokens[i].type === 'punctuation' && tokens[i].value === ')') depth = Math.max(0, depth - 1);
+                        if (depth === 0 && tokens[i].type === 'keyword') {
+                            const ck = tokens[i].value.toUpperCase();
+                            if (JOIN_KEYWORDS.has(ck) || ck === 'JOIN') break;
+                        }
+                        condTokens.push(tokens[i]);
+                        i++;
+                    }
+                    condition = trimTokens(condTokens);
+                    break;
+                }
+                if (JOIN_KEYWORDS.has(kw) || kw === 'JOIN') break;
+            }
+            tableTokens.push(tokens[i]);
+            i++;
+        }
+
+        parts.push({
+            joinKeyword: joinKw,
+            table: trimTokens(tableTokens),
+            onKeyword,
+            condition,
+        });
+    }
+
+    return parts;
 }
