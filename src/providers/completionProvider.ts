@@ -16,9 +16,16 @@ export class TsqlCompletionProvider implements vscode.CompletionItemProvider {
         const result = await this.provideCompletionItemsInner(document, position, _token, _context);
         if (result) {
             const chars = TsqlCompletionProvider.getCommitCharacters();
-            if (chars.length > 0) {
-                for (const item of result.items) {
-                    if (!item.commitCharacters) item.commitCharacters = chars;
+            for (const item of result.items) {
+                // Tag all items with extension name
+                if (typeof item.detail === 'string') {
+                    item.detail = `T-SQL • ${item.detail}`;
+                } else if (!item.detail) {
+                    item.detail = 'T-SQL';
+                }
+                // Commit characters
+                if (chars.length > 0 && !item.commitCharacters) {
+                    item.commitCharacters = chars;
                 }
             }
         }
