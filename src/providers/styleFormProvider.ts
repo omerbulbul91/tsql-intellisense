@@ -107,6 +107,30 @@ export class StyleFormProvider {
                     });
                     break;
                 }
+                case 'loadSnippets': {
+                    const snippetDir = vscode.workspace.getConfiguration('tsql-intellisense').get<string>('snippetFolder', '');
+                    const snippets: { prefix: string; description: string; body: string }[] = [];
+                    if (snippetDir) {
+                        try {
+                            const fs = await import('fs');
+                            const path = await import('path');
+                            const files = await fs.promises.readdir(snippetDir);
+                            for (const file of files.filter(f => f.endsWith('.json')).sort()) {
+                                try {
+                                    const content = await fs.promises.readFile(path.join(snippetDir, file), 'utf-8');
+                                    const snip = JSON.parse(content);
+                                    snippets.push({
+                                        prefix: snip.prefix || file.replace('.json', ''),
+                                        description: snip.description || '',
+                                        body: snip.body || '',
+                                    });
+                                } catch { /* skip invalid */ }
+                            }
+                        } catch { /* folder not accessible */ }
+                    }
+                    panel.webview.postMessage({ cmd: 'snippetsLoaded', snippets });
+                    break;
+                }
                 case 'browseSnippetFolder': {
                     const current = vscode.workspace.getConfiguration('tsql-intellisense').get<string>('snippetFolder', '');
                     const result = await vscode.window.showOpenDialog({
@@ -414,6 +438,54 @@ export class StyleFormProvider {
             color: var(--vscode-descriptionForeground);
             padding: 4px 0;
         }
+
+        /* Snippet list */
+        .snippet-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+            margin-top: 8px;
+        }
+        .snippet-table th {
+            text-align: left;
+            padding: 6px 8px;
+            border-bottom: 1px solid var(--vscode-panel-border);
+            font-weight: 600;
+            font-size: 12px;
+            color: var(--vscode-descriptionForeground);
+        }
+        .snippet-table td {
+            padding: 4px 8px;
+            border-bottom: 1px solid var(--vscode-panel-border, transparent);
+            cursor: pointer;
+        }
+        .snippet-table tr:hover td {
+            background: var(--vscode-list-hoverBackground);
+        }
+        .snippet-table tr.selected td {
+            background: var(--vscode-list-activeSelectionBackground);
+            color: var(--vscode-list-activeSelectionForeground);
+        }
+        .snippet-list-container {
+            max-height: 250px;
+            overflow-y: auto;
+            border: 1px solid var(--vscode-panel-border);
+            border-radius: 2px;
+        }
+        .snippet-code {
+            margin-top: 12px;
+            padding: 12px;
+            background: var(--vscode-editor-background);
+            border: 1px solid var(--vscode-panel-border);
+            border-radius: 2px;
+            font-family: var(--vscode-editor-fontFamily, monospace);
+            font-size: var(--vscode-editor-fontSize, 13px);
+            line-height: 1.5;
+            white-space: pre-wrap;
+            min-height: 60px;
+            max-height: 150px;
+            overflow-y: auto;
+        }
     </style>
 </head>
 <body>
@@ -424,6 +496,9 @@ export class StyleFormProvider {
 
     <div class="main">
         <div class="sidebar">
+            <div class="section-title">Suggestions</div>
+            <div class="menu-item" onclick="showSection('snippets')">Snippets</div>
+
             <div class="section-title">Inserted code</div>
             <div class="menu-item" onclick="showSection('aliases')">Aliases</div>
             <div class="menu-item" onclick="showSection('specialChars')">Special characters</div>
@@ -461,6 +536,38 @@ export class StyleFormProvider {
 
         <div class="content">
             <div class="content-body">
+                <!-- Casing Section -->
+                <!-- Snippets Section -->
+                <div id="section-snippets" style="display:none">
+                    <h2>Snippets</h2>
+                    <p style="font-size:13px; color:var(--vscode-descriptionForeground); margin-bottom:12px;">
+                        You can use snippets to insert frequently used chunks of code into your query.
+                    </p>
+
+                    <div class="form-row">
+                        <label>Snippet folder:</label>
+                        <div style="display:flex; gap:8px; align-items:center; flex:1;">
+                            <input type="text" id="snippetFolderSnippets" value="${StyleFormProvider.escapeHtml(snippetFolder)}" readonly
+                                style="flex:1; padding:5px 8px; font-size:13px; font-family:var(--vscode-font-family); background:var(--vscode-input-background); color:var(--vscode-input-foreground); border:1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius:2px; outline:none;" />
+                            <button class="btn btn-secondary" onclick="browseSnippetFolder()">...</button>
+                        </div>
+                    </div>
+
+                    <div class="snippet-list-container">
+                        <table class="snippet-table">
+                            <thead><tr><th>Snippet</th><th>Description</th></tr></thead>
+                            <tbody id="snippetListBody">
+                                <tr><td colspan="2" style="color:var(--vscode-descriptionForeground); text-align:center; padding:16px;">Loading snippets...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <div style="margin-top:4px; font-size:11px; color:var(--vscode-descriptionForeground);" id="snippetCountLabel"></div>
+
+                    <h3>Code</h3>
+                    <div class="snippet-code" id="snippetCodePreview" style="color:var(--vscode-descriptionForeground);">Select a snippet to preview</div>
+                </div>
+
                 <!-- Casing Section -->
                 <div id="section-casing">
                     <h2>Casing</h2>
@@ -748,6 +855,21 @@ export class StyleFormProvider {
             vscode.postMessage({ cmd: 'loadFile' });
         }
 
+        function selectSnippet(index) {
+            document.querySelectorAll('.snippet-table tr.selected').forEach(el => el.classList.remove('selected'));
+            const row = document.getElementById('snip-' + index);
+            if (row) row.classList.add('selected');
+            const s = window._snippets && window._snippets[index];
+            const preview = document.getElementById('snippetCodePreview');
+            if (s && s.body) {
+                preview.textContent = s.body;
+                preview.style.color = '';
+            } else {
+                preview.textContent = 'No code';
+                preview.style.color = 'var(--vscode-descriptionForeground)';
+            }
+        }
+
         function browseSnippetFolder() {
             vscode.postMessage({ cmd: 'browseSnippetFolder' });
         }
@@ -764,6 +886,8 @@ export class StyleFormProvider {
             vscode.postMessage({ cmd: 'reset' });
         }
 
+        let snippetsLoaded = false;
+
         function showSection(name) {
             document.querySelectorAll('.menu-item').forEach(el => el.classList.remove('active'));
             event.target.classList.add('active');
@@ -771,6 +895,10 @@ export class StyleFormProvider {
             const sec = document.getElementById('section-' + name);
             if (sec) sec.style.display = '';
             updatePreview();
+            if (name === 'snippets' && !snippetsLoaded) {
+                vscode.postMessage({ cmd: 'loadSnippets' });
+                snippetsLoaded = true;
+            }
         }
 
         function toggleStyleSubs() {
@@ -786,8 +914,23 @@ export class StyleFormProvider {
             const msg = e.data;
             if (msg.cmd === 'saved') {
                 // Visual feedback handled by VS Code notification
+            } else if (msg.cmd === 'snippetsLoaded') {
+                const tbody = document.getElementById('snippetListBody');
+                if (msg.snippets.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="2" style="color:var(--vscode-descriptionForeground); text-align:center; padding:16px;">No snippets found. Set a snippet folder first.</td></tr>';
+                } else {
+                    tbody.innerHTML = msg.snippets.map((s, i) =>
+                        '<tr onclick="selectSnippet(' + i + ')" id="snip-' + i + '"><td>' + escapeHtml(s.prefix) + '</td><td>' + escapeHtml(s.description || '') + '</td></tr>'
+                    ).join('');
+                }
+                document.getElementById('snippetCountLabel').textContent = msg.snippets.length + ' snippets';
+                window._snippets = msg.snippets;
             } else if (msg.cmd === 'snippetFolderSet') {
                 document.getElementById('snippetFolder').value = msg.path;
+                document.getElementById('snippetFolderSnippets').value = msg.path;
+                snippetsLoaded = false;
+                vscode.postMessage({ cmd: 'loadSnippets' });
+                snippetsLoaded = true;
             } else if (msg.cmd === 'connectionsUpdated') {
                 document.querySelector('#section-connections .info-bar').innerHTML =
                     '<span class="icon">ℹ</span> ' + msg.count + ' connection profile kayıtlı.';
