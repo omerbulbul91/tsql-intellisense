@@ -1296,19 +1296,18 @@ export function activate(context: vscode.ExtensionContext) {
                     return;
                 }
                 let word: string | undefined;
-                const wordRange = editor.document.getWordRangeAtPosition(editor.selection.active, /[\w]+/);
-                if (wordRange) {
-                    word = editor.document.getText(wordRange);
+                // 1. Selection varsa seçili metni kullan
+                if (!editor.selection.isEmpty) {
+                    word = editor.document.getText(editor.selection).trim();
                 } else {
-                    // Cursor not on a word — scan current line for any known object name
-                    const lineText = editor.document.lineAt(editor.selection.active.line).text;
-                    const words = lineText.match(/[\w]+/g) || [];
-                    for (const w of words) {
-                        if (schemaCache.findObject(w)) { word = w; break; }
+                    // 2. Cursor'daki kelime (Türkçe karakter + underscore desteği)
+                    const wordRange = editor.document.getWordRangeAtPosition(editor.selection.active, /[a-zA-Z0-9_\u00C0-\u024F\u0100-\u017F]+/);
+                    if (wordRange) {
+                        word = editor.document.getText(wordRange);
                     }
                 }
                 if (!word) {
-                    vscode.window.showWarningMessage('Open Project File: No object found at cursor or on current line');
+                    vscode.window.showWarningMessage('Open Project File: No word at cursor. Place cursor on an object name or select it.');
                     return;
                 }
                 const obj = schemaCache.findObject(word);
