@@ -11,7 +11,7 @@ export interface DdlInfo {
     objectName: string;
 }
 
-const DDL_REGEX = /^\s*(ALTER|CREATE(?:\s+OR\s+ALTER)?)\s+(PROC(?:EDURE)?|VIEW|FUNCTION|TRIGGER|TABLE)\s+(?:\[?(\w+)\]?\.)?\[?(\w+)\]?/im;
+const DDL_REGEX = /^\s*(ALTER|CREATE(?:\s+OR\s+ALTER)?)\s+(PROC(?:EDURE)?|VIEW|FUNCTION|TRIGGER|TABLE)\s+(?:\[?([a-zA-Z0-9_\u00C0-\u024F\u0100-\u017F]+)\]?\.)?\[?([a-zA-Z0-9_\u00C0-\u024F\u0100-\u017F]+)\]?/im;
 
 const SUBDIRECTORY_MAP: Record<string, string> = {
     'PROCEDURE': 'Stored Procedures',

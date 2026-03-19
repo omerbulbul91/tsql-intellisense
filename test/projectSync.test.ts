@@ -20,7 +20,7 @@ function assert(condition: boolean, testName: string) {
 }
 
 // Mirror of DDL_REGEX and detectDdl from src/sync/projectSync.ts
-const DDL_REGEX = /^\s*(ALTER|CREATE(?:\s+OR\s+ALTER)?)\s+(PROC(?:EDURE)?|VIEW|FUNCTION|TRIGGER|TABLE)\s+(?:\[?(\w+)\]?\.)?\[?(\w+)\]?/im;
+const DDL_REGEX = /^\s*(ALTER|CREATE(?:\s+OR\s+ALTER)?)\s+(PROC(?:EDURE)?|VIEW|FUNCTION|TRIGGER|TABLE)\s+(?:\[?([a-zA-Z0-9_\u00C0-\u024F\u0100-\u017F]+)\]?\.)?\[?([a-zA-Z0-9_\u00C0-\u024F\u0100-\u017F]+)\]?/im;
 
 interface DdlInfo {
     action: 'ALTER' | 'CREATE';
@@ -187,6 +187,19 @@ assert(
     convertPlaceholders('$PASTE$ $table_name$') === '${1:PASTE} ${2:table_name}',
     'with $PASTE$, named placeholders start at 2'
 );
+
+// ── Turkish characters in DDL ──
+{
+    const ddl = detectDdl('CREATE OR ALTER VIEW dbo.CPC01_ModulAltGrupları AS SELECT 1');
+    assert(ddl !== null, 'Turkish chars: DDL detected');
+    assert(ddl?.objectName === 'CPC01_ModulAltGrupları', 'Turkish chars: objectName correct — ' + ddl?.objectName);
+    assert(ddl?.schema === 'dbo', 'Turkish chars: schema correct');
+}
+{
+    const ddl = detectDdl('ALTER PROCEDURE dbo.spÖğrenciKayıt AS SELECT 1');
+    assert(ddl !== null, 'Turkish SP: DDL detected');
+    assert(ddl?.objectName === 'spÖğrenciKayıt', 'Turkish SP: objectName correct — ' + ddl?.objectName);
+}
 
 // ─── Summary ───
 console.log(`\n${'═'.repeat(40)}`);
