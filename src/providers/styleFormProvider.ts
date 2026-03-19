@@ -37,8 +37,11 @@ export class StyleFormProvider {
             capitaliseAliases: config.get<boolean>('aliases.capitaliseAliases', false),
             prefixesToIgnore: config.get<string[]>('aliases.prefixesToIgnore', []),
         };
+        const snippetFolder = config.get<string>('snippetFolder', '');
+        // Read connections to show count
+        const connections = config.get<any[]>('connections', []);
 
-        panel.webview.html = StyleFormProvider.getHtml(casingOpts, layoutOpts, aliasOpts, styleName, styleFile);
+        panel.webview.html = StyleFormProvider.getHtml(casingOpts, layoutOpts, aliasOpts, styleName, styleFile, snippetFolder, connections.length);
 
         panel.webview.onDidReceiveMessage(async (msg) => {
             switch (msg.cmd) {
@@ -104,6 +107,66 @@ export class StyleFormProvider {
                     });
                     break;
                 }
+                case 'browseSnippetFolder': {
+                    const current = vscode.workspace.getConfiguration('tsql-intellisense').get<string>('snippetFolder', '');
+                    const result = await vscode.window.showOpenDialog({
+                        canSelectFiles: false,
+                        canSelectFolders: true,
+                        canSelectMany: false,
+                        openLabel: 'Snippet Dizini Seç',
+                        defaultUri: current ? vscode.Uri.file(current) : undefined
+                    });
+                    if (result && result[0]) {
+                        await vscode.workspace.getConfiguration('tsql-intellisense').update('snippetFolder', result[0].fsPath, vscode.ConfigurationTarget.Global);
+                        panel.webview.postMessage({ cmd: 'snippetFolderSet', path: result[0].fsPath });
+                        vscode.window.showInformationMessage(`Snippet dizini ayarlandı: ${result[0].fsPath}`);
+                    }
+                    break;
+                }
+                case 'exportConnections': {
+                    const conns = vscode.workspace.getConfiguration('tsql-intellisense').get<any[]>('connections', []);
+                    const uri = await vscode.window.showSaveDialog({
+                        filters: { 'JSON': ['json'] },
+                        defaultUri: vscode.Uri.file('tsql-connections.json')
+                    });
+                    if (uri) {
+                        const fs = await import('fs');
+                        await fs.promises.writeFile(uri.fsPath, JSON.stringify(conns, null, 2), 'utf-8');
+                        vscode.window.showInformationMessage(`${conns.length} connection exported: ${uri.fsPath}`);
+                    }
+                    break;
+                }
+                case 'importConnections': {
+                    const result = await vscode.window.showOpenDialog({
+                        canSelectFiles: true,
+                        canSelectFolders: false,
+                        canSelectMany: false,
+                        openLabel: 'Connection JSON Seç',
+                        filters: { 'JSON': ['json'] }
+                    });
+                    if (result && result[0]) {
+                        try {
+                            const fs = await import('fs');
+                            const content = await fs.promises.readFile(result[0].fsPath, 'utf-8');
+                            const imported = JSON.parse(content);
+                            if (!Array.isArray(imported)) {
+                                vscode.window.showErrorMessage('Geçersiz dosya formatı — JSON array bekleniyor.');
+                                break;
+                            }
+                            const config = vscode.workspace.getConfiguration('tsql-intellisense');
+                            const existing = config.get<any[]>('connections', []);
+                            const existingNames = new Set(existing.map((c: any) => c.name));
+                            const newConns = imported.filter((c: any) => !existingNames.has(c.name));
+                            const merged = [...existing, ...newConns];
+                            await config.update('connections', merged, vscode.ConfigurationTarget.Global);
+                            vscode.window.showInformationMessage(`${newConns.length} yeni connection import edildi (${imported.length - newConns.length} duplicate atlandı).`);
+                            panel.webview.postMessage({ cmd: 'connectionsUpdated', count: merged.length });
+                        } catch (err: any) {
+                            vscode.window.showErrorMessage(`Import hatası: ${err.message}`);
+                        }
+                    }
+                    break;
+                }
             }
         });
 
@@ -117,7 +180,9 @@ export class StyleFormProvider {
         layout: { maxLineLength: number; placeCommasBeforeItems: boolean; alignItemsToTabStops: boolean },
         aliases: { assignAliases: boolean; includeAS: boolean; capitaliseAliases: boolean; prefixesToIgnore: string[] },
         styleName: string,
-        styleFile: string
+        styleFile: string,
+        snippetFolder: string,
+        connectionCount: number
     ): string {
         return /*html*/`<!DOCTYPE html>
 <html lang="en">
@@ -388,6 +453,10 @@ export class StyleFormProvider {
             <div class="menu-item disabled">CASE</div>
             <div class="menu-item disabled">IN</div>
             <div class="menu-item disabled">Operators</div>
+
+            <div class="section-title">Settings</div>
+            <div class="menu-item" onclick="showSection('paths')">Paths</div>
+            <div class="menu-item" onclick="showSection('connections')">Connections</div>
         </div>
 
         <div class="content">
@@ -526,6 +595,54 @@ export class StyleFormProvider {
                         Auto-closing for quotes, parentheses and brackets is handled by VS Code's built-in settings (editor.autoClosingBrackets, editor.autoClosingQuotes).
                     </div>
                 </div>
+
+                <!-- Paths Section -->
+                <div id="section-paths" style="display:none">
+                    <h2>Paths</h2>
+
+                    <div class="form-row">
+                        <label>Snippet folder:</label>
+                        <div style="display:flex; gap:8px; align-items:center; flex:1;">
+                            <input type="text" id="snippetFolder" value="${StyleFormProvider.escapeHtml(snippetFolder)}" readonly
+                                style="flex:1; padding:5px 8px; font-size:13px; font-family:var(--vscode-font-family); background:var(--vscode-input-background); color:var(--vscode-input-foreground); border:1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius:2px; outline:none;" />
+                            <button class="btn btn-secondary" onclick="browseSnippetFolder()">Browse...</button>
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <label>Style file:</label>
+                        <div style="display:flex; gap:8px; align-items:center; flex:1;">
+                            <input type="text" id="styleFilePath" value="${StyleFormProvider.escapeHtml(styleFile)}" readonly
+                                style="flex:1; padding:5px 8px; font-size:13px; font-family:var(--vscode-font-family); background:var(--vscode-input-background); color:var(--vscode-input-foreground); border:1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius:2px; outline:none;" />
+                            <button class="btn btn-secondary" onclick="loadFile()">Browse...</button>
+                        </div>
+                    </div>
+
+                    <div class="info-bar">
+                        <span class="icon">ℹ</span>
+                        Snippet folder: Redgate SQL Prompt snippet JSON dosyaları. Style file: Redgate formatlama stili (.json).
+                    </div>
+                </div>
+
+                <!-- Connections Section -->
+                <div id="section-connections" style="display:none">
+                    <h2>Connections</h2>
+
+                    <div class="info-bar">
+                        <span class="icon">ℹ</span>
+                        ${connectionCount} connection profile kayıtlı.
+                    </div>
+
+                    <h3>Import connections</h3>
+                    <p style="font-size:13px; margin-bottom:12px; color:var(--vscode-descriptionForeground);">
+                        Başka bir makinedeki bağlantı ayarlarını JSON dosyasından içe aktarın.
+                    </p>
+
+                    <div style="display:flex; gap:8px;">
+                        <button class="btn btn-secondary" onclick="importConnections()">Import from JSON...</button>
+                        <button class="btn btn-secondary" onclick="exportConnections()">Export to JSON...</button>
+                    </div>
+                </div>
             </div>
 
             <div class="preview">
@@ -631,6 +748,18 @@ export class StyleFormProvider {
             vscode.postMessage({ cmd: 'loadFile' });
         }
 
+        function browseSnippetFolder() {
+            vscode.postMessage({ cmd: 'browseSnippetFolder' });
+        }
+
+        function importConnections() {
+            vscode.postMessage({ cmd: 'importConnections' });
+        }
+
+        function exportConnections() {
+            vscode.postMessage({ cmd: 'exportConnections' });
+        }
+
         function reset() {
             vscode.postMessage({ cmd: 'reset' });
         }
@@ -657,6 +786,11 @@ export class StyleFormProvider {
             const msg = e.data;
             if (msg.cmd === 'saved') {
                 // Visual feedback handled by VS Code notification
+            } else if (msg.cmd === 'snippetFolderSet') {
+                document.getElementById('snippetFolder').value = msg.path;
+            } else if (msg.cmd === 'connectionsUpdated') {
+                document.querySelector('#section-connections .info-bar').innerHTML =
+                    '<span class="icon">ℹ</span> ' + msg.count + ' connection profile kayıtlı.';
             } else if (msg.cmd === 'styleLoaded') {
                 document.getElementById('reservedKeywords').value = msg.casing.reservedKeywords;
                 document.getElementById('builtInFunctions').value = msg.casing.builtInFunctions;
