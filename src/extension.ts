@@ -1290,13 +1290,15 @@ export function activate(context: vscode.ExtensionContext) {
                 if (!wordRange) { return; }
                 const word = editor.document.getText(wordRange);
                 const obj = schemaCache.findObject(word);
-                if (!obj) {
-                    vscode.window.showWarningMessage(`"${word}" not found in schema cache`);
-                    return;
+                if (obj) {
+                    const typeMap: Record<string, ObjectType> = { TABLE: 'table', VIEW: 'view', PROCEDURE: 'sp', FUNCTION: 'func' };
+                    objectName = obj.name;
+                    objectType = typeMap[obj.type] ?? 'sp';
+                } else {
+                    // Schema'da bulunamadı — tüm klasörlerde ara
+                    objectName = word;
+                    objectType = 'sp'; // will try all folders below
                 }
-                const typeMap: Record<string, ObjectType> = { TABLE: 'table', VIEW: 'view', PROCEDURE: 'sp', FUNCTION: 'func' };
-                objectName = obj.name;
-                objectType = typeMap[obj.type] ?? 'sp';
             } else {
                 objectName = item.objectName;
                 objectType = item.objectType;
@@ -1319,20 +1321,27 @@ export function activate(context: vscode.ExtensionContext) {
             };
             const subFolder = folderMap[objectType];
 
-            const filePath = vscode.Uri.file(`${projectPath}/dbo/${subFolder}/${objectName}.sql`);
-            try {
-                const doc = await vscode.workspace.openTextDocument(filePath);
-                await vscode.window.showTextDocument(doc);
-            } catch {
-                // Try without schema prefix
-                try {
-                    const altPath = vscode.Uri.file(`${projectPath}/${subFolder}/${objectName}.sql`);
-                    const doc = await vscode.workspace.openTextDocument(altPath);
-                    await vscode.window.showTextDocument(doc);
-                } catch {
-                    vscode.window.showWarningMessage(`File not found: ${filePath.fsPath}`);
+            // Try multiple folder patterns to find the file
+            const searchPaths = [
+                `${projectPath}/dbo/${subFolder}/${objectName}.sql`,
+                `${projectPath}/${subFolder}/${objectName}.sql`,
+            ];
+            // If objectType came from fallback, try all folders
+            if (!schemaCache.findObject(objectName)) {
+                const allFolders = ['Views', 'Stored Procedures', 'Functions', 'Tables'];
+                for (const f of allFolders) {
+                    searchPaths.push(`${projectPath}/dbo/${f}/${objectName}.sql`);
+                    searchPaths.push(`${projectPath}/${f}/${objectName}.sql`);
                 }
             }
+            for (const sp of searchPaths) {
+                try {
+                    const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(sp));
+                    await vscode.window.showTextDocument(doc);
+                    return;
+                } catch { /* try next */ }
+            }
+            vscode.window.showWarningMessage(`File not found: ${objectName}.sql in ${projectPath}`);
         })
     );
 
