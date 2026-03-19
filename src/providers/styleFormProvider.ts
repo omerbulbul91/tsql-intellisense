@@ -18,7 +18,7 @@ export class StyleFormProvider {
 
         const panel = vscode.window.createWebviewPanel(
             'tsqlStyleForm',
-            'Formatting Styles',
+            'SQL Prompt Options',
             column,
             { enableScripts: true, retainContextWhenHidden: true }
         );
@@ -195,6 +195,13 @@ export class StyleFormProvider {
             color: var(--vscode-disabledForeground);
             cursor: default;
         }
+        .sidebar .menu-item.sub {
+            padding-left: 28px;
+            font-size: 12px;
+        }
+        .sidebar .style-subs {
+            overflow: hidden;
+        }
 
         /* Content */
         .content {
@@ -346,19 +353,26 @@ export class StyleFormProvider {
 </head>
 <body>
     <div class="header">
-        <h1>Formatting Styles</h1>
+        <h1>SQL Prompt Options</h1>
         <span class="style-name" id="styleName">${StyleFormProvider.escapeHtml(styleName)}</span>
     </div>
 
     <div class="main">
         <div class="sidebar">
-            <div class="section-title">Global</div>
-            <div class="menu-item disabled">Whitespace</div>
-            <div class="menu-item" onclick="showSection('lists')">Lists</div>
-            <div class="menu-item disabled">Parentheses</div>
-            <div class="menu-item active" onclick="showSection('casing')">Casing</div>
+            <div class="section-title">Inserted code</div>
+            <div class="menu-item" onclick="showSection('aliases')">Aliases</div>
+            <div class="menu-item" onclick="showSection('specialChars')">Special characters</div>
 
-            <div class="section-title">Statements</div>
+            <div class="section-title">Format</div>
+            <div class="menu-item" onclick="toggleStyleSubs()" style="font-weight:600;">Styles</div>
+            <div class="style-subs">
+                <div class="menu-item sub active" onclick="showSection('casing')">Casing</div>
+                <div class="menu-item sub" onclick="showSection('lists')">Lists</div>
+                <div class="menu-item sub disabled">Whitespace</div>
+                <div class="menu-item sub disabled">Parentheses</div>
+            </div>
+
+            <div class="section-title" style="margin-top:8px">Statements</div>
             <div class="menu-item disabled">Data (DML)</div>
             <div class="menu-item disabled">Schema (DDL)</div>
             <div class="menu-item disabled">Control flow</div>
@@ -374,9 +388,6 @@ export class StyleFormProvider {
             <div class="menu-item disabled">CASE</div>
             <div class="menu-item disabled">IN</div>
             <div class="menu-item disabled">Operators</div>
-
-            <div class="section-title">Inserted code</div>
-            <div class="menu-item" onclick="showSection('aliases')">Aliases</div>
         </div>
 
         <div class="content">
@@ -487,6 +498,32 @@ export class StyleFormProvider {
                             style="width:300px; padding:8px; font-size:13px; font-family:var(--vscode-editor-fontFamily, monospace); background:var(--vscode-input-background); color:var(--vscode-input-foreground); border:1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius:2px; outline:none; resize:vertical;"
                             placeholder="One prefix per line, e.g.&#10;Cv_Rn&#10;Tb_Rn&#10;Tmp_Rn">${aliases.prefixesToIgnore.join('\n')}</textarea>
                         <span style="font-size:12px; color:var(--vscode-descriptionForeground); padding-top:8px;">One prefix per line</span>
+                    </div>
+                </div>
+
+                <!-- Special Characters Section -->
+                <div id="section-specialChars" style="display:none">
+                    <h2>Special characters</h2>
+
+                    <h3>Brackets</h3>
+                    <div class="checkbox-row" style="margin-left:0">
+                        <input type="checkbox" id="encloseInBrackets">
+                        <label for="encloseInBrackets">Enclose identifiers within square brackets [ ]</label>
+                    </div>
+                    <div class="checkbox-row" style="margin-left:0">
+                        <input type="checkbox" id="addParentheses" checked>
+                        <label for="addParentheses">Add parentheses ( ) when inserting a function or data type</label>
+                    </div>
+
+                    <h3>Closing characters</h3>
+                    <div class="checkbox-row" style="margin-left:0">
+                        <input type="checkbox" id="removeDuplicateClosing" checked>
+                        <label for="removeDuplicateClosing">Remove duplicate closing characters as you type</label>
+                    </div>
+
+                    <div class="info-bar">
+                        <span class="icon">ℹ</span>
+                        Auto-closing for quotes, parentheses and brackets is handled by VS Code's built-in settings (editor.autoClosingBrackets, editor.autoClosingQuotes).
                     </div>
                 </div>
             </div>
@@ -604,6 +641,16 @@ export class StyleFormProvider {
             document.querySelectorAll('[id^="section-"]').forEach(el => el.style.display = 'none');
             const sec = document.getElementById('section-' + name);
             if (sec) sec.style.display = '';
+            updatePreview();
+        }
+
+        function toggleStyleSubs() {
+            const subs = document.querySelector('.style-subs');
+            if (subs.style.display === 'none') {
+                subs.style.display = '';
+            } else {
+                subs.style.display = 'none';
+            }
         }
 
         window.addEventListener('message', (e) => {

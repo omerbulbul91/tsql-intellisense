@@ -95,7 +95,7 @@
       },
       {
         "command": "tsql-intellisense.openStyleSettings",
-        "title": "T-SQL IntelliSense: Formatting Styles"
+        "title": "T-SQL IntelliSense: SQL Prompt Options"
       },
       { "command": "tsql-intellisense.addConnection", "title": "T-SQL IntelliSense: Add Connection", "icon": "$(add)" },
       { "command": "tsql-intellisense.editConnection", "title": "T-SQL IntelliSense: Edit Connection", "icon": "$(edit)" },
