@@ -112,6 +112,11 @@
     "menus": {
       "editor/context": [
         {
+          "command": "tsql-intellisense.formatSql",
+          "when": "editorLangId == sql && tsqlIntellisense.active",
+          "group": "1_modification@1"
+        },
+        {
           "command": "tsql-intellisense.selectInObjectExplorer",
           "when": "editorLangId == sql && tsqlIntellisense.active",
           "group": "z_tsql@1"
