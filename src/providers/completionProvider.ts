@@ -267,14 +267,16 @@ export class TsqlCompletionProvider implements vscode.CompletionItemProvider {
         }
 
         for (const obj of objects) {
-            const item = new vscode.CompletionItem(obj.name);
+            const qualifiedName = `dbo.${obj.name}`;
+            const item = new vscode.CompletionItem(qualifiedName);
             item.kind = type === 'TRIGGER' ? vscode.CompletionItemKind.Event
                 : type === 'FUNCTION' ? vscode.CompletionItemKind.Function
                 : type === 'VIEW' ? vscode.CompletionItemKind.Interface
                 : vscode.CompletionItemKind.Class;
             item.detail = obj.type;
             item.sortText = `0_${obj.name}`;
-            item.filterText = obj.name;
+            item.filterText = `${obj.name} dbo.${obj.name}`;
+            item.insertText = qualifiedName;
             // ALTER TABLE sadece isim tamamlar, script açmaz
             // Diğerleri (VIEW, FUNCTION, TRIGGER) seçilince definition açar
             if (type !== 'TABLE') {
