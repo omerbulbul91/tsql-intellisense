@@ -500,6 +500,10 @@ export class StyleFormProvider {
     </style>
 </head>
 <body>
+    <div style="padding:6px 24px; font-size:12px; color:var(--vscode-descriptionForeground); background:var(--vscode-editorWidget-background); border-bottom:1px solid var(--vscode-panel-border);">
+        T-SQL IntelliSense is a code auto-completion and formatting tool for writing SQL queries.
+    </div>
+
     <div class="header">
         <h1>SQL Prompt Options</h1>
         <span class="style-name" id="styleName">${StyleFormProvider.escapeHtml(styleName)}</span>
