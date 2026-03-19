@@ -492,6 +492,11 @@ export function activate(context: vscode.ExtensionContext) {
                         const prefixTokens = tokenize('CREATE OR ALTER ');
                         const casedPrefix = applyCasing(prefixTokens, styleLoader.getCasingOptions());
                         script = script.replace(/^(\s*)CREATE\s+/i, '$1' + casedPrefix);
+                        // Ensure schema prefix (dbo.) is present after object type keyword
+                        script = script.replace(
+                            /^(.*?(?:VIEW|PROC(?:EDURE)?|FUNCTION|TRIGGER)\s+)(?![\w]*\.)([\w]+)/i,
+                            '$1dbo.$2'
+                        );
                     }
                 } catch {}
             }
