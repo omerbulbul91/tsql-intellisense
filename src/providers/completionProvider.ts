@@ -461,6 +461,9 @@ export class TsqlCompletionProvider implements vscode.CompletionItemProvider {
 
         const addedConditions = new Set<string>();
         let sortIndex = 0;
+        const joinConfig = vscode.workspace.getConfiguration('tsql-intellisense');
+        const matchNames = joinConfig.get<boolean>('joinMatchingNames', true);
+        const swapOrder = joinConfig.get<boolean>('joinSwapColumnOrder', false);
 
         for (const other of otherAliases) {
             const otherColumns = dbName
@@ -480,7 +483,9 @@ export class TsqlCompletionProvider implements vscode.CompletionItemProvider {
                     otherCol = fk.parentColumn;
                 }
 
-                const label = `${joinedAlias}.${joinCol} = ${other.alias}.${otherCol}`;
+                const label = swapOrder
+                    ? `${other.alias}.${otherCol} = ${joinedAlias}.${joinCol}`
+                    : `${joinedAlias}.${joinCol} = ${other.alias}.${otherCol}`;
                 if (addedConditions.has(label.toLowerCase())) { continue; }
                 addedConditions.add(label.toLowerCase());
 
@@ -488,20 +493,22 @@ export class TsqlCompletionProvider implements vscode.CompletionItemProvider {
                 item.kind = vscode.CompletionItemKind.Reference;
                 item.detail = `FK: ${fk.fkName}`;
                 item.sortText = `0_${String(sortIndex++).padStart(4, '0')}`;
-                // filterText starts with alias so typing "r" or "rol" matches
                 item.filterText = `${joinedAlias} ${joinCol} ${otherCol}`;
                 item.insertText = label;
                 items.push(item);
             }
 
-            // 2. Same-name columns
+            // 2. Same-name columns (controlled by joinMatchingNames setting)
+            if (!matchNames) { continue; }
             for (const jCol of joinedColumns) {
                 const matchingCol = otherColumns.find(
                     c => c.name.toLowerCase() === jCol.name.toLowerCase()
                 );
                 if (!matchingCol) { continue; }
 
-                const label = `${joinedAlias}.${jCol.name} = ${other.alias}.${matchingCol.name}`;
+                const label = swapOrder
+                    ? `${other.alias}.${matchingCol.name} = ${joinedAlias}.${jCol.name}`
+                    : `${joinedAlias}.${jCol.name} = ${other.alias}.${matchingCol.name}`;
                 if (addedConditions.has(label.toLowerCase())) { continue; }
                 addedConditions.add(label.toLowerCase());
 

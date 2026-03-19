@@ -62,6 +62,11 @@ export class StyleFormProvider {
                         await config.update('aliases.capitaliseAliases', msg.aliases.capitaliseAliases, vscode.ConfigurationTarget.Global);
                         await config.update('aliases.prefixesToIgnore', msg.aliases.prefixesToIgnore, vscode.ConfigurationTarget.Global);
                     }
+                    // Join conditions
+                    if (msg.joinConditions) {
+                        await config.update('joinMatchingNames', msg.joinConditions.matchingNames, vscode.ConfigurationTarget.Global);
+                        await config.update('joinSwapColumnOrder', msg.joinConditions.swapOrder, vscode.ConfigurationTarget.Global);
+                    }
                     // Insertion keys
                     if (msg.insertionKeys) {
                         await config.update('insertionKeys', msg.insertionKeys, vscode.ConfigurationTarget.Global);
@@ -1087,6 +1092,10 @@ export class StyleFormProvider {
                     includeAS: document.getElementById('includeAS').checked,
                     capitaliseAliases: document.getElementById('capitaliseAliases').checked,
                     prefixesToIgnore: prefixes,
+                },
+                joinConditions: {
+                    matchingNames: document.getElementById('joinMatchingNames').checked,
+                    swapOrder: document.getElementById('swapJoinColumnOrder').checked,
                 },
                 insertionKeys: {
                     space: document.getElementById('ik_space').checked,
