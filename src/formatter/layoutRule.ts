@@ -172,15 +172,10 @@ function splitStatements(tokens: Token[]): StatementParts[] {
             continue;
         }
         if (depth === 0 && t.type === 'keyword' && t.value.toUpperCase() === 'GO') {
-            flushStatement('');
-            // GO itself becomes a separate "statement" with newline prefix
-            statements.push({ clauses: [], prefix: '\n', suffix: t.value });
+            flushStatement('\n' + t.value + '\n');
             i++;
             // Skip whitespace after GO
-            while (i < tokens.length && tokens[i].type === 'whitespace') {
-                statements[statements.length - 1].suffix += tokens[i].value;
-                i++;
-            }
+            while (i < tokens.length && tokens[i].type === 'whitespace') i++;
             continue;
         }
 

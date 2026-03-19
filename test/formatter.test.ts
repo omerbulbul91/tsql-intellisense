@@ -363,7 +363,7 @@ assertLayout(
 // --- GO preserved ---
 assertLayout(
     'select a from T\ngo',
-    'Select  a\nFrom    T\nGo',
+    'Select  a\nFrom    T\nGo\n',
     defaultLayout, 'GO preserved'
 );
 
