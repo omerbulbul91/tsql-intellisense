@@ -475,21 +475,45 @@ export function activate(context: vscode.ExtensionContext) {
             if (obj && obj.type === 'TABLE') {
                 script = buildObjectScript(objName);
             } else {
-                // SP, VIEW, FUNCTION, TRIGGER — use OBJECT_DEFINITION
-                try {
-                    const result = await connectionManager.executeQuery(
-                        `SELECT COALESCE(
-                            OBJECT_DEFINITION(OBJECT_ID(@objectName)),
-                            OBJECT_DEFINITION(OBJECT_ID(@objectName, 'TR'))
-                        ) AS [definition]`,
-                        { objectName: { type: TYPES.NVarChar, value: objName } }
-                    );
-                    if (result.rows.length > 0 && result.rows[0]['definition']) {
-                        script = result.rows[0]['definition'] as string;
-                        // CREATE → CREATE OR ALTER dönüşümü
-                        script = script.replace(/^(\s*)CREATE\s+/i, '$1CREATE OR ALTER ');
+                // Try project file first (preserves user formatting)
+                const profile = connectionManager.currentProfile;
+                if (profile) {
+                    const dbName = profile.database;
+                    const projectPath = (profile as any).databaseProjects?.[dbName]
+                        ?? (profile as any).databaseProjects?.[dbName?.toLowerCase()]
+                        ?? (profile as any).projectPath;
+                    if (projectPath) {
+                        const fs = require('fs');
+                        const typeMap: Record<string, string> = { VIEW: 'Views', PROCEDURE: 'Stored Procedures', FUNCTION: 'Functions', TRIGGER: 'Triggers' };
+                        const subDir = obj ? typeMap[obj.type] || '' : '';
+                        const candidates = subDir
+                            ? [`${projectPath}/dbo/${subDir}/${objName}.sql`, `${projectPath}/${subDir}/${objName}.sql`]
+                            : Object.values(typeMap).flatMap(d => [`${projectPath}/dbo/${d}/${objName}.sql`, `${projectPath}/${d}/${objName}.sql`]);
+                        for (const fp of candidates) {
+                            if (fs.existsSync(fp)) {
+                                script = fs.readFileSync(fp, 'utf-8');
+                                break;
+                            }
+                        }
                     }
-                } catch {}
+                }
+
+                // Fallback: fetch from DB
+                if (!script) {
+                    try {
+                        const result = await connectionManager.executeQuery(
+                            `SELECT COALESCE(
+                                OBJECT_DEFINITION(OBJECT_ID(@objectName)),
+                                OBJECT_DEFINITION(OBJECT_ID(@objectName, 'TR'))
+                            ) AS [definition]`,
+                            { objectName: { type: TYPES.NVarChar, value: objName } }
+                        );
+                        if (result.rows.length > 0 && result.rows[0]['definition']) {
+                            script = result.rows[0]['definition'] as string;
+                            script = script.replace(/^(\s*)CREATE\s+/i, '$1CREATE OR ALTER ');
+                        }
+                    } catch {}
+                }
             }
 
             if (!script) {
@@ -499,14 +523,12 @@ export function activate(context: vscode.ExtensionContext) {
 
             const editor = vscode.window.activeTextEditor;
             if (editor) {
-                // Format the script with current style settings (casing, layout)
-                const { SqlFormatter } = require('./formatter/sqlFormatter');
-                const fmt = new SqlFormatter(styleLoader);
-                const formatted = fmt.format(script! + '\nGO\n');
+                // Insert as-is (no formatting — preserves user's saved format)
+                const scriptWithGo = script!.trimEnd() + '\nGO\n';
                 const cursorLine = editor.selection.active.line;
                 const lineRange = editor.document.lineAt(cursorLine).rangeIncludingLineBreak;
                 await editor.edit(editBuilder => {
-                    editBuilder.replace(lineRange, formatted);
+                    editBuilder.replace(lineRange, scriptWithGo);
                 });
             }
         })

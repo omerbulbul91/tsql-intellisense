@@ -55,7 +55,7 @@ export class ProjectSync {
             if (!ddl) { continue; }
 
             try {
-                await this.syncObject(ddl, projectPath, buildTableScript);
+                await this.syncObject(ddl, projectPath, buildTableScript, batch.trim());
             } catch (err: any) {
                 vscode.window.showWarningMessage(`Project Sync: ${ddl.objectName} — ${err.message}`);
             }
@@ -65,7 +65,8 @@ export class ProjectSync {
     private async syncObject(
         ddl: DdlInfo,
         projectPath: string,
-        buildTableScript: (tableName: string) => string | null
+        buildTableScript: (tableName: string) => string | null,
+        batchText?: string
     ): Promise<void> {
         let createScript: string | null = null;
 
@@ -73,19 +74,20 @@ export class ProjectSync {
             // Force reload schema cache for this table, then rebuild script
             await this.schemaCache.loadColumnsFor(ddl.objectName, true);
             createScript = buildTableScript(ddl.objectName);
+        } else if (batchText) {
+            // Use the editor text as-is (preserves user formatting)
+            createScript = batchText;
         } else {
-            // PROC, VIEW, FUNCTION, TRIGGER: fetch canonical CREATE from DB
+            // Fallback: fetch from DB
             createScript = await this.fetchObjectDefinition(ddl.objectName);
+            if (createScript) {
+                createScript = createScript.replace(/^(\s*)CREATE\s+/i, '$1CREATE OR ALTER ');
+            }
         }
 
         if (!createScript) {
             vscode.window.showWarningMessage(`Project Sync: Could not retrieve definition for ${ddl.objectName}`);
             return;
-        }
-
-        // Normalize to CREATE OR ALTER (for non-TABLE objects)
-        if (ddl.objectType !== 'TABLE') {
-            createScript = createScript.replace(/^(\s*)CREATE\s+/i, '$1CREATE OR ALTER ');
         }
 
         // Resolve file path
