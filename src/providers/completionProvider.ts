@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { SchemaCache } from '../cache/schemaCache';
 import { QueryRunner } from './queryRunner';
 import { SqlContextType, SqlContext, detectContext, getCurrentStatement, extractNonAggColumns } from '../parser/sqlContext';
+import { FUNCTIONS } from '../formatter/sqlTokenizer';
 
 export class TsqlCompletionProvider implements vscode.CompletionItemProvider {
     constructor(private schemaCache: SchemaCache, private queryRunner?: QueryRunner) {}
@@ -853,12 +854,52 @@ export class TsqlCompletionProvider implements vscode.CompletionItemProvider {
             { label: 'STRING_AGG', snippet: 'STRING_AGG(${1:expression}, ${2:\', \'})', detail: 'Aggregate: concatenate strings' },
         ];
 
+        // Snippet-based functions (with tab stops)
+        const snippetLabels = new Set<string>();
         for (const fn of sqlFunctions) {
+            snippetLabels.add(fn.label);
             const item = new vscode.CompletionItem(fn.label, vscode.CompletionItemKind.Function);
             item.detail = fn.detail;
             item.sortText = `1_${fn.label}`;
             item.filterText = fn.label;
             item.insertText = new vscode.SnippetString(fn.snippet);
+            if (replaceRange) {
+                item.range = replaceRange;
+            }
+            items.push(item);
+        }
+
+        // All remaining built-in functions from tokenizer (simple parentheses)
+        for (const fnName of FUNCTIONS) {
+            if (fnName.startsWith('@@')) continue; // system vars, not callable
+            if (snippetLabels.has(fnName)) continue; // already added as snippet
+            const item = new vscode.CompletionItem(fnName, vscode.CompletionItemKind.Function);
+            item.detail = 'Built-in function';
+            item.sortText = `2_${fnName}`;
+            item.filterText = fnName;
+            item.insertText = new vscode.SnippetString(`${fnName}(\${1})`);
+            if (replaceRange) {
+                item.range = replaceRange;
+            }
+            items.push(item);
+        }
+
+        // SELECT keywords: DISTINCT, TOP, ALL, NULL, CASE, EXISTS
+        const selectKeywords = [
+            { label: 'DISTINCT', detail: 'Remove duplicate rows' },
+            { label: 'TOP', snippet: 'TOP ${1:100}', detail: 'Limit result rows' },
+            { label: 'ALL', detail: 'Return all rows (default)' },
+            { label: 'NULL', detail: 'NULL value' },
+            { label: 'EXISTS', snippet: 'EXISTS(${1:SELECT 1 FROM ${2:table}})', detail: 'Existence check' },
+        ];
+        for (const kw of selectKeywords) {
+            const item = new vscode.CompletionItem(kw.label, vscode.CompletionItemKind.Keyword);
+            item.detail = kw.detail;
+            item.sortText = `3_${kw.label}`;
+            item.filterText = kw.label;
+            if ((kw as any).snippet) {
+                item.insertText = new vscode.SnippetString((kw as any).snippet);
+            }
             if (replaceRange) {
                 item.range = replaceRange;
             }
