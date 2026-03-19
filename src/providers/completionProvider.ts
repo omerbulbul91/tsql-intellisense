@@ -528,7 +528,8 @@ export class TsqlCompletionProvider implements vscode.CompletionItemProvider {
             item.filterText = obj.name;
             // Insert table name + alias (without ⚡)
             if (alias) {
-                item.insertText = `${obj.name} ${alias}`;
+                const includeAs = vscode.workspace.getConfiguration('tsql-intellisense').get<boolean>('aliases.includeAS', false);
+                item.insertText = includeAs ? `${obj.name} AS ${alias}` : `${obj.name} ${alias}`;
             } else {
                 item.insertText = obj.name;
             }
@@ -689,18 +690,42 @@ export class TsqlCompletionProvider implements vscode.CompletionItemProvider {
 
     /** Generate a short alias from a table name */
     private generateAlias(tableName: string): string | null {
-        // Remove prefix like RN06_, CV04_, SP06_, IT01_, TMP06_ etc.
-        const withoutPrefix = tableName.replace(/^[A-Z]{1,4}\d{1,3}_/, '');
-        if (!withoutPrefix) { return null; }
+        const config = vscode.workspace.getConfiguration('tsql-intellisense');
+        const assignAliases = config.get<boolean>('aliases.assignAliases', true);
+        if (!assignAliases) return null;
+
+        const prefixes = config.get<string[]>('aliases.prefixesToIgnore', []);
+        const capitalise = config.get<boolean>('aliases.capitaliseAliases', false);
+
+        // Remove configured prefixes (longest match first)
+        let withoutPrefix = tableName;
+        if (prefixes.length > 0) {
+            const sorted = [...prefixes].sort((a, b) => b.length - a.length);
+            for (const pfx of sorted) {
+                if (tableName.startsWith(pfx)) {
+                    withoutPrefix = tableName.slice(pfx.length);
+                    break;
+                }
+            }
+        }
+
+        // Fallback: remove generic prefix pattern (RN06_, CV04_, etc.)
+        if (withoutPrefix === tableName) {
+            withoutPrefix = tableName.replace(/^[A-Z]{1,4}\d{1,3}_/, '');
+        }
+
+        if (!withoutPrefix) return null;
 
         // Get uppercase letters as alias (e.g. StokAmbarNo → SAN, HareketFisM → HFM)
         const uppers = withoutPrefix.match(/[A-Z]/g);
+        let alias: string;
         if (uppers && uppers.length >= 2) {
-            return uppers.join('').toLowerCase();
+            alias = uppers.join('');
+        } else {
+            alias = withoutPrefix[0].toUpperCase();
         }
 
-        // Fallback: first letter
-        return withoutPrefix[0].toLowerCase();
+        return capitalise ? alias.toUpperCase() : alias.toLowerCase();
     }
 
     private completeProcedureNames(prefix?: string, dbName?: string): vscode.CompletionList {

@@ -224,7 +224,7 @@
       },
       {
         "command": "tsql-intellisense.formatSql",
-        "key": "ctrl+k y",
+        "key": "ctrl+k ctrl+y",
         "when": "editorLangId == sql && tsqlIntellisense.active"
       }
     ],
@@ -359,6 +359,27 @@
           "type": "string",
           "default": "",
           "description": "Redgate SQL Prompt snippet JSON dosyalarını içeren dizin yolu"
+        },
+        "tsql-intellisense.aliases.assignAliases": {
+          "type": "boolean",
+          "default": true,
+          "description": "Tablo/view seçildiğinde otomatik alias ata"
+        },
+        "tsql-intellisense.aliases.includeAS": {
+          "type": "boolean",
+          "default": false,
+          "description": "Alias tanımında AS kullan (FROM Table AS t)"
+        },
+        "tsql-intellisense.aliases.capitaliseAliases": {
+          "type": "boolean",
+          "default": false,
+          "description": "Alias'ları büyük harfle oluştur (SA yerine sa)"
+        },
+        "tsql-intellisense.aliases.prefixesToIgnore": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [],
+          "description": "Alias üretirken yok sayılacak tablo adı prefix'leri (ör. Cv_Rn, Tb_Rn)"
         },
         "tsql-intellisense.maxLineLength": {
           "type": "number",
