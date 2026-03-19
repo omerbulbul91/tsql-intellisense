@@ -507,7 +507,7 @@ export function activate(context: vscode.ExtensionContext) {
                 const { applyCasing: caseFn } = require('./formatter/casingRule');
                 const { tokenize: tok } = require('./formatter/sqlTokenizer');
                 const goText = caseFn(tok('GO'), styleLoader.getCasingOptions());
-                const scriptWithGo = script!.trimEnd() + '\n' + goText + '\n';
+                const scriptWithGo = script!.replace(/[\r\n\s]+$/, '') + '\n' + goText + '\n';
                 const cursorLine = editor.selection.active.line;
                 const lineRange = editor.document.lineAt(cursorLine).rangeIncludingLineBreak;
                 await editor.edit(editBuilder => {
