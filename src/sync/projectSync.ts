@@ -77,11 +77,24 @@ export class ProjectSync {
         } else if (batchText) {
             // Use the editor text as-is (preserves user formatting)
             createScript = batchText;
+            // Ensure CREATE OR ALTER prefix
+            if (!/CREATE\s+OR\s+ALTER/i.test(createScript)) {
+                createScript = createScript.replace(/^(\s*)CREATE\s+/i, '$1CREATE OR ALTER ');
+            }
+            // Ensure schema prefix (dbo.)
+            createScript = createScript.replace(
+                /^(.*?(?:VIEW|PROC(?:EDURE)?|FUNCTION|TRIGGER)\s+)(?![\w]*\.)([\w]+)/i,
+                '$1dbo.$2'
+            );
         } else {
             // Fallback: fetch from DB
             createScript = await this.fetchObjectDefinition(ddl.objectName);
             if (createScript) {
                 createScript = createScript.replace(/^(\s*)CREATE\s+/i, '$1CREATE OR ALTER ');
+                createScript = createScript.replace(
+                    /^(.*?(?:VIEW|PROC(?:EDURE)?|FUNCTION|TRIGGER)\s+)(?![\w]*\.)([\w]+)/i,
+                    '$1dbo.$2'
+                );
             }
         }
 
