@@ -63,6 +63,16 @@ export class StyleLoader {
         }
     }
 
+    applyOverrides(casing: { reservedKeywords?: string; builtInFunctions?: string; builtInDataTypes?: string }): void {
+        this.options = {
+            reservedKeywords: validateMode(casing.reservedKeywords, this.options.reservedKeywords),
+            builtInFunctions: validateMode(casing.builtInFunctions, this.options.builtInFunctions),
+            builtInDataTypes: validateMode(casing.builtInDataTypes, this.options.builtInDataTypes),
+        };
+        this.styleName = 'Custom (manual)';
+        this.log(`Applied manual overrides: keywords=${this.options.reservedKeywords}, functions=${this.options.builtInFunctions}, datatypes=${this.options.builtInDataTypes}`);
+    }
+
     getCasingOptions(): CasingOptions { return this.options; }
     getStyleName(): string { return this.styleName; }
 

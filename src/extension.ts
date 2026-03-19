@@ -14,6 +14,7 @@ import { TsqlCodeLensProvider } from './providers/sqlCodeLensProvider';
 import { ConnectionFormProvider } from './providers/connectionFormProvider';
 import { StyleLoader } from './formatter/styleLoader';
 import { FormatterProvider } from './providers/formatterProvider';
+import { StyleFormProvider } from './providers/styleFormProvider';
 
 let connectionManager: ConnectionManager;
 let schemaCache: SchemaCache;
@@ -226,6 +227,8 @@ export function activate(context: vscode.ExtensionContext) {
     const styleLoader = new StyleLoader(styleOutputChannel);
     const styleFile = vscode.workspace.getConfiguration('tsql-intellisense').get<string>('styleFile', '');
     styleLoader.loadFromFile(styleFile);
+    const styleOverrides = vscode.workspace.getConfiguration('tsql-intellisense').get<any>('styleOverrides');
+    if (styleOverrides) { styleLoader.applyOverrides(styleOverrides); }
 
     const formatterProvider = new FormatterProvider(styleLoader);
     context.subscriptions.push(
@@ -256,6 +259,13 @@ export function activate(context: vscode.ExtensionContext) {
                 await vscode.workspace.getConfiguration('tsql-intellisense').update('styleFile', result[0].fsPath, vscode.ConfigurationTarget.Global);
                 vscode.window.showInformationMessage(`Stil dosyası ayarlandı: ${result[0].fsPath}`);
             }
+        })
+    );
+
+    // Open Style Settings UI
+    context.subscriptions.push(
+        vscode.commands.registerCommand('tsql-intellisense.openStyleSettings', () => {
+            StyleFormProvider.show(context, styleLoader);
         })
     );
 

@@ -93,6 +93,10 @@
         "command": "tsql-intellisense.setStyleFile",
         "title": "T-SQL IntelliSense: Set Style File"
       },
+      {
+        "command": "tsql-intellisense.openStyleSettings",
+        "title": "T-SQL IntelliSense: Formatting Styles"
+      },
       { "command": "tsql-intellisense.addConnection", "title": "T-SQL IntelliSense: Add Connection", "icon": "$(add)" },
       { "command": "tsql-intellisense.editConnection", "title": "T-SQL IntelliSense: Edit Connection", "icon": "$(edit)" },
       { "command": "tsql-intellisense.deleteConnection", "title": "T-SQL IntelliSense: Delete Connection", "icon": "$(trash)" },
@@ -360,6 +364,11 @@
           "type": "string",
           "default": "",
           "description": "Redgate SQL Prompt stil dosyası (.json) yolu"
+        },
+        "tsql-intellisense.styleOverrides": {
+          "type": "object",
+          "default": null,
+          "description": "Manuel casing ayarları (Formatting Styles panelinden kaydedilir)"
         }
       }
     }
