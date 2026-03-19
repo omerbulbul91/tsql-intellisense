@@ -623,7 +623,7 @@ export class StyleFormProvider {
 
                     <h3>VS Code integration</h3>
                     <div class="checkbox-row" style="margin-left:0">
-                        <input type="checkbox" id="disableWordSuggestions" checked>
+                        <input type="checkbox" id="disableWordSuggestions">
                         <label for="disableWordSuggestions">Disable VS Code word-based suggestions for SQL files</label>
                     </div>
                     <p style="font-size:12px; color:var(--vscode-descriptionForeground); margin-left:24px;">
