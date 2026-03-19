@@ -172,7 +172,7 @@ import { applyCasingInPlace } from '../src/formatter/casingRule';
 let layoutPassed = 0;
 let layoutFailed = 0;
 
-const defaultLayout: LayoutOptions = { maxLineLength: 120, placeCommasBeforeItems: true, alignItemsToTabStops: true };
+const defaultLayout: LayoutOptions = { maxLineLength: 120, placeCommasBeforeItems: true, alignItemsToTabStops: true, qualifyObjectNames: false };
 
 function assertLayout(input: string, expected: string, options: LayoutOptions, testName: string) {
     const tokens = tokenize(input);
@@ -251,7 +251,7 @@ assertLayout(
 assertLayout(
     'select col1, col2, col3, col4, col5, col6, col7, col8, col9, col10 from T',
     'Select  col1, col2, col3, col4, col5, col6, col7, col8, col9, col10\nFrom    T',
-    { maxLineLength: 80, placeCommasBeforeItems: true, alignItemsToTabStops: true },
+    { maxLineLength: 80, placeCommasBeforeItems: true, alignItemsToTabStops: true, qualifyObjectNames: false },
     'wrap within maxLineLength'
 );
 
@@ -259,7 +259,7 @@ assertLayout(
 assertLayout(
     'select very_long_column_name_1, very_long_column_name_2, very_long_column_name_3 from T',
     'Select  very_long_column_name_1, very_long_column_name_2\n      , very_long_column_name_3\nFrom    T',
-    { maxLineLength: 60, placeCommasBeforeItems: true, alignItemsToTabStops: true },
+    { maxLineLength: 60, placeCommasBeforeItems: true, alignItemsToTabStops: true, qualifyObjectNames: false },
     'wrap with comma before on continuation'
 );
 
@@ -267,7 +267,7 @@ assertLayout(
 assertLayout(
     'select very_long_column_name_1, very_long_column_name_2, very_long_column_name_3 from T',
     'Select  very_long_column_name_1, very_long_column_name_2,\n        very_long_column_name_3\nFrom    T',
-    { maxLineLength: 60, placeCommasBeforeItems: false, alignItemsToTabStops: true },
+    { maxLineLength: 60, placeCommasBeforeItems: false, alignItemsToTabStops: true, qualifyObjectNames: false },
     'wrap with comma after'
 );
 
@@ -275,7 +275,7 @@ assertLayout(
 assertLayout(
     'select a, b, c, d, e, f, g, h from T',
     'Select  a, b, c, d, e, f, g, h\nFrom    T',
-    { maxLineLength: 0, placeCommasBeforeItems: true, alignItemsToTabStops: true },
+    { maxLineLength: 0, placeCommasBeforeItems: true, alignItemsToTabStops: true, qualifyObjectNames: false },
     'maxLineLength=0 no wrap'
 );
 
@@ -283,7 +283,7 @@ assertLayout(
 assertLayout(
     'select a, b from T',
     'Select a, b\nFrom T',
-    { maxLineLength: 120, placeCommasBeforeItems: true, alignItemsToTabStops: false },
+    { maxLineLength: 120, placeCommasBeforeItems: true, alignItemsToTabStops: false, qualifyObjectNames: false },
     'no padding when alignItemsToTabStops=false'
 );
 
@@ -331,7 +331,7 @@ assertLayout(
 
 // --- JOIN formatting ---
 const joinLayout: LayoutOptions = {
-    maxLineLength: 120, placeCommasBeforeItems: true, alignItemsToTabStops: true,
+    maxLineLength: 120, placeCommasBeforeItems: true, alignItemsToTabStops: true, qualifyObjectNames: false,
     join: { placeOnNewLine: false, placeConditionOnNewLine: true, conditionAlignment: 'toTable' }
 };
 
@@ -369,7 +369,7 @@ assertLayout(
 
 // --- JOIN condition inline ---
 const joinInline: LayoutOptions = {
-    maxLineLength: 120, placeCommasBeforeItems: true, alignItemsToTabStops: true,
+    maxLineLength: 120, placeCommasBeforeItems: true, alignItemsToTabStops: true, qualifyObjectNames: false,
     join: { placeOnNewLine: false, placeConditionOnNewLine: false, conditionAlignment: 'toTable' }
 };
 

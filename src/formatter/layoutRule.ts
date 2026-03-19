@@ -10,6 +10,7 @@ export interface LayoutOptions {
     maxLineLength: number;
     placeCommasBeforeItems: boolean;
     alignItemsToTabStops: boolean;
+    qualifyObjectNames: boolean;
     join?: JoinOptions;
 }
 
@@ -396,20 +397,20 @@ function formatFromWithJoins(clause: Clause, kwPadded: string, paddingWidth: num
     const parts = parseJoinParts(clause.rawTokens);
 
     if (parts.length === 0) {
-        // No joins found, fall back to simple format
-        return kwPadded + clause.items.join(', ');
+        const items = options.qualifyObjectNames ? clause.items.map(it => qualifyTable(it, true)) : clause.items;
+        return kwPadded + items.join(', ');
     }
 
     const joinIndent = ' '.repeat(paddingWidth);
     const lines: string[] = [];
 
     // First part: FROM table
-    lines.push(kwPadded + parts[0].table);
+    lines.push(kwPadded + qualifyTable(parts[0].table, options.qualifyObjectNames));
 
     // Each JOIN
     for (let i = 1; i < parts.length; i++) {
         const p = parts[i];
-        const joinLine = joinIndent + p.joinKeyword + ' ' + p.table;
+        const joinLine = joinIndent + p.joinKeyword + ' ' + qualifyTable(p.table, options.qualifyObjectNames);
 
         if (p.onKeyword && p.condition) {
             if (joinOpts.placeConditionOnNewLine) {
@@ -525,4 +526,22 @@ function parseJoinParts(tokens: Token[]): JoinPart[] {
     }
 
     return parts;
+}
+
+/**
+ * Add dbo. prefix to table name if no schema qualifier present.
+ * "TableName alias" → "dbo.TableName alias"
+ * "dbo.TableName alias" → unchanged
+ * "(subquery) alias" → unchanged
+ */
+function qualifyTable(tableStr: string, qualify: boolean): string {
+    if (!qualify) return tableStr;
+    // Skip if already qualified (has dot), starts with ( (subquery), or is empty
+    const trimmed = tableStr.trim();
+    if (!trimmed || trimmed.startsWith('(')) return tableStr;
+    // Check first word for dot
+    const firstWord = trimmed.split(/\s/)[0];
+    if (firstWord.includes('.')) return tableStr;
+    // Add dbo. prefix
+    return tableStr.replace(/^(\s*)(\S+)/, '$1dbo.$2');
 }

@@ -573,12 +573,15 @@ export class TsqlCompletionProvider implements vscode.CompletionItemProvider {
                 : obj.type;
             item.sortText = `0_${obj.name}`;
             item.filterText = obj.name;
-            // Insert table name + alias (without ⚡)
+            // Insert table name with schema + alias (without ⚡)
+            const config = vscode.workspace.getConfiguration('tsql-intellisense');
+            const qualifyWithOwner = config.get<boolean>('qualifyWithOwner', true);
+            const qualifiedName = qualifyWithOwner ? `dbo.${obj.name}` : obj.name;
             if (alias) {
-                const includeAs = vscode.workspace.getConfiguration('tsql-intellisense').get<boolean>('aliases.includeAS', false);
-                item.insertText = includeAs ? `${obj.name} AS ${alias}` : `${obj.name} ${alias}`;
+                const includeAs = config.get<boolean>('aliases.includeAS', false);
+                item.insertText = includeAs ? `${qualifiedName} AS ${alias}` : `${qualifiedName} ${alias}`;
             } else {
-                item.insertText = obj.name;
+                item.insertText = qualifiedName;
             }
 
             // Build documentation: CREATE script + trigger scripts

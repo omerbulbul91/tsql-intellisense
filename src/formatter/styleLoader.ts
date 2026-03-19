@@ -40,6 +40,7 @@ const DEFAULT_LAYOUT: LayoutOptions = {
     maxLineLength: 120,
     placeCommasBeforeItems: true,
     alignItemsToTabStops: true,
+    qualifyObjectNames: true,
     join: { ...DEFAULT_JOIN },
 };
 
@@ -88,9 +89,10 @@ export class StyleLoader {
             // Layout
             if (style.lists) {
                 this.layoutOptions = {
-                    maxLineLength: this.layoutOptions.maxLineLength, // preserved from settings
+                    maxLineLength: this.layoutOptions.maxLineLength,
                     placeCommasBeforeItems: style.lists.placeCommasBeforeItems ?? DEFAULT_LAYOUT.placeCommasBeforeItems,
                     alignItemsToTabStops: style.lists.alignItemsToTabStops ?? DEFAULT_LAYOUT.alignItemsToTabStops,
+                    qualifyObjectNames: this.layoutOptions.qualifyObjectNames,
                 };
             } else {
                 this.layoutOptions = { ...DEFAULT_LAYOUT, maxLineLength: this.layoutOptions.maxLineLength };

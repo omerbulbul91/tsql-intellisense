@@ -393,6 +393,11 @@
           "default": [],
           "description": "Alias üretirken yok sayılacak tablo adı prefix'leri (ör. Cv_Rn, Tb_Rn)"
         },
+        "tsql-intellisense.qualifyWithOwner": {
+          "type": "boolean",
+          "default": true,
+          "description": "Tablo/view adlarına dbo. schema prefix'i ekle"
+        },
         "tsql-intellisense.joinMatchingNames": {
           "type": "boolean",
           "default": true,
