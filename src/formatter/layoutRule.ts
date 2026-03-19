@@ -350,7 +350,12 @@ function trimTokens(tokens: Token[]): string {
     const parts: string[] = [];
     for (let i = start; i <= end; i++) {
         if (tokens[i].type === 'whitespace') {
-            parts.push(' '); // normalize to single space
+            // Preserve newline before comments (don't collapse to single space)
+            if (tokens[i].value.includes('\n') && i + 1 <= end && tokens[i + 1].type === 'comment') {
+                parts.push('\n');
+            } else {
+                parts.push(' ');
+            }
         } else {
             parts.push(tokens[i].value);
         }
