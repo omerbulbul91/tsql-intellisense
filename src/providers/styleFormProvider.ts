@@ -555,7 +555,7 @@ export class StyleFormProvider {
 
             <div class="section-title">Expressions</div>
             <div class="menu-item disabled">Function calls</div>
-            <div class="menu-item disabled">CASE</div>
+            <div class="menu-item" onclick="showSection('caseExpr')">CASE</div>
             <div class="menu-item disabled">IN</div>
             <div class="menu-item disabled">Operators</div>
 
@@ -719,6 +719,61 @@ export class StyleFormProvider {
                     <div class="checkbox-row" style="margin-left:0">
                         <input type="checkbox" id="insertOutputInto">
                         <label for="insertOutputInto">Insert column list for INTO clause</label>
+                    </div>
+                </div>
+
+                <!-- CASE Expressions Section -->
+                <div id="section-caseExpr" style="display:none">
+                    <h2>CASE</h2>
+
+                    <div class="checkbox-row" style="margin-left:0">
+                        <input type="checkbox" id="casePlaceExprOnNewLine">
+                        <label for="casePlaceExprOnNewLine">Place expressions on new line</label>
+                    </div>
+
+                    <h3>WHEN</h3>
+                    <div class="form-row">
+                        <label>Place first WHEN on new line:</label>
+                        <select id="caseFirstWhenNewLine" style="width:160px; padding:5px 8px; font-size:13px; font-family:var(--vscode-font-family); background:var(--vscode-input-background); color:var(--vscode-input-foreground); border:1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius:2px;">
+                            <option value="never" selected>Never</option>
+                            <option value="always">Always</option>
+                            <option value="ifLong">If longer than max line length</option>
+                        </select>
+                    </div>
+
+                    <div class="form-row">
+                        <label>WHEN alignment:</label>
+                        <select id="caseWhenAlignment" style="width:160px; padding:5px 8px; font-size:13px; font-family:var(--vscode-font-family); background:var(--vscode-input-background); color:var(--vscode-input-foreground); border:1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius:2px;">
+                            <option value="toFirstItem" selected>To first item</option>
+                            <option value="toCase">To CASE</option>
+                            <option value="indented">Indented</option>
+                        </select>
+                    </div>
+
+                    <h3>THEN expressions</h3>
+                    <div class="checkbox-row" style="margin-left:0">
+                        <input type="checkbox" id="casePlaceThenOnNewLine">
+                        <label for="casePlaceThenOnNewLine">Place THEN on new line</label>
+                    </div>
+
+                    <div class="form-row">
+                        <label>Expression alignment:</label>
+                        <select id="caseThenAlignment" style="width:160px; padding:5px 8px; font-size:13px; font-family:var(--vscode-font-family); background:var(--vscode-input-background); color:var(--vscode-input-foreground); border:1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius:2px;">
+                            <option value="indentedFromWhen" selected>Indented from WHEN</option>
+                            <option value="toCase">To CASE</option>
+                            <option value="toFirstItem">To first item</option>
+                        </select>
+                    </div>
+
+                    <h3>ELSE</h3>
+                    <div class="checkbox-row" style="margin-left:0">
+                        <input type="checkbox" id="casePlaceElseOnNewLine" checked>
+                        <label for="casePlaceElseOnNewLine">Place ELSE on new line</label>
+                    </div>
+
+                    <div class="checkbox-row" style="margin-left:0">
+                        <input type="checkbox" id="caseAlignElseToWhen" checked>
+                        <label for="caseAlignElseToWhen">Align ELSE to WHEN</label>
                     </div>
                 </div>
 
