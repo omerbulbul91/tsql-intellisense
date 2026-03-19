@@ -499,11 +499,12 @@ export function activate(context: vscode.ExtensionContext) {
 
             const editor = vscode.window.activeTextEditor;
             if (editor) {
-                // Insert at cursor position (don't replace existing content)
-                const position = editor.selection.active;
+                // Replace the current line (ALTER VIEW/PROC/FUNCTION/TRIGGER ...) with full definition + GO
+                const cursorLine = editor.selection.active.line;
+                const lineRange = editor.document.lineAt(cursorLine).rangeIncludingLineBreak;
                 const scriptWithGo = script! + '\nGO\n';
                 await editor.edit(editBuilder => {
-                    editBuilder.insert(position, scriptWithGo);
+                    editBuilder.replace(lineRange, scriptWithGo);
                 });
             }
         })
