@@ -381,6 +381,11 @@
           "default": [],
           "description": "Alias üretirken yok sayılacak tablo adı prefix'leri (ör. Cv_Rn, Tb_Rn)"
         },
+        "tsql-intellisense.insertionKeys": {
+          "type": "object",
+          "default": { "space": true, "dot": false, "parentheses": false, "comma": false, "bracket": false, "semicolon": false },
+          "description": "Hangi tuşlarla completion kabul edilir (commitCharacters)"
+        },
         "tsql-intellisense.maxLineLength": {
           "type": "number",
           "default": 120,

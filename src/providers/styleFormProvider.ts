@@ -37,11 +37,12 @@ export class StyleFormProvider {
             capitaliseAliases: config.get<boolean>('aliases.capitaliseAliases', false),
             prefixesToIgnore: config.get<string[]>('aliases.prefixesToIgnore', []),
         };
+        const insertionKeys = config.get<any>('insertionKeys', { space: true, dot: false, parentheses: false, comma: false, bracket: false, semicolon: false });
         const snippetFolder = config.get<string>('snippetFolder', '');
         // Read connections to show count
         const connections = config.get<any[]>('connections', []);
 
-        panel.webview.html = StyleFormProvider.getHtml(casingOpts, layoutOpts, aliasOpts, styleName, styleFile, snippetFolder, connections.length);
+        panel.webview.html = StyleFormProvider.getHtml(casingOpts, layoutOpts, aliasOpts, insertionKeys, styleName, styleFile, snippetFolder, connections.length);
 
         panel.webview.onDidReceiveMessage(async (msg) => {
             switch (msg.cmd) {
@@ -60,6 +61,10 @@ export class StyleFormProvider {
                         await config.update('aliases.includeAS', msg.aliases.includeAS, vscode.ConfigurationTarget.Global);
                         await config.update('aliases.capitaliseAliases', msg.aliases.capitaliseAliases, vscode.ConfigurationTarget.Global);
                         await config.update('aliases.prefixesToIgnore', msg.aliases.prefixesToIgnore, vscode.ConfigurationTarget.Global);
+                    }
+                    // Insertion keys
+                    if (msg.insertionKeys) {
+                        await config.update('insertionKeys', msg.insertionKeys, vscode.ConfigurationTarget.Global);
                     }
                     panel.webview.postMessage({ cmd: 'saved' });
                     vscode.window.showInformationMessage(`Stil ayarları kaydedildi`);
@@ -203,6 +208,7 @@ export class StyleFormProvider {
         options: { reservedKeywords: CasingMode; builtInFunctions: CasingMode; builtInDataTypes: CasingMode },
         layout: { maxLineLength: number; placeCommasBeforeItems: boolean; alignItemsToTabStops: boolean },
         aliases: { assignAliases: boolean; includeAS: boolean; capitaliseAliases: boolean; prefixesToIgnore: string[] },
+        insertionKeys: { space: boolean; dot: boolean; parentheses: boolean; comma: boolean; bracket: boolean; semicolon: boolean },
         styleName: string,
         styleFile: string,
         snippetFolder: string,
@@ -563,6 +569,21 @@ export class StyleFormProvider {
                         <label for="showTooltipsParameters">Show tooltips for: Parameters</label>
                     </div>
 
+                    <h3>Insertion keys</h3>
+                    <p style="font-size:13px; color:var(--vscode-descriptionForeground); margin-bottom:8px;">
+                        Insert selected suggestions into your code when any of the following keys are pressed:
+                    </p>
+                    <div style="display:flex; flex-wrap:wrap; gap:4px 16px; margin-bottom:16px;">
+                        <div class="checkbox-row" style="margin:0"><input type="checkbox" id="ik_enter" checked disabled><label for="ik_enter">Enter</label></div>
+                        <div class="checkbox-row" style="margin:0"><input type="checkbox" id="ik_tab" checked disabled><label for="ik_tab">Tab</label></div>
+                        <div class="checkbox-row" style="margin:0"><input type="checkbox" id="ik_space" ${insertionKeys.space ? 'checked' : ''}><label for="ik_space">Space bar</label></div>
+                        <div class="checkbox-row" style="margin:0"><input type="checkbox" id="ik_dot" ${insertionKeys.dot ? 'checked' : ''}><label for="ik_dot">Dot</label></div>
+                        <div class="checkbox-row" style="margin:0"><input type="checkbox" id="ik_paren" ${insertionKeys.parentheses ? 'checked' : ''}><label for="ik_paren">Parentheses</label></div>
+                        <div class="checkbox-row" style="margin:0"><input type="checkbox" id="ik_comma" ${insertionKeys.comma ? 'checked' : ''}><label for="ik_comma">Comma</label></div>
+                        <div class="checkbox-row" style="margin:0"><input type="checkbox" id="ik_bracket" ${insertionKeys.bracket ? 'checked' : ''}><label for="ik_bracket">Closing square bracket</label></div>
+                        <div class="checkbox-row" style="margin:0"><input type="checkbox" id="ik_semicolon" ${insertionKeys.semicolon ? 'checked' : ''}><label for="ik_semicolon">Semicolon</label></div>
+                    </div>
+
                     <h3>Types of suggestions</h3>
                     <div class="checkbox-row" style="margin-left:0">
                         <input type="checkbox" id="listColumnsAfterSelect">
@@ -890,6 +911,14 @@ export class StyleFormProvider {
                     includeAS: document.getElementById('includeAS').checked,
                     capitaliseAliases: document.getElementById('capitaliseAliases').checked,
                     prefixesToIgnore: prefixes,
+                },
+                insertionKeys: {
+                    space: document.getElementById('ik_space').checked,
+                    dot: document.getElementById('ik_dot').checked,
+                    parentheses: document.getElementById('ik_paren').checked,
+                    comma: document.getElementById('ik_comma').checked,
+                    bracket: document.getElementById('ik_bracket').checked,
+                    semicolon: document.getElementById('ik_semicolon').checked,
                 },
             });
         }

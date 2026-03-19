@@ -12,6 +12,36 @@ export class TsqlCompletionProvider implements vscode.CompletionItemProvider {
         _token: vscode.CancellationToken,
         _context: vscode.CompletionContext
     ): Promise<vscode.CompletionList | undefined> {
+        const result = await this.provideCompletionItemsInner(document, position, _token, _context);
+        if (result) {
+            const chars = TsqlCompletionProvider.getCommitCharacters();
+            if (chars.length > 0) {
+                for (const item of result.items) {
+                    if (!item.commitCharacters) item.commitCharacters = chars;
+                }
+            }
+        }
+        return result;
+    }
+
+    private static getCommitCharacters(): string[] {
+        const keys = vscode.workspace.getConfiguration('tsql-intellisense').get<any>('insertionKeys', {});
+        const chars: string[] = [];
+        if (keys.space) chars.push(' ');
+        if (keys.dot) chars.push('.');
+        if (keys.parentheses) chars.push('(', ')');
+        if (keys.comma) chars.push(',');
+        if (keys.bracket) chars.push(']');
+        if (keys.semicolon) chars.push(';');
+        return chars;
+    }
+
+    private async provideCompletionItemsInner(
+        document: vscode.TextDocument,
+        position: vscode.Position,
+        _token: vscode.CancellationToken,
+        _context: vscode.CompletionContext
+    ): Promise<vscode.CompletionList | undefined> {
         // Determine the effective DB for this document
         const docDb = this.queryRunner?.getDocumentDatabase(document.uri);
         const dbName = docDb?.dbName;
