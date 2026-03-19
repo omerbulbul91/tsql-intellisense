@@ -507,6 +507,7 @@ export class StyleFormProvider {
             <div class="menu-item" onclick="showSection('snippets')">Snippets</div>
 
             <div class="section-title">Inserted code</div>
+            <div class="menu-item" onclick="showSection('objectsStatements')">Objects & statements</div>
             <div class="menu-item" onclick="showSection('aliases')">Aliases</div>
             <div class="menu-item" onclick="showSection('specialChars')">Special characters</div>
 
@@ -598,6 +599,66 @@ export class StyleFormProvider {
                     <div class="info-bar">
                         <span class="icon">ℹ</span>
                         Most suggestion behavior is controlled by VS Code's editor.suggest.* settings. These options are SQL-specific overrides.
+                    </div>
+                </div>
+
+                <!-- Objects & Statements Section -->
+                <div id="section-objectsStatements" style="display:none">
+                    <h2>Inserted code &gt; Objects &amp; statements</h2>
+                    <p style="font-size:13px; color:var(--vscode-descriptionForeground); margin-bottom:16px;">
+                        SQL Prompt can automatically complete the syntax of some statements.
+                    </p>
+
+                    <h3>ALTER statements</h3>
+                    <div class="checkbox-row" style="margin-left:0">
+                        <input type="checkbox" id="insertFullAlter" checked>
+                        <label for="insertFullAlter">Insert full ALTER statement</label>
+                    </div>
+
+                    <h3>INSERT statements</h3>
+                    <div class="checkbox-row" style="margin-left:0">
+                        <input type="checkbox" id="insertFullInsert" checked>
+                        <label for="insertFullInsert">Insert full INSERT statement</label>
+                    </div>
+                    <div class="checkbox-row" style="margin-left:24px">
+                        <input type="checkbox" id="includeValuesClause" checked>
+                        <label for="includeValuesClause">Include VALUES clause</label>
+                    </div>
+                    <div class="checkbox-row" style="margin-left:48px">
+                        <input type="checkbox" id="showColumnNames" checked>
+                        <label for="showColumnNames">Show column names</label>
+                    </div>
+                    <div class="checkbox-row" style="margin-left:48px">
+                        <input type="checkbox" id="showColumnDataTypes" checked>
+                        <label for="showColumnDataTypes">Show column data types</label>
+                    </div>
+                    <div class="checkbox-row" style="margin-left:48px">
+                        <input type="checkbox" id="insertDefaultValue" checked>
+                        <label for="insertDefaultValue">Insert default value for each column</label>
+                    </div>
+
+                    <h3>EXEC statements</h3>
+                    <div class="checkbox-row" style="margin-left:0">
+                        <input type="checkbox" id="insertParameters" checked>
+                        <label for="insertParameters">Insert parameters for functions and stored procedures</label>
+                    </div>
+                    <div class="checkbox-row" style="margin-left:24px">
+                        <input type="checkbox" id="insertDeclareOutput" checked>
+                        <label for="insertDeclareOutput">Insert DECLARE statement for OUTPUT parameters</label>
+                    </div>
+                    <div class="checkbox-row" style="margin-left:24px">
+                        <input type="checkbox" id="insertDefaultParamValue" checked>
+                        <label for="insertDefaultParamValue">Insert default value for each parameter</label>
+                    </div>
+                    <div class="checkbox-row" style="margin-left:24px">
+                        <input type="checkbox" id="showParameterDataTypes" checked>
+                        <label for="showParameterDataTypes">Show parameter data types</label>
+                    </div>
+
+                    <h3>OUTPUT clauses</h3>
+                    <div class="checkbox-row" style="margin-left:0">
+                        <input type="checkbox" id="insertOutputInto">
+                        <label for="insertOutputInto">Insert column list for INTO clause</label>
                     </div>
                 </div>
 
