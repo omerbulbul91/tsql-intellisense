@@ -508,6 +508,7 @@ export class StyleFormProvider {
 
             <div class="section-title">Inserted code</div>
             <div class="menu-item" onclick="showSection('objectsStatements')">Objects & statements</div>
+            <div class="menu-item" onclick="showSection('qualification')">Qualification</div>
             <div class="menu-item" onclick="showSection('aliases')">Aliases</div>
             <div class="menu-item" onclick="showSection('specialChars')">Special characters</div>
 
@@ -659,6 +660,40 @@ export class StyleFormProvider {
                     <div class="checkbox-row" style="margin-left:0">
                         <input type="checkbox" id="insertOutputInto">
                         <label for="insertOutputInto">Insert column list for INTO clause</label>
+                    </div>
+                </div>
+
+                <!-- Qualification Section -->
+                <div id="section-qualification" style="display:none">
+                    <h2>Inserted code &gt; Qualification</h2>
+
+                    <div class="checkbox-row" style="margin-left:0">
+                        <input type="checkbox" id="qualifyWithOwner" checked>
+                        <label for="qualifyWithOwner">Qualify object names with owner name</label>
+                        <span style="font-size:12px; color:var(--vscode-descriptionForeground); margin-left:12px;">e.g. dbo.Address</span>
+                    </div>
+
+                    <div class="checkbox-row" style="margin-left:0">
+                        <input type="checkbox" id="qualifyWithAlias" checked>
+                        <label for="qualifyWithAlias">Qualify column names with aliases</label>
+                        <span style="font-size:12px; color:var(--vscode-descriptionForeground); margin-left:12px;">e.g. a.AddressLine1</span>
+                    </div>
+
+                    <div class="checkbox-row" style="margin-left:0">
+                        <input type="checkbox" id="qualifyWithTableName">
+                        <label for="qualifyWithTableName">Qualify column names with table name</label>
+                        <span style="font-size:12px; color:var(--vscode-descriptionForeground); margin-left:12px;">e.g. Address.AddressLine1</span>
+                    </div>
+
+                    <div class="info-bar" style="margin-top:16px">
+                        <span class="icon">ℹ</span>
+                        <div>Note: In some situations, inserted object names will always be qualified, regardless of these settings:
+                            <ul style="margin:8px 0 0 16px; font-size:12px;">
+                                <li>When inserting an object in a non-default schema</li>
+                                <li>When column names would be ambiguous without also specifying the table</li>
+                                <li>When you type table.* and press TAB to expand all columns</li>
+                            </ul>
+                        </div>
                     </div>
                 </div>
 
