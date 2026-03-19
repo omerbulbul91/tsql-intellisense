@@ -90,8 +90,8 @@
         "title": "T-SQL IntelliSense: Format SQL"
       },
       {
-        "command": "tsql-intellisense.setStyleFolder",
-        "title": "T-SQL IntelliSense: Set Style Folder"
+        "command": "tsql-intellisense.setStyleFile",
+        "title": "T-SQL IntelliSense: Set Style File"
       },
       { "command": "tsql-intellisense.addConnection", "title": "T-SQL IntelliSense: Add Connection", "icon": "$(add)" },
       { "command": "tsql-intellisense.editConnection", "title": "T-SQL IntelliSense: Edit Connection", "icon": "$(edit)" },
@@ -351,10 +351,10 @@
           "default": "",
           "description": "Redgate SQL Prompt snippet JSON dosyalarını içeren dizin yolu"
         },
-        "tsql-intellisense.styleFolder": {
+        "tsql-intellisense.styleFile": {
           "type": "string",
           "default": "",
-          "description": "Redgate SQL Prompt stil dosyalarını (.json) içeren dizin yolu"
+          "description": "Redgate SQL Prompt stil dosyası (.json) yolu"
         }
       }
     }

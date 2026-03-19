@@ -1,5 +1,4 @@
 import * as fs from 'fs';
-import * as path from 'path';
 import { CasingOptions, CasingMode } from './casingRule';
 
 export interface SqlStyle {
@@ -31,30 +30,19 @@ export class StyleLoader {
 
     constructor(private outputChannel?: { appendLine(msg: string): void }) {}
 
-    async loadFromFolder(folderPath: string): Promise<void> {
-        if (!folderPath) {
+    async loadFromFile(filePath: string): Promise<void> {
+        if (!filePath) {
             this.options = { ...DEFAULT_STYLE };
             this.styleName = 'RENIUMSTYLE (default)';
-            this.log(`No style folder configured — using default RENIUMSTYLE`);
+            this.log(`No style file configured — using default RENIUMSTYLE`);
             return;
         }
 
         try {
-            const files = await fs.promises.readdir(folderPath);
-            const jsonFiles = files.filter(f => f.endsWith('.json')).sort();
-
-            if (jsonFiles.length === 0) {
-                this.log(`No .json files found in ${folderPath} — using default`);
-                this.options = { ...DEFAULT_STYLE };
-                this.styleName = 'RENIUMSTYLE (default)';
-                return;
-            }
-
-            const filePath = path.join(folderPath, jsonFiles[0]);
             const content = await fs.promises.readFile(filePath, 'utf-8');
             const style: SqlStyle = JSON.parse(content);
 
-            this.styleName = style.metadata?.name || jsonFiles[0];
+            this.styleName = style.metadata?.name || filePath.split(/[/\\]/).pop() || 'Unknown';
             if (style.casing) {
                 this.options = {
                     reservedKeywords: validateMode(style.casing.reservedKeywords, DEFAULT_STYLE.reservedKeywords),
@@ -69,7 +57,7 @@ export class StyleLoader {
             this.log(`Loaded style "${this.styleName}" from ${filePath}`);
             this.log(`  keywords: ${this.options.reservedKeywords}, functions: ${this.options.builtInFunctions}, datatypes: ${this.options.builtInDataTypes}`);
         } catch (err: any) {
-            this.log(`Error loading style from ${folderPath}: ${err.message} — using default`);
+            this.log(`Error loading style from ${filePath}: ${err.message} — using default`);
             this.options = { ...DEFAULT_STYLE };
             this.styleName = 'RENIUMSTYLE (default)';
         }
