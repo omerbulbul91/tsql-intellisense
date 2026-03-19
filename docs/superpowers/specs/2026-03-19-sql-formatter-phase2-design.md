@@ -8,7 +8,12 @@ Faz 1 (casing) üzerine SELECT sorguları için clause-based layout formatlama e
 
 - **Sadece SELECT sorguları** — INSERT/UPDATE/DELETE Faz 2 kapsamında değil
 - **Clause'lar:** SELECT, FROM, WHERE, ORDER BY, GROUP BY, HAVING
-- **Subquery:** Parantez içindeki subquery keyword'leri yok sayılır (depth=0 kuralı)
+- **Subquery:** Parantez içindeki keyword'ler yok sayılır (depth=0 kuralı — tüm parantez ifadeleri dahil: subquery, fonksiyon çağrıları)
+- **CTE:** `WITH cte AS (SELECT ...)` — parantez içindeki SELECT depth>0, dış SELECT formatlanır
+- **Batch:** `;` ve `GO` clause state'ini sıfırlar, her SELECT bağımsız formatlanır
+- **SELECT DISTINCT / SELECT TOP N:** `DISTINCT` ve `TOP N` SELECT keyword'üne dahildir, padding hesabında keyword genişliğine eklenmez. Kolon listesi bunlardan sonra başlar.
+- **SELECT *:** Virgüllü öğe listesi yok — padding uygulanır, wrap gerekmez
+- **WHERE / HAVING:** Virgül ayırma yok, tüm içerik tek öğe olarak tutulur (AND/OR bölme Faz 5'te)
 
 ## Beklenen Çıktı Örneği
 
@@ -89,13 +94,16 @@ Select    k.Col1, k.Col2, k.Col3,
 Token stream üzerinde:
 1. Parantez depth sayacı tut (depth=0'da çalış)
 2. Depth=0'da clause keyword gördüğünde yeni clause başlat
-3. `ORDER BY`, `GROUP BY` → iki token'lık compound keyword (keyword + whitespace + keyword)
-4. Her clause'un öğelerini virgüllerle ayır
-5. Her öğe = virgüller arası token grubu (whitespace trim edilir)
+3. `ORDER BY`, `GROUP BY` → compound keyword: keyword token + (whitespace/comment atla) + `BY` keyword. Araya comment girerse: `ORDER /* x */ BY` → yine compound keyword olarak tespit edilir.
+4. Her clause'un öğelerini depth=0 virgüllerle ayır (parantez içi virgüller öğe ayırıcı değil: `ISNULL(a, b)` tek öğe)
+5. Her öğe = virgüller arası token grubu (whitespace trim edilir, `AS alias` dahil tek öğe)
+6. `SELECT DISTINCT` / `SELECT TOP N` → DISTINCT ve TOP (+ sayı) SELECT öğelerinden ayrılır, keyword prefix olarak tutulur
+7. `;` ve `GO` → clause state sıfırlanır, sonraki SELECT bağımsız formatlanır
 
 **Clause keyword listesi (depth=0):** SELECT, FROM, WHERE, ORDER BY, GROUP BY, HAVING
 
-**Clause dışı tokenlar:** `;`, `GO`, comment'lar — olduğu gibi bırakılır.
+**Clause arası comment'lar:** Clause'lar arasındaki comment tokenları, bir sonraki clause'un önüne yerleştirilir.
+**Öğe içi comment'lar:** Öğenin parçası olarak kalır, bölünmez.
 
 ### 5. Öğe İçi Whitespace
 
@@ -121,12 +129,17 @@ src/formatter/layoutRule.ts  — applyLayout(tokens, options) → string
 
 ```typescript
 interface LayoutOptions {
-    enabled: boolean;                 // layout aktif mi
-    maxLineLength: number;            // varsayılan 120
+    maxLineLength: number;            // varsayılan 120, 0 = wrap yok
     placeCommasBeforeItems: boolean;  // virgül başta mı (varsayılan true)
-    alignItemsToTabStops: boolean;    // clause padding (varsayılan true)
+    alignItemsToTabStops: boolean;    // clause padding aktif mi (varsayılan true)
 }
 ```
+
+**`alignItemsToTabStops` davranışı:**
+- `true` → clause keyword + dinamik padding (en uzun keyword'e göre hizala)
+- `false` → clause keyword + tek boşluk (padding yok, hizalama yok)
+
+**`maxLineLength = 0` davranışı:** Wrap yapılmaz, tüm öğeler tek satırda kalır.
 
 ### SqlFormatter Akışı
 
@@ -135,16 +148,16 @@ format(sql: string): string {
     const tokens = tokenize(sql);
     const casingOptions = this.styleLoader.getCasingOptions();
     const layoutOptions = this.styleLoader.getLayoutOptions();
-    const cased = applyCasing(tokens, casingOptions);
-    if (layoutOptions.enabled) {
-        const casedTokens = tokenize(cased);
-        return applyLayout(casedTokens, layoutOptions);
-    }
-    return cased;
+    // Casing: token value'larını yerinde değiştirir
+    applyCasingInPlace(tokens, casingOptions);
+    // Layout: token stream'den formatlanmış string üretir
+    return applyLayout(tokens, layoutOptions);
 }
 ```
 
-Re-tokenize gerekli çünkü casing token value'larını değiştirir, layout ise token pozisyonlarına ihtiyaç duyar.
+**`applyCasingInPlace`:** Mevcut `applyCasing`'in token dizisini döndüren versiyonu. Token'ların `.value` alanını yerinde günceller, re-tokenize gerekmez. Mevcut `applyCasing(tokens) → string` geriye uyumluluk için kalır, `applyCasingInPlace` eklenir.
+
+Layout her zaman çağrılır — `alignItemsToTabStops: false` ve `placeCommasBeforeItems: false` olduğunda `applyLayout` token'ları basitçe birleştirip döndürür (mevcut davranış).
 
 ### StyleLoader Değişiklikleri
 
@@ -153,15 +166,27 @@ JSON'dan okunan alanlar:
 {
     "lists": {
         "placeCommasBeforeItems": true,
-        "alignItemsToTabStops": true,
-        "placeSubsequentItemsOnNewLines": "never"
+        "alignItemsToTabStops": true
     }
 }
 ```
 
-`maxLineLength` → VS Code settings'ten: `tsql-intellisense.maxLineLength`
+`maxLineLength` → VS Code settings'ten: `tsql-intellisense.maxLineLength` (Redgate stil dosyasında bu alan yok — IDE ayarı)
 
-`getLayoutOptions()` metodu eklenir. Layout, `alignItemsToTabStops: true` veya `placeCommasBeforeItems` değiştirilmişse `enabled: true` olur.
+`getLayoutOptions()` metodu eklenir. Varsayılanlar: `placeCommasBeforeItems: true`, `alignItemsToTabStops: true`, `maxLineLength: 120`.
+
+`applyOverrides` metodu `lists` alanını da kabul eder. `styleOverrides` settings yapısı:
+```json
+{
+    "reservedKeywords": "upperCamelCase",
+    "builtInFunctions": "uppercase",
+    "builtInDataTypes": "upperCamelCase",
+    "lists": {
+        "placeCommasBeforeItems": true,
+        "alignItemsToTabStops": true
+    }
+}
+```
 
 ### Webview Panel (styleFormProvider.ts) Değişiklikleri
 
@@ -214,7 +239,16 @@ Yeni setting:
 — Tek clause: "select a, b" → FROM yok, padding SELECT'e göre
 — Boş sonuç: boş string → boş string
 — maxLineLength=0 veya çok büyük → wrap yok, tek satır
-— WHERE condition: "where x = 1 and y = 2" → clause olarak formatlanır
+— WHERE condition: "where x = 1 and y = 2" → tek öğe, bölünmez
+— SELECT DISTINCT: "select distinct a, b from T" → DISTINCT prefix, kolon listesi sonra
+— SELECT TOP N: "select top 100 a, b from T" → TOP 100 prefix
+— SELECT *: "select * from T" → wrap yok, padding uygulanır
+— Fonksiyon içi virgül: "select isnull(a, b), c from T" → ISNULL(a, b) tek öğe
+— CTE: "with cte as (select a from T1) select b from cte" → dış SELECT formatlanır
+— Batch: "select a from T1; select b from T2" → her SELECT bağımsız
+— FROM çoklu tablo: "select a from T1, T2 where T1.id = T2.id" → FROM öğeleri virgülle ayrılır
+— AS alias: "select col1 as alias1, col2 as alias2 from T" → AS dahil tek öğe
+— HAVING: "... having count(*) > 1" → tek öğe, virgül bölme yok
 ```
 
 ### Manuel Test
