@@ -8,6 +8,8 @@ export interface CaseOptions {
     thenAlignment: 'indentedFromWhen' | 'toCase' | 'toFirstItem';
     placeElseOnNewLine: boolean;
     alignElseToWhen: boolean;
+    collapseShortCaseExpressions: boolean;
+    collapseCaseExpressionsShorterThan: number;
 }
 
 export const DEFAULT_CASE_OPTIONS: CaseOptions = {
@@ -18,6 +20,8 @@ export const DEFAULT_CASE_OPTIONS: CaseOptions = {
     thenAlignment: 'indentedFromWhen',
     placeElseOnNewLine: true,
     alignElseToWhen: true,
+    collapseShortCaseExpressions: true,
+    collapseCaseExpressionsShorterThan: 100,
 };
 
 /**
@@ -95,10 +99,19 @@ function formatCaseBlock(block: CaseBlock, options: CaseOptions): string {
     const parts = parseCaseParts(block);
     if (!parts) return buildOriginalText(block.tokens);
 
+    const caseKeyword = block.tokens[0].value;
+    const endKeyword = block.tokens[block.tokens.length - 1].value;
+
+    // Collapse short CASE expressions to single line
+    if (options.collapseShortCaseExpressions) {
+        const inlineVersion = buildInlineCaseText(caseKeyword, endKeyword, parts);
+        if (inlineVersion.length <= options.collapseCaseExpressionsShorterThan) {
+            return inlineVersion;
+        }
+    }
+
     // Determine indentation
     const baseIndent = getLeadingWhitespace(block.tokens);
-    const caseKeyword = block.tokens[0].value; // "Case" or "CASE" etc.
-    const endKeyword = block.tokens[block.tokens.length - 1].value;
 
     let whenIndent: string;
     switch (options.whenAlignment) {
@@ -259,7 +272,24 @@ function getLeadingWhitespace(tokens: Token[]): string {
 }
 
 function findBlockInString(sql: string, tokens: Token[]): number {
-    // Build a normalized search pattern from the token values
     const original = buildOriginalText(tokens);
     return sql.indexOf(original);
+}
+
+/**
+ * Build a single-line inline version of a CASE expression.
+ */
+function buildInlineCaseText(caseKeyword: string, endKeyword: string, parts: CaseParts): string {
+    let result = caseKeyword;
+    if (parts.caseExpression) {
+        result += ' ' + parts.caseExpression;
+    }
+    for (const wc of parts.whenClauses) {
+        result += ' ' + wc.whenKeyword + ' ' + wc.condition + ' ' + wc.thenKeyword + ' ' + wc.thenResult;
+    }
+    if (parts.elseClause) {
+        result += ' ' + parts.elseClause.elseKeyword + ' ' + parts.elseClause.result;
+    }
+    result += ' ' + endKeyword;
+    return result;
 }

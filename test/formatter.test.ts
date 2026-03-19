@@ -408,28 +408,36 @@ function assertCase(input: string, expected: string, options: Partial<CaseOption
 
 console.log('\n=== CASE Formatting Tests ===\n');
 
-// --- Default: WHEN inline, ELSE on new line ---
+// --- Default: WHEN inline, ELSE on new line (collapse disabled) ---
 assertCase(
     'select case when x = 1 then \'a\' when x = 2 then \'b\' else \'c\' end from T',
     "Select Case When x = 1 Then 'a' When x = 2 Then 'b'\n     Else 'c' End From T",
-    { placeFirstWhenOnNewLine: 'never', placeElseOnNewLine: true, alignElseToWhen: true },
+    { placeFirstWhenOnNewLine: 'never', placeElseOnNewLine: true, alignElseToWhen: true, collapseShortCaseExpressions: false },
     'default: WHEN inline, ELSE new line'
 );
 
-// --- All WHENs on new line ---
+// --- All WHENs on new line (collapse disabled) ---
 assertCase(
     'select case when x = 1 then \'a\' when x = 2 then \'b\' end from T',
     "Select Case\n     When x = 1 Then 'a'\n     When x = 2 Then 'b' End From T",
-    { placeFirstWhenOnNewLine: 'always', whenAlignment: 'toFirstItem' },
+    { placeFirstWhenOnNewLine: 'always', whenAlignment: 'toFirstItem', collapseShortCaseExpressions: false },
     'all WHENs on new line'
 );
 
-// --- THEN on new line ---
+// --- THEN on new line (collapse disabled) ---
 assertCase(
     'select case when x = 1 then \'a\' else \'b\' end from T',
     "Select Case When x = 1\n         Then 'a'\n     Else 'b' End From T",
-    { placeThenOnNewLine: true, thenAlignment: 'indentedFromWhen', placeElseOnNewLine: true, alignElseToWhen: true },
+    { placeThenOnNewLine: true, thenAlignment: 'indentedFromWhen', placeElseOnNewLine: true, alignElseToWhen: true, collapseShortCaseExpressions: false },
     'THEN on new line indented from WHEN'
+);
+
+// --- Collapse short CASE (default behavior) ---
+assertCase(
+    'select case when x = 1 then \'a\' else \'b\' end from T',
+    "Select Case When x = 1 Then 'a' Else 'b' End From T",
+    { collapseShortCaseExpressions: true, collapseCaseExpressionsShorterThan: 100 },
+    'collapse short CASE to single line'
 );
 
 // --- ELSE inline ---
