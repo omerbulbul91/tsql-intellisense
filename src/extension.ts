@@ -499,12 +499,14 @@ export function activate(context: vscode.ExtensionContext) {
 
             const editor = vscode.window.activeTextEditor;
             if (editor) {
-                // Replace the current line (ALTER VIEW/PROC/FUNCTION/TRIGGER ...) with full definition + GO
+                // Format the script with current style settings (casing, layout)
+                const { SqlFormatter } = require('./formatter/sqlFormatter');
+                const fmt = new SqlFormatter(styleLoader);
+                const formatted = fmt.format(script! + '\nGO\n');
                 const cursorLine = editor.selection.active.line;
                 const lineRange = editor.document.lineAt(cursorLine).rangeIncludingLineBreak;
-                const scriptWithGo = script! + '\nGO\n';
                 await editor.edit(editBuilder => {
-                    editBuilder.replace(lineRange, scriptWithGo);
+                    editBuilder.replace(lineRange, formatted);
                 });
             }
         })
