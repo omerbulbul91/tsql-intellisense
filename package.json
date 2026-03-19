@@ -127,6 +127,11 @@
           "group": "1_modification@2"
         },
         {
+          "command": "tsql-intellisense.openProjectFile",
+          "when": "editorLangId == sql && tsqlIntellisense.active",
+          "group": "z_tsql@0"
+        },
+        {
           "command": "tsql-intellisense.selectInObjectExplorer",
           "when": "editorLangId == sql && tsqlIntellisense.active",
           "group": "z_tsql@1"
