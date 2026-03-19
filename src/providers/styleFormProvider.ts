@@ -497,6 +497,7 @@ export class StyleFormProvider {
     <div class="main">
         <div class="sidebar">
             <div class="section-title">Suggestions</div>
+            <div class="menu-item" onclick="showSection('behavior')">Behavior</div>
             <div class="menu-item" onclick="showSection('snippets')">Snippets</div>
 
             <div class="section-title">Inserted code</div>
@@ -537,6 +538,48 @@ export class StyleFormProvider {
         <div class="content">
             <div class="content-body">
                 <!-- Casing Section -->
+                <!-- Behavior Section -->
+                <div id="section-behavior" style="display:none">
+                    <h2>Suggestions &gt; Behavior</h2>
+
+                    <h3>Suggestions box and other popups</h3>
+                    <div class="checkbox-row" style="margin-left:0">
+                        <input type="checkbox" id="showCodeSuggestions" checked>
+                        <label for="showCodeSuggestions">Show code suggestions</label>
+                    </div>
+
+                    <div class="checkbox-row" style="margin-left:24px">
+                        <input type="checkbox" id="showObjectDefinitions" checked>
+                        <label for="showObjectDefinitions">Show object definitions</label>
+                    </div>
+
+                    <div class="checkbox-row" style="margin-left:24px">
+                        <input type="checkbox" id="showTooltipsObjects" checked>
+                        <label for="showTooltipsObjects">Show tooltips for: Objects</label>
+                    </div>
+
+                    <div class="checkbox-row" style="margin-left:24px">
+                        <input type="checkbox" id="showTooltipsParameters" checked>
+                        <label for="showTooltipsParameters">Show tooltips for: Parameters</label>
+                    </div>
+
+                    <h3>Types of suggestions</h3>
+                    <div class="checkbox-row" style="margin-left:0">
+                        <input type="checkbox" id="listColumnsAfterSelect">
+                        <label for="listColumnsAfterSelect">List all database columns after a SELECT statement</label>
+                    </div>
+
+                    <div class="checkbox-row" style="margin-left:0">
+                        <input type="checkbox" id="listSystemObjects">
+                        <label for="listSystemObjects">List system objects</label>
+                    </div>
+
+                    <div class="info-bar">
+                        <span class="icon">ℹ</span>
+                        Most suggestion behavior is controlled by VS Code's editor.suggest.* settings. These options are SQL-specific overrides.
+                    </div>
+                </div>
+
                 <!-- Snippets Section -->
                 <div id="section-snippets" style="display:none">
                     <h2>Snippets</h2>
