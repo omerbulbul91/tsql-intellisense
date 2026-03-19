@@ -31,3 +31,19 @@ export function applyCasing(tokens: Token[], options: CasingOptions): string {
         }
     }).join('');
 }
+
+export function applyCasingInPlace(tokens: Token[], options: CasingOptions): void {
+    for (const token of tokens) {
+        switch (token.type) {
+            case 'keyword':
+                token.value = applyMode(token.value, options.reservedKeywords);
+                break;
+            case 'function':
+                token.value = applyMode(token.value, options.builtInFunctions);
+                break;
+            case 'datatype':
+                token.value = applyMode(token.value, options.builtInDataTypes);
+                break;
+        }
+    }
+}

@@ -164,5 +164,172 @@ assertCasing('  select  *  from  T  ', '  Select  *  From  T  ', 'upperCamelCase
 
 console.log(`\nCasing: ${casingPassed} passed, ${casingFailed} failed\n`);
 
-const totalFailed = failed + casingFailed;
+// ===================== LAYOUT TESTS =====================
+
+import { applyLayout, LayoutOptions } from '../src/formatter/layoutRule';
+import { applyCasingInPlace } from '../src/formatter/casingRule';
+
+let layoutPassed = 0;
+let layoutFailed = 0;
+
+const defaultLayout: LayoutOptions = { maxLineLength: 120, placeCommasBeforeItems: true, alignItemsToTabStops: true };
+
+function assertLayout(input: string, expected: string, options: LayoutOptions, testName: string) {
+    const tokens = tokenize(input);
+    applyCasingInPlace(tokens, { reservedKeywords: 'upperCamelCase', builtInFunctions: 'uppercase', builtInDataTypes: 'upperCamelCase' });
+    const result = applyLayout(tokens, options);
+    if (result === expected) {
+        layoutPassed++;
+        console.log(`  ✅ ${testName}`);
+    } else {
+        layoutFailed++;
+        console.error(`  ❌ ${testName}`);
+        console.error(`    expected: "${expected.replace(/\n/g, '\\n')}"`);
+        console.error(`    got:      "${result.replace(/\n/g, '\\n')}"`);
+    }
+}
+
+console.log('\n=== Layout Rule Tests ===\n');
+
+// --- Basic SELECT + FROM ---
+assertLayout(
+    'select a, b, c from T',
+    'Select  a, b, c\nFrom    T',
+    defaultLayout, 'basic SELECT FROM padding'
+);
+
+// --- Dynamic padding with ORDER BY ---
+assertLayout(
+    'select a from T order by a',
+    'Select    a\nFrom      T\nOrder By  a',
+    defaultLayout, 'dynamic padding with ORDER BY'
+);
+
+// --- SELECT with GROUP BY + HAVING ---
+assertLayout(
+    'select a, count(b) from T group by a having count(b) > 1',
+    'Select    a, COUNT(b)\nFrom      T\nGroup By  a\nHaving    COUNT(b) > 1',
+    defaultLayout, 'GROUP BY + HAVING'
+);
+
+// --- WHERE clause (single item, no comma split) ---
+assertLayout(
+    'select a from T where x = 1 and y = 2',
+    'Select  a\nFrom    T\nWhere   x = 1 And y = 2',
+    defaultLayout, 'WHERE as single item'
+);
+
+// --- SELECT * ---
+assertLayout(
+    'select * from T',
+    'Select  *\nFrom    T',
+    defaultLayout, 'SELECT star'
+);
+
+// --- SELECT DISTINCT ---
+assertLayout(
+    'select distinct a, b from T',
+    'Select  Distinct a, b\nFrom    T',
+    defaultLayout, 'SELECT DISTINCT prefix'
+);
+
+// --- SELECT TOP N ---
+assertLayout(
+    'select top 100 a, b from T',
+    'Select  Top 100 a, b\nFrom    T',
+    defaultLayout, 'SELECT TOP N prefix'
+);
+
+// --- Function with inner commas (depth>0) ---
+assertLayout(
+    'select isnull(a, b), c from T',
+    'Select  ISNULL(a, b), c\nFrom    T',
+    defaultLayout, 'function inner commas not split'
+);
+
+// --- Line wrap with commas before ---
+assertLayout(
+    'select col1, col2, col3, col4, col5, col6, col7, col8, col9, col10 from T',
+    'Select  col1, col2, col3, col4, col5, col6, col7, col8, col9, col10\nFrom    T',
+    { maxLineLength: 80, placeCommasBeforeItems: true, alignItemsToTabStops: true },
+    'wrap within maxLineLength'
+);
+
+// --- Wrap: commas before items on continuation ---
+assertLayout(
+    'select very_long_column_name_1, very_long_column_name_2, very_long_column_name_3 from T',
+    'Select  very_long_column_name_1, very_long_column_name_2\n      , very_long_column_name_3\nFrom    T',
+    { maxLineLength: 60, placeCommasBeforeItems: true, alignItemsToTabStops: true },
+    'wrap with comma before on continuation'
+);
+
+// --- Wrap: commas after items ---
+assertLayout(
+    'select very_long_column_name_1, very_long_column_name_2, very_long_column_name_3 from T',
+    'Select  very_long_column_name_1, very_long_column_name_2,\n        very_long_column_name_3\nFrom    T',
+    { maxLineLength: 60, placeCommasBeforeItems: false, alignItemsToTabStops: true },
+    'wrap with comma after'
+);
+
+// --- maxLineLength=0: no wrap ---
+assertLayout(
+    'select a, b, c, d, e, f, g, h from T',
+    'Select  a, b, c, d, e, f, g, h\nFrom    T',
+    { maxLineLength: 0, placeCommasBeforeItems: true, alignItemsToTabStops: true },
+    'maxLineLength=0 no wrap'
+);
+
+// --- alignItemsToTabStops=false: no padding ---
+assertLayout(
+    'select a, b from T',
+    'Select a, b\nFrom T',
+    { maxLineLength: 120, placeCommasBeforeItems: true, alignItemsToTabStops: false },
+    'no padding when alignItemsToTabStops=false'
+);
+
+// --- Subquery (depth>0 SELECT ignored) ---
+assertLayout(
+    'select a from (select b from T2) x',
+    'Select  a\nFrom    (Select b From T2) x',
+    defaultLayout, 'subquery SELECT not split'
+);
+
+// --- String with keyword ---
+assertLayout(
+    "select 'from' from T",
+    "Select  'from'\nFrom    T",
+    defaultLayout, 'string keyword not treated as clause'
+);
+
+// --- Batch: semicolon ---
+assertLayout(
+    'select a from T1; select b from T2',
+    'Select  a\nFrom    T1;\nSelect  b\nFrom    T2',
+    defaultLayout, 'batch semicolon separates statements'
+);
+
+// --- AS alias ---
+assertLayout(
+    'select col1 as alias1, col2 as alias2 from T',
+    'Select  col1 As alias1, col2 As alias2\nFrom    T',
+    defaultLayout, 'AS alias stays with item'
+);
+
+// --- FROM with multiple tables ---
+assertLayout(
+    'select a from T1, T2 where T1.id = T2.id',
+    'Select  a\nFrom    T1, T2\nWhere   T1.id = T2.id',
+    defaultLayout, 'FROM multiple tables comma-separated'
+);
+
+// --- Only SELECT (no FROM) ---
+assertLayout(
+    'select 1, 2, 3',
+    'Select  1, 2, 3',
+    defaultLayout, 'SELECT without FROM'
+);
+
+console.log(`\nLayout: ${layoutPassed} passed, ${layoutFailed} failed\n`);
+
+const totalFailed = failed + casingFailed + layoutFailed;
 if (totalFailed > 0) process.exit(1);
