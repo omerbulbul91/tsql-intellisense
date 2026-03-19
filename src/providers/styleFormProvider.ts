@@ -29,9 +29,16 @@ export class StyleFormProvider {
         const casingOpts = styleLoader.getCasingOptions();
         const layoutOpts = styleLoader.getLayoutOptions();
         const styleName = styleLoader.getStyleName();
-        const styleFile = vscode.workspace.getConfiguration('tsql-intellisense').get<string>('styleFile', '');
+        const config = vscode.workspace.getConfiguration('tsql-intellisense');
+        const styleFile = config.get<string>('styleFile', '');
+        const aliasOpts = {
+            assignAliases: config.get<boolean>('aliases.assignAliases', true),
+            includeAS: config.get<boolean>('aliases.includeAS', false),
+            capitaliseAliases: config.get<boolean>('aliases.capitaliseAliases', false),
+            prefixesToIgnore: config.get<string[]>('aliases.prefixesToIgnore', []),
+        };
 
-        panel.webview.html = StyleFormProvider.getHtml(casingOpts, layoutOpts, styleName, styleFile);
+        panel.webview.html = StyleFormProvider.getHtml(casingOpts, layoutOpts, aliasOpts, styleName, styleFile);
 
         panel.webview.onDidReceiveMessage(async (msg) => {
             switch (msg.cmd) {
@@ -44,6 +51,13 @@ export class StyleFormProvider {
                         styleLoader.setMaxLineLength(msg.maxLineLength);
                     }
                     styleLoader.applyOverrides(overrides);
+                    // Alias settings
+                    if (msg.aliases) {
+                        await config.update('aliases.assignAliases', msg.aliases.assignAliases, vscode.ConfigurationTarget.Global);
+                        await config.update('aliases.includeAS', msg.aliases.includeAS, vscode.ConfigurationTarget.Global);
+                        await config.update('aliases.capitaliseAliases', msg.aliases.capitaliseAliases, vscode.ConfigurationTarget.Global);
+                        await config.update('aliases.prefixesToIgnore', msg.aliases.prefixesToIgnore, vscode.ConfigurationTarget.Global);
+                    }
                     panel.webview.postMessage({ cmd: 'saved' });
                     vscode.window.showInformationMessage(`Stil ayarları kaydedildi`);
                     break;
@@ -101,6 +115,7 @@ export class StyleFormProvider {
     private static getHtml(
         options: { reservedKeywords: CasingMode; builtInFunctions: CasingMode; builtInDataTypes: CasingMode },
         layout: { maxLineLength: number; placeCommasBeforeItems: boolean; alignItemsToTabStops: boolean },
+        aliases: { assignAliases: boolean; includeAS: boolean; capitaliseAliases: boolean; prefixesToIgnore: string[] },
         styleName: string,
         styleFile: string
     ): string {
@@ -359,6 +374,9 @@ export class StyleFormProvider {
             <div class="menu-item disabled">CASE</div>
             <div class="menu-item disabled">IN</div>
             <div class="menu-item disabled">Operators</div>
+
+            <div class="section-title">Inserted code</div>
+            <div class="menu-item" onclick="showSection('aliases')">Aliases</div>
         </div>
 
         <div class="content">
@@ -436,6 +454,39 @@ export class StyleFormProvider {
                     <div class="info-bar">
                         <span class="icon">ℹ</span>
                         These options affect SELECT column list formatting.
+                    </div>
+                </div>
+
+                <!-- Aliases Section -->
+                <div id="section-aliases" style="display:none">
+                    <h2>Aliases</h2>
+
+                    <div class="checkbox-row" style="margin-left:0">
+                        <input type="checkbox" id="assignAliases" ${aliases.assignAliases ? 'checked' : ''}>
+                        <label for="assignAliases">Assign aliases</label>
+                    </div>
+
+                    <div class="checkbox-row" style="margin-left:24px">
+                        <input type="checkbox" id="includeAS" ${aliases.includeAS ? 'checked' : ''}>
+                        <label for="includeAS">Include AS in alias definition</label>
+                    </div>
+
+                    <div class="checkbox-row" style="margin-left:24px">
+                        <input type="checkbox" id="capitaliseAliases" ${aliases.capitaliseAliases ? 'checked' : ''}>
+                        <label for="capitaliseAliases">Capitalise aliases</label>
+                    </div>
+
+                    <h3>Prefixes to ignore</h3>
+                    <div class="info-bar">
+                        <span class="icon">ℹ</span>
+                        When generating an alias from a table name, ignore these prefixes.
+                    </div>
+
+                    <div style="margin:8px 0; display:flex; gap:8px; align-items:flex-start;">
+                        <textarea id="prefixesToIgnore" rows="6"
+                            style="width:300px; padding:8px; font-size:13px; font-family:var(--vscode-editor-fontFamily, monospace); background:var(--vscode-input-background); color:var(--vscode-input-foreground); border:1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius:2px; outline:none; resize:vertical;"
+                            placeholder="One prefix per line, e.g.&#10;Cv_Rn&#10;Tb_Rn&#10;Tmp_Rn">${aliases.prefixesToIgnore.join('\n')}</textarea>
+                        <span style="font-size:12px; color:var(--vscode-descriptionForeground); padding-top:8px;">One prefix per line</span>
                     </div>
                 </div>
             </div>
@@ -516,6 +567,8 @@ export class StyleFormProvider {
         }
 
         function save() {
+            const prefixText = document.getElementById('prefixesToIgnore').value.trim();
+            const prefixes = prefixText ? prefixText.split('\\n').map(s => s.trim()).filter(s => s) : [];
             vscode.postMessage({
                 cmd: 'save',
                 casing: {
@@ -528,6 +581,12 @@ export class StyleFormProvider {
                     alignItemsToTabStops: document.getElementById('alignItemsToTabStops').checked,
                 },
                 maxLineLength: parseInt(document.getElementById('maxLineLength').value) || 0,
+                aliases: {
+                    assignAliases: document.getElementById('assignAliases').checked,
+                    includeAS: document.getElementById('includeAS').checked,
+                    capitaliseAliases: document.getElementById('capitaliseAliases').checked,
+                    prefixesToIgnore: prefixes,
+                },
             });
         }
 
