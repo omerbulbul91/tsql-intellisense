@@ -18,6 +18,17 @@ const CLAUSE_KEYWORDS = new Set(['SELECT', 'FROM', 'WHERE', 'HAVING']);
 const COMPOUND_FIRST = new Set(['ORDER', 'GROUP']);
 const JOIN_KEYWORDS = new Set(['INNER', 'LEFT', 'RIGHT', 'CROSS', 'FULL']);
 
+// Keywords that start a new statement (used to detect statement boundaries in re-tokenized input)
+const LAYOUT_STMT_STARTERS = new Set([
+    'SET', 'IF', 'ELSE', 'WHILE', 'PRINT', 'EXEC', 'EXECUTE',
+    'DECLARE', 'INSERT', 'UPDATE', 'DELETE', 'MERGE',
+    'RETURN', 'THROW', 'RAISERROR', 'BEGIN', 'END',
+    'CREATE', 'ALTER', 'DROP', 'TRUNCATE',
+    'GRANT', 'DENY', 'REVOKE', 'USE', 'WAITFOR',
+    'OPEN', 'CLOSE', 'FETCH', 'DEALLOCATE',
+    'COMMIT', 'ROLLBACK', 'BREAK', 'CONTINUE', 'SAVE',
+]);
+
 interface Clause {
     keyword: string;       // e.g. "Select", "Order By"
     keywordLength: number; // display length
@@ -30,6 +41,7 @@ interface StatementParts {
     clauses: Clause[];
     prefix: string; // tokens before SELECT (e.g. CREATE OR ALTER VIEW ... AS)
     suffix: string; // trailing ;, comments, etc.
+    indent: string; // block indentation extracted from whitespace before SELECT
 }
 
 /**
@@ -52,16 +64,17 @@ export function applyLayout(tokens: Token[], options: LayoutOptions): string {
         const paddingWidth = options.alignItemsToTabStops ? maxKwLen + 2 : 0;
 
         const formattedClauses: string[] = [];
+        const ind = stmt.indent; // block indentation prefix
 
         for (const clause of stmt.clauses) {
-            const kwPadded = options.alignItemsToTabStops
+            const kwPadded = ind + (options.alignItemsToTabStops
                 ? clause.keyword + ' '.repeat(paddingWidth - clause.keywordLength)
-                : clause.keyword + ' ';
+                : clause.keyword + ' ');
             const prefix = clause.prefix ? clause.prefix + ' ' : '';
 
             // FROM clause with JOINs — special handling
             if (clause.keyword.toUpperCase() === 'FROM' && options.join && hasJoinTokens(clause.rawTokens)) {
-                formattedClauses.push(formatFromWithJoins(clause, kwPadded, paddingWidth, options));
+                formattedClauses.push(formatFromWithJoins(clause, kwPadded, paddingWidth, options, ind));
                 continue;
             }
 
@@ -82,11 +95,11 @@ export function applyLayout(tokens: Token[], options: LayoutOptions): string {
                     // Wrap to new line
                     lines.push(currentLine);
                     if (options.placeCommasBeforeItems) {
-                        currentLine = ' '.repeat(paddingWidth - 2) + ', ' + item;
+                        currentLine = ind + ' '.repeat(paddingWidth - 2) + ', ' + item;
                     } else {
                         // Add trailing comma to previous line
                         lines[lines.length - 1] += ',';
-                        currentLine = ' '.repeat(paddingWidth) + item;
+                        currentLine = ind + ' '.repeat(paddingWidth) + item;
                     }
                 } else {
                     currentLine = testLine;
@@ -99,14 +112,14 @@ export function applyLayout(tokens: Token[], options: LayoutOptions): string {
         let result = stmt.prefix + formattedClauses.join('\n');
         if (stmt.suffix) {
             result += stmt.suffix;
-            // Add newline after statement separator if next statement follows
+            // Add newline after ; for SELECT statements (may not have \n in token stream)
             if (stmt.suffix === ';') result += '\n';
         }
         results.push(result);
     }
 
     // Join and remove redundant blank lines
-    return results.join('').replace(/\n{3,}/g, '\n\n').replace(/\n\n(Go\b)/gi, '\n$1');
+    return results.join('');
 }
 
 /**
@@ -121,6 +134,7 @@ function splitStatements(tokens: Token[]): StatementParts[] {
     let i = 0;
     let suffixTokens: Token[] = [];
     let hasSelectClause = false;
+    let lastDmlKeyword = '';
 
     function flushClause() {
         if (currentClause) {
@@ -140,22 +154,32 @@ function splitStatements(tokens: Token[]): StatementParts[] {
         flushClause();
         // Build prefix from tokens before the first clause (e.g. CREATE OR ALTER VIEW ... AS)
         let prefixStr = suffixTokens.map(t => t.value).join('');
-        // If prefix ends with whitespace, replace with newline (SELECT starts on new line)
+        let indent = '';
+        // Extract block indentation from trailing whitespace of prefix
         if (prefixStr && hasSelectClause) {
-            prefixStr = prefixStr.replace(/\s+$/, '\n');
+            const lastNewline = prefixStr.lastIndexOf('\n');
+            if (lastNewline >= 0) {
+                const afterNewline = prefixStr.substring(lastNewline + 1);
+                indent = afterNewline.match(/^(\s*)/)?.[1] || '';
+                prefixStr = prefixStr.substring(0, lastNewline + 1);
+            } else {
+                // No newline in prefix — replace trailing whitespace with newline
+                prefixStr = prefixStr.replace(/\s+$/, '\n');
+            }
         }
         if (hasSelectClause) {
-            statements.push({ clauses: currentClauses, prefix: prefixStr, suffix });
+            statements.push({ clauses: currentClauses, prefix: prefixStr, suffix, indent });
         } else {
             // Not a SELECT statement — return as-is
             const raw = currentClauses.length > 0
                 ? prefixStr + rebuildRaw(currentClauses, []) + suffix
                 : prefixStr + suffix;
-            statements.push({ clauses: [], prefix: '', suffix: raw });
+            statements.push({ clauses: [], prefix: '', suffix: raw, indent: '' });
         }
         currentClauses = [];
         suffixTokens = [];
         hasSelectClause = false;
+        lastDmlKeyword = '';
     }
 
     while (i < tokens.length) {
@@ -169,8 +193,8 @@ function splitStatements(tokens: Token[]): StatementParts[] {
         if (depth === 0 && t.type === 'punctuation' && t.value === ';') {
             flushStatement(';');
             i++;
-            // Skip whitespace after ; (will be replaced by \n in output)
-            while (i < tokens.length && tokens[i].type === 'whitespace') i++;
+            // Skip space-only whitespace, preserve newlines for boundary detection / indentation
+            while (i < tokens.length && tokens[i].type === 'whitespace' && !tokens[i].value.includes('\n')) i++;
             continue;
         }
         if (depth === 0 && t.type === 'keyword' && t.value.toUpperCase() === 'GO') {
@@ -180,12 +204,37 @@ function splitStatements(tokens: Token[]): StatementParts[] {
             continue;
         }
 
+        // Statement boundary: newline + statement-starting keyword at depth 0
+        if (depth === 0 && t.type === 'whitespace' && t.value.includes('\n')) {
+            let nextIdx = i + 1;
+            while (nextIdx < tokens.length && tokens[nextIdx].type === 'whitespace') nextIdx++;
+            if (nextIdx < tokens.length && tokens[nextIdx].type === 'keyword') {
+                const nextUpper = tokens[nextIdx].value.toUpperCase();
+                // Don't flush SET if inside UPDATE chain (UPDATE...SET is one statement)
+                const skipSet = nextUpper === 'SET' && lastDmlKeyword === 'UPDATE';
+                if (LAYOUT_STMT_STARTERS.has(nextUpper) && !skipSet) {
+                    flushStatement('');
+                    suffixTokens.push(t);
+                    i++;
+                    continue;
+                }
+            }
+        }
+
+        // Track DML keywords for UPDATE...SET detection
+        if (depth === 0 && t.type === 'keyword') {
+            const kwUpper = t.value.toUpperCase();
+            if (kwUpper === 'UPDATE' || kwUpper === 'SELECT' || kwUpper === 'INSERT' || kwUpper === 'DELETE') {
+                lastDmlKeyword = kwUpper;
+            }
+        }
+
         // Clause keyword detection (depth=0 only)
         if (depth === 0 && t.type === 'keyword') {
             const upper = t.value.toUpperCase();
 
-            // Compound: ORDER BY, GROUP BY
-            if (COMPOUND_FIRST.has(upper)) {
+            // Compound: ORDER BY, GROUP BY — only after SELECT
+            if (hasSelectClause && COMPOUND_FIRST.has(upper)) {
                 const byIdx = findNextNonTrivial(tokens, i + 1);
                 if (byIdx !== -1 && tokens[byIdx].type === 'keyword' && tokens[byIdx].value.toUpperCase() === 'BY') {
                     flushClause();
@@ -196,7 +245,7 @@ function splitStatements(tokens: Token[]): StatementParts[] {
                 }
             }
 
-            if (CLAUSE_KEYWORDS.has(upper)) {
+            if (upper === 'SELECT' || (hasSelectClause && CLAUSE_KEYWORDS.has(upper))) {
                 flushClause();
                 if (upper === 'SELECT') hasSelectClause = true;
 
@@ -392,7 +441,7 @@ interface JoinPart {
  * Format FROM clause with JOINs.
  * Splits: FROM table alias \n JOIN table alias ON \n condition
  */
-function formatFromWithJoins(clause: Clause, kwPadded: string, paddingWidth: number, options: LayoutOptions): string {
+function formatFromWithJoins(clause: Clause, kwPadded: string, paddingWidth: number, options: LayoutOptions, blockIndent: string = ''): string {
     const joinOpts = options.join!;
     const parts = parseJoinParts(clause.rawTokens);
 
@@ -401,7 +450,7 @@ function formatFromWithJoins(clause: Clause, kwPadded: string, paddingWidth: num
         return kwPadded + items.join(', ');
     }
 
-    const joinIndent = ' '.repeat(paddingWidth);
+    const joinIndent = blockIndent + ' '.repeat(paddingWidth);
     const lines: string[] = [];
 
     // First part: FROM table

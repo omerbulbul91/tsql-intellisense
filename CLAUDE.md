@@ -37,6 +37,14 @@ src/
 │   ├── alterProcProvider.ts         -- Quick Pick ile SP seçme komutu
 │   ├── queryRunner.ts              -- WebviewViewProvider, sorgu çalıştırma, sonuç paneli (tabs/stacked)
 │   └── renameProvider.ts           -- F2 ile alias rename
+├── formatter/
+│   ├── sqlFormatter.ts              -- Ana formatter pipeline (CREATE OR ALTER, spacing, dbo. prefix)
+│   ├── sqlTokenizer.ts              -- SQL tokenizer (keyword/function/datatype/identifier/string/comment)
+│   ├── casingRule.ts                -- Keyword/function/datatype casing (uppercase, upperCamelCase, lowercase)
+│   ├── layoutRule.ts                -- SELECT clause layout, JOIN formatlama, tablo dbo. prefix
+│   ├── statementRule.ts             -- Statement ayırma, BEGIN/END block indentation, DECLARE/EXEC detail
+│   ├── caseRule.ts                  -- CASE expression formatlama
+│   └── styleLoader.ts              -- Ayar yükleme ve varsayılanlar
 ├── queries/
 │   └── schemaQueries.ts             -- SQL sorgu şablonları (INFORMATION_SCHEMA + sys tabloları)
 └── snippets/
@@ -209,7 +217,7 @@ Regex tabanlı cursor pozisyonu analizi. Türler:
 ### Otomatik (programatik)
 
 ```bash
-npm test    # 41 context detection + 46 projectSync/snippet testi
+npm test    # 199 test (context detection + projectSync/snippet + formatter)
 ```
 
 ### Manuel Checklist (F5 ile Extension Dev Host'ta)
@@ -260,4 +268,37 @@ npm test    # 41 context detection + 46 projectSync/snippet testi
 
 - SQL parser regex tabanlı, karmaşık nested sorgularda hata yapabilir
 - mssql eklentisinin şifreleri encrypted saklaması nedeniyle mssql bağlantıları okunamaz (şifre boş gelir)
-- Formatlama özelliği henüz yok
+### SQL Formatter
+
+7 aşamalı pipeline:
+1. **Tokenize** — SQL'i keyword/function/datatype/identifier/string/comment token'larına ayırır
+2. **Casing** — Keyword (upperCamelCase), Function (UPPERCASE), Datatype (upperCamelCase) casing uygular
+3. **CREATE OR ALTER** — `ALTER PROC/VIEW/FUNCTION/TRIGGER` → `CREATE OR ALTER` dönüşümü (zaten varsa tekrarlamaz)
+4. **Spacing** — `=` etrafında boşluk, `,` sonrası boşluk ekler
+5. **EXEC dbo.** — `Execute SpName` → `Execute dbo.SpName` (qualifyObjectNames ayarı)
+6. **Statement Formatting** — Statement ayırma, BEGIN/END block indentation, DECLARE alignment, EXEC wrapping
+7. **Layout** — SELECT clause tab-stop hizalama, JOIN formatlama, tablo dbo. prefix, satır kaydırma
+
+#### Formatter Kuralları
+
+| Kural | Açıklama |
+|-------|----------|
+| CREATE OR ALTER | ALTER PROC/VIEW/FUNCTION/TRIGGER otomatik CREATE OR ALTER'a dönüşür. Zaten CREATE OR ALTER ise tekrar eklemez |
+| SP Parametre Girintisi | PROC/PROCEDURE ile AS arasındaki `@Param` satırları 4 space girintilenir |
+| Block Comment İçerik | `/* */` içindeki satırlar `/*` delimiter'ına göre +4 space girintilenir |
+| Operator Spacing | `=` operatörünün her iki tarafında boşluk (`=FF` → `= FF`, `=3` → `= 3`) |
+| Comma Spacing | Virgül sonrası boşluk (`',16,1)` → `', 16, 1)`) |
+| EXECUTE dbo. | Niteliksiz SP adlarına dbo. prefix eklenir |
+| SELECT Layout | SELECT/FROM/WHERE/ORDER BY/GROUP BY tab-stop hizalama (maxKw + 2) |
+| JOIN Formatlama | JOIN condition yeni satırda, tablo başlangıcına hizalı |
+| Comma Before | Devam satırlarında virgül başta (`, item`) |
+| Block Indentation | BEGIN/END, IF/ELSE/WHILE derinlik takibi (4 space/level) |
+| WHERE/FROM Scope | Layout'ta WHERE/FROM sadece SELECT sonrası clause olarak algılanır (UPDATE WHERE'i bozmaz) |
+
+#### Test
+
+```bash
+npm test    # 199 test (41 context + 51 projectSync + 78 tokenizer/casing/layout/case/statement + 29 statementRule)
+```
+
+`test/spFormat.test.ts` — Gerçek dünya Türkçe SP ile 78 satırlık end-to-end doğrulama
