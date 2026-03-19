@@ -52,10 +52,10 @@ export class AlterProcProvider {
 
             let definition = result.rows[0]['definition'] as string;
 
-            // Replace CREATE with ALTER
+            // Replace CREATE with CREATE OR ALTER
             definition = definition.replace(
                 /^(\s*)CREATE\s+(PROC(?:EDURE)?)/i,
-                '$1ALTER $2'
+                '$1CREATE OR ALTER $2'
             );
 
             // Open in a new untitled SQL document

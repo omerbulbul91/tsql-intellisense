@@ -486,8 +486,8 @@ export function activate(context: vscode.ExtensionContext) {
                     );
                     if (result.rows.length > 0 && result.rows[0]['definition']) {
                         script = result.rows[0]['definition'] as string;
-                        // CREATE → ALTER dönüşümü
-                        script = script.replace(/^(\s*)CREATE\s+/i, '$1ALTER ');
+                        // CREATE → CREATE OR ALTER dönüşümü
+                        script = script.replace(/^(\s*)CREATE\s+/i, '$1CREATE OR ALTER ');
                     }
                 } catch {}
             }
