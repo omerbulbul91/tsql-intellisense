@@ -83,6 +83,11 @@ export class ProjectSync {
             return;
         }
 
+        // Normalize to CREATE OR ALTER (for non-TABLE objects)
+        if (ddl.objectType !== 'TABLE') {
+            createScript = createScript.replace(/^(\s*)CREATE\s+/i, '$1CREATE OR ALTER ');
+        }
+
         // Resolve file path
         const subDir = SUBDIRECTORY_MAP[ddl.objectType] || '';
         const filePath = path.join(projectPath, ddl.schema, subDir, `${ddl.objectName}.sql`);
