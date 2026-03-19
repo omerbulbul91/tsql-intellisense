@@ -504,6 +504,7 @@ export class StyleFormProvider {
         <div class="sidebar">
             <div class="section-title">Suggestions</div>
             <div class="menu-item" onclick="showSection('behavior')">Behavior</div>
+            <div class="menu-item" onclick="showSection('joinConditions')">Join conditions</div>
             <div class="menu-item" onclick="showSection('snippets')">Snippets</div>
 
             <div class="section-title">Inserted code</div>
@@ -603,6 +604,37 @@ export class StyleFormProvider {
                     <div class="info-bar">
                         <span class="icon">ℹ</span>
                         Most suggestion behavior is controlled by VS Code's editor.suggest.* settings. These options are SQL-specific overrides.
+                    </div>
+                </div>
+
+                <!-- Join Conditions Section -->
+                <div id="section-joinConditions" style="display:none">
+                    <h2>Suggestions &gt; Join conditions</h2>
+                    <p style="font-size:13px; color:var(--vscode-descriptionForeground); margin-bottom:16px;">
+                        By default, SQL Prompt suggests joins based on foreign key relationships.
+                    </p>
+
+                    <p style="font-size:13px; margin-bottom:8px;">Also suggest join conditions based on:</p>
+
+                    <div class="checkbox-row" style="margin-left:0">
+                        <input type="checkbox" id="joinMatchingNames" checked>
+                        <label for="joinMatchingNames">Columns with matching names (not case-sensitive)</label>
+                    </div>
+
+                    <div class="checkbox-row" style="margin-left:0">
+                        <input type="checkbox" id="joinMatchingTypes">
+                        <label for="joinMatchingTypes">Columns with matching data types</label>
+                    </div>
+
+                    <div class="checkbox-row" style="margin-left:0">
+                        <input type="checkbox" id="joinMultiColumnFK">
+                        <label for="joinMultiColumnFK">Individual columns in multiple-column foreign keys</label>
+                    </div>
+
+                    <h3>Column order</h3>
+                    <div class="checkbox-row" style="margin-left:0">
+                        <input type="checkbox" id="swapJoinColumnOrder">
+                        <label for="swapJoinColumnOrder">Swap order of columns in join clauses</label>
                     </div>
                 </div>
 
