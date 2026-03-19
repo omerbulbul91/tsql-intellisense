@@ -538,6 +538,9 @@ export class StyleFormProvider {
             <div class="menu-item disabled">IN</div>
             <div class="menu-item disabled">Operators</div>
 
+            <div class="section-title">Queries</div>
+            <div class="menu-item" onclick="showSection('history')">History</div>
+
             <div class="section-title">Settings</div>
             <div class="menu-item" onclick="showSection('paths')">Paths</div>
             <div class="menu-item" onclick="showSection('connections')">Connections</div>
@@ -860,6 +863,51 @@ export class StyleFormProvider {
                     <div class="info-bar">
                         <span class="icon">ℹ</span>
                         Auto-closing for quotes, parentheses and brackets is handled by VS Code's built-in settings (editor.autoClosingBrackets, editor.autoClosingQuotes).
+                    </div>
+                </div>
+
+                <!-- History Section -->
+                <div id="section-history" style="display:none">
+                    <h2>Queries &gt; History</h2>
+
+                    <div class="checkbox-row" style="margin-left:0">
+                        <input type="checkbox" id="enableSqlHistory" checked>
+                        <label for="enableSqlHistory">Enable SQL History</label>
+                    </div>
+
+                    <h3>Query size</h3>
+                    <div class="form-row">
+                        <label>Maximum query size:</label>
+                        <select id="maxQuerySize" style="width:100px; padding:5px 8px; font-size:13px; font-family:var(--vscode-font-family); background:var(--vscode-input-background); color:var(--vscode-input-foreground); border:1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius:2px;">
+                            <option value="256">256 KB</option>
+                            <option value="512">512 KB</option>
+                            <option value="1024" selected>1 MB</option>
+                            <option value="2048">2 MB</option>
+                            <option value="5120">5 MB</option>
+                        </select>
+                    </div>
+                    <p style="font-size:12px; color:var(--vscode-descriptionForeground); margin-left:196px;">
+                        Queries larger than the maximum size won't be stored in the history
+                    </p>
+
+                    <h3>Open queries</h3>
+                    <div class="checkbox-row" style="margin-left:0">
+                        <input type="checkbox" id="restoreOpenQueries" checked>
+                        <label for="restoreOpenQueries">Restore open queries when VS Code starts</label>
+                    </div>
+                    <div class="form-row" style="margin-left:24px">
+                        <label>Maximum number of queries to restore:</label>
+                        <input type="number" id="maxQueriesToRestore" value="20" min="1" max="100"
+                            style="width:70px; padding:5px 8px; font-size:13px; font-family:var(--vscode-font-family); background:var(--vscode-input-background); color:var(--vscode-input-foreground); border:1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius:2px;" />
+                    </div>
+
+                    <h3>Clear SQL History</h3>
+                    <div class="checkbox-row" style="margin-left:0">
+                        <input type="checkbox" id="autoRemoveOldQueries" checked>
+                        <label for="autoRemoveOldQueries">Automatically remove queries older than</label>
+                        <input type="number" id="historyRetentionDays" value="7" min="1" max="365"
+                            style="width:60px; margin:0 6px; padding:5px 8px; font-size:13px; font-family:var(--vscode-font-family); background:var(--vscode-input-background); color:var(--vscode-input-foreground); border:1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius:2px;" />
+                        <span style="font-size:13px;">days</span>
                     </div>
                 </div>
 
