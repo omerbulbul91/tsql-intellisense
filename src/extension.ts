@@ -1324,9 +1324,14 @@ export function activate(context: vscode.ExtensionContext) {
                 const doc = await vscode.workspace.openTextDocument(filePath);
                 await vscode.window.showTextDocument(doc);
             } catch {
-                // File not found — reveal the subfolder in OS explorer
-                const folderUri = vscode.Uri.file(`${projectPath}/dbo/${subFolder}`);
-                await vscode.commands.executeCommand('revealFileInOS', folderUri);
+                // Try without schema prefix
+                try {
+                    const altPath = vscode.Uri.file(`${projectPath}/${subFolder}/${objectName}.sql`);
+                    const doc = await vscode.workspace.openTextDocument(altPath);
+                    await vscode.window.showTextDocument(doc);
+                } catch {
+                    vscode.window.showWarningMessage(`File not found: ${filePath.fsPath}`);
+                }
             }
         })
     );
