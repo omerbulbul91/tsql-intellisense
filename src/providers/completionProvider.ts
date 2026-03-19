@@ -750,7 +750,7 @@ export class TsqlCompletionProvider implements vscode.CompletionItemProvider {
             starItem.detail = `${columns.length} columns with ${alias}. prefix`;
             starItem.sortText = '0_0000';
             starItem.filterText = '* expand all';
-            const allCols = columns.map(c => `${aliasPrefix}${c.name}`).join(',\n\t');
+            const allCols = TsqlCompletionProvider.formatExpandedColumns(columns.map(c => `${aliasPrefix}${c.name}`));
             starItem.insertText = new vscode.SnippetString(allCols);
             if (replaceRange) {
                 starItem.range = replaceRange;
@@ -846,5 +846,38 @@ export class TsqlCompletionProvider implements vscode.CompletionItemProvider {
         }
 
         return new vscode.CompletionList(items, false);
+    }
+
+    /**
+     * Format expanded column list according to style settings (maxLineLength, commas before).
+     */
+    private static formatExpandedColumns(cols: string[]): string {
+        const config = vscode.workspace.getConfiguration('tsql-intellisense');
+        const maxLine = config.get<number>('maxLineLength', 120);
+        const commasBefore = config.get<any>('styleOverrides')?.lists?.placeCommasBeforeItems ?? true;
+        const padding = 8; // typical SELECT padding width
+
+        if (cols.length === 0) return '';
+
+        const lines: string[] = [];
+        let currentLine = cols[0];
+
+        for (let i = 1; i < cols.length; i++) {
+            const test = currentLine + ', ' + cols[i];
+            if (maxLine > 0 && test.length + padding > maxLine) {
+                lines.push(currentLine);
+                if (commasBefore) {
+                    currentLine = ', ' + cols[i];
+                } else {
+                    lines[lines.length - 1] += ',';
+                    currentLine = cols[i];
+                }
+            } else {
+                currentLine = test;
+            }
+        }
+        lines.push(currentLine);
+
+        return lines.join('\n');
     }
 }
