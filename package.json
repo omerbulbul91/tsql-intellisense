@@ -360,6 +360,11 @@
           "default": "",
           "description": "Redgate SQL Prompt snippet JSON dosyalarını içeren dizin yolu"
         },
+        "tsql-intellisense.maxLineLength": {
+          "type": "number",
+          "default": 120,
+          "description": "SQL formatlama için maksimum satır uzunluğu (0 = wrap yok)"
+        },
         "tsql-intellisense.styleFile": {
           "type": "string",
           "default": "",

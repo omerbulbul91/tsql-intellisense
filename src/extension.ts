@@ -226,6 +226,8 @@ export function activate(context: vscode.ExtensionContext) {
     const styleOutputChannel = vscode.window.createOutputChannel('T-SQL Formatter');
     const styleLoader = new StyleLoader(styleOutputChannel);
     const styleFile = vscode.workspace.getConfiguration('tsql-intellisense').get<string>('styleFile', '');
+    const maxLineLength = vscode.workspace.getConfiguration('tsql-intellisense').get<number>('maxLineLength', 120);
+    styleLoader.setMaxLineLength(maxLineLength);
     styleLoader.loadFromFile(styleFile);
     const styleOverrides = vscode.workspace.getConfiguration('tsql-intellisense').get<any>('styleOverrides');
     if (styleOverrides) { styleLoader.applyOverrides(styleOverrides); }
@@ -275,6 +277,10 @@ export function activate(context: vscode.ExtensionContext) {
             if (e.affectsConfiguration('tsql-intellisense.styleFile')) {
                 const file = vscode.workspace.getConfiguration('tsql-intellisense').get<string>('styleFile', '');
                 styleLoader.loadFromFile(file);
+            }
+            if (e.affectsConfiguration('tsql-intellisense.maxLineLength')) {
+                const ml = vscode.workspace.getConfiguration('tsql-intellisense').get<number>('maxLineLength', 120);
+                styleLoader.setMaxLineLength(ml);
             }
         })
     );

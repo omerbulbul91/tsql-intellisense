@@ -1,5 +1,6 @@
 import { tokenize } from './sqlTokenizer';
-import { applyCasing } from './casingRule';
+import { applyCasingInPlace } from './casingRule';
+import { applyLayout } from './layoutRule';
 import { StyleLoader } from './styleLoader';
 
 export class SqlFormatter {
@@ -7,7 +8,7 @@ export class SqlFormatter {
 
     format(sql: string): string {
         const tokens = tokenize(sql);
-        const options = this.styleLoader.getCasingOptions();
-        return applyCasing(tokens, options);
+        applyCasingInPlace(tokens, this.styleLoader.getCasingOptions());
+        return applyLayout(tokens, this.styleLoader.getLayoutOptions());
     }
 }
