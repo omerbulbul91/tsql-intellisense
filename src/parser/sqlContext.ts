@@ -356,7 +356,7 @@ export function detectContext(textBeforeCursor: string, fullStatementText: strin
             };
         }
 
-        const columnContextMatch = currentLine.match(/(?:SELECT(?:\s+(?:DISTINCT|ALL|TOP\s+\d+))?|WHERE|AND|OR|ON|SET|ORDER\s+BY|HAVING|,|\()\s*([\w*]*)$/i);
+        const columnContextMatch = currentLine.match(/(?:SELECT(?:\s+(?:DISTINCT|ALL|TOP\s+\d+))?|WHERE|AND|OR|ON|SET|ORDER\s+BY|HAVING|WHEN|THEN|ELSE|CASE|,|\()\s*([\w*]*)$/i);
         if (columnContextMatch) {
             return {
                 type: SqlContextType.AFTER_SELECT,
