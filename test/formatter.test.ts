@@ -331,5 +331,74 @@ assertLayout(
 
 console.log(`\nLayout: ${layoutPassed} passed, ${layoutFailed} failed\n`);
 
-const totalFailed = failed + casingFailed + layoutFailed;
+// ===================== CASE FORMATTING TESTS =====================
+
+import { applyCaseFormatting, CaseOptions, DEFAULT_CASE_OPTIONS } from '../src/formatter/caseRule';
+
+let casePassed = 0;
+let caseFailed = 0;
+
+function assertCase(input: string, expected: string, options: Partial<CaseOptions>, testName: string) {
+    const opts = { ...DEFAULT_CASE_OPTIONS, ...options };
+    const tokens = tokenize(input);
+    applyCasingInPlace(tokens, { reservedKeywords: 'upperCamelCase', builtInFunctions: 'uppercase', builtInDataTypes: 'upperCamelCase' });
+    const cased = tokens.map(t => t.value).join('');
+    const casedTokens = tokenize(cased);
+    const result = applyCaseFormatting(cased, opts, casedTokens);
+    if (result === expected) {
+        casePassed++;
+        console.log(`  ✅ ${testName}`);
+    } else {
+        caseFailed++;
+        console.error(`  ❌ ${testName}`);
+        console.error(`    expected: "${expected.replace(/\n/g, '\\n')}"`);
+        console.error(`    got:      "${result.replace(/\n/g, '\\n')}"`);
+    }
+}
+
+console.log('\n=== CASE Formatting Tests ===\n');
+
+// --- Default: WHEN inline, ELSE on new line ---
+assertCase(
+    'select case when x = 1 then \'a\' when x = 2 then \'b\' else \'c\' end from T',
+    "Select Case When x = 1 Then 'a' When x = 2 Then 'b'\n     Else 'c' End From T",
+    { placeFirstWhenOnNewLine: 'never', placeElseOnNewLine: true, alignElseToWhen: true },
+    'default: WHEN inline, ELSE new line'
+);
+
+// --- All WHENs on new line ---
+assertCase(
+    'select case when x = 1 then \'a\' when x = 2 then \'b\' end from T',
+    "Select Case\n     When x = 1 Then 'a'\n     When x = 2 Then 'b' End From T",
+    { placeFirstWhenOnNewLine: 'always', whenAlignment: 'toFirstItem' },
+    'all WHENs on new line'
+);
+
+// --- THEN on new line ---
+assertCase(
+    'select case when x = 1 then \'a\' else \'b\' end from T',
+    "Select Case When x = 1\n         Then 'a'\n     Else 'b' End From T",
+    { placeThenOnNewLine: true, thenAlignment: 'indentedFromWhen', placeElseOnNewLine: true, alignElseToWhen: true },
+    'THEN on new line indented from WHEN'
+);
+
+// --- ELSE inline ---
+assertCase(
+    'select case when x = 1 then \'a\' else \'b\' end from T',
+    "Select Case When x = 1 Then 'a' Else 'b' End From T",
+    { placeElseOnNewLine: false },
+    'ELSE inline'
+);
+
+// --- Simple CASE expression (CASE expr WHEN val) ---
+assertCase(
+    'select case x when 1 then \'a\' when 2 then \'b\' end from T',
+    "Select Case x When 1 Then 'a' When 2 Then 'b' End From T",
+    { placeFirstWhenOnNewLine: 'never', placeElseOnNewLine: false },
+    'simple CASE with expression'
+);
+
+console.log(`\nCASE: ${casePassed} passed, ${caseFailed} failed\n`);
+
+const totalFailed = failed + casingFailed + layoutFailed + caseFailed;
 if (totalFailed > 0) process.exit(1);

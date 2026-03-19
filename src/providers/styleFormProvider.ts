@@ -48,7 +48,7 @@ export class StyleFormProvider {
             switch (msg.cmd) {
                 case 'save': {
                     const config = vscode.workspace.getConfiguration('tsql-intellisense');
-                    const overrides = { ...msg.casing, lists: msg.lists };
+                    const overrides = { ...msg.casing, lists: msg.lists, caseExpressions: msg.caseExpressions };
                     await config.update('styleOverrides', overrides, vscode.ConfigurationTarget.Global);
                     if (msg.maxLineLength !== undefined) {
                         await config.update('maxLineLength', msg.maxLineLength, vscode.ConfigurationTarget.Global);
@@ -1166,6 +1166,15 @@ export class StyleFormProvider {
                     includeAS: document.getElementById('includeAS').checked,
                     capitaliseAliases: document.getElementById('capitaliseAliases').checked,
                     prefixesToIgnore: prefixes,
+                },
+                caseExpressions: {
+                    placeExpressionOnNewLine: document.getElementById('casePlaceExprOnNewLine').checked,
+                    placeFirstWhenOnNewLine: document.getElementById('caseFirstWhenNewLine').value,
+                    whenAlignment: document.getElementById('caseWhenAlignment').value,
+                    placeThenOnNewLine: document.getElementById('casePlaceThenOnNewLine').checked,
+                    thenAlignment: document.getElementById('caseThenAlignment').value,
+                    placeElseOnNewLine: document.getElementById('casePlaceElseOnNewLine').checked,
+                    alignElseToWhen: document.getElementById('caseAlignElseToWhen').checked,
                 },
                 disableWordSuggestions: document.getElementById('disableWordSuggestions').checked,
                 joinConditions: {

@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import { CasingOptions, CasingMode } from './casingRule';
 import { LayoutOptions } from './layoutRule';
+import { CaseOptions, DEFAULT_CASE_OPTIONS } from './caseRule';
 
 export interface SqlStyle {
     metadata?: { id?: string; name?: string };
@@ -38,6 +39,7 @@ function validateMode(value: string | undefined, fallback: CasingMode): CasingMo
 export class StyleLoader {
     private casingOptions: CasingOptions = { ...DEFAULT_CASING };
     private layoutOptions: LayoutOptions = { ...DEFAULT_LAYOUT };
+    private caseOptions: CaseOptions = { ...DEFAULT_CASE_OPTIONS };
     private styleName: string = 'RENIUMSTYLE (default)';
 
     constructor(private outputChannel?: { appendLine(msg: string): void }) {}
@@ -46,6 +48,7 @@ export class StyleLoader {
         if (!filePath) {
             this.casingOptions = { ...DEFAULT_CASING };
             this.layoutOptions = { ...DEFAULT_LAYOUT };
+            this.caseOptions = { ...DEFAULT_CASE_OPTIONS };
             this.styleName = 'RENIUMSTYLE (default)';
             this.log(`No style file configured — using default RENIUMSTYLE`);
             return;
@@ -86,6 +89,7 @@ export class StyleLoader {
             this.log(`Error loading style from ${filePath}: ${err.message} — using default`);
             this.casingOptions = { ...DEFAULT_CASING };
             this.layoutOptions = { ...DEFAULT_LAYOUT };
+            this.caseOptions = { ...DEFAULT_CASE_OPTIONS };
             this.styleName = 'RENIUMSTYLE (default)';
         }
     }
@@ -102,6 +106,7 @@ export class StyleLoader {
             placeCommasBeforeItems?: boolean;
             alignItemsToTabStops?: boolean;
         };
+        caseExpressions?: Partial<CaseOptions>;
     }): void {
         this.casingOptions = {
             reservedKeywords: validateMode(overrides.reservedKeywords, this.casingOptions.reservedKeywords),
@@ -115,12 +120,16 @@ export class StyleLoader {
                 alignItemsToTabStops: overrides.lists.alignItemsToTabStops ?? this.layoutOptions.alignItemsToTabStops,
             };
         }
+        if (overrides.caseExpressions) {
+            this.caseOptions = { ...this.caseOptions, ...overrides.caseExpressions };
+        }
         this.styleName = 'Custom (manual)';
         this.log(`Applied overrides: kw=${this.casingOptions.reservedKeywords}, fn=${this.casingOptions.builtInFunctions}, dt=${this.casingOptions.builtInDataTypes}`);
     }
 
     getCasingOptions(): CasingOptions { return this.casingOptions; }
     getLayoutOptions(): LayoutOptions { return this.layoutOptions; }
+    getCaseOptions(): CaseOptions { return this.caseOptions; }
     getStyleName(): string { return this.styleName; }
 
     private log(msg: string) {
