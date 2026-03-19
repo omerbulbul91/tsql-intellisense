@@ -95,7 +95,8 @@
       },
       {
         "command": "tsql-intellisense.openStyleSettings",
-        "title": "T-SQL IntelliSense: SQL Prompt Options"
+        "title": "T-SQL IntelliSense: SQL Prompt Options",
+        "icon": "$(gear)"
       },
       { "command": "tsql-intellisense.addConnection", "title": "T-SQL IntelliSense: Add Connection", "icon": "$(add)" },
       { "command": "tsql-intellisense.editConnection", "title": "T-SQL IntelliSense: Edit Connection", "icon": "$(edit)" },
@@ -121,6 +122,11 @@
           "group": "1_modification@1"
         },
         {
+          "command": "tsql-intellisense.openStyleSettings",
+          "when": "editorLangId == sql && tsqlIntellisense.active",
+          "group": "1_modification@2"
+        },
+        {
           "command": "tsql-intellisense.selectInObjectExplorer",
           "when": "editorLangId == sql && tsqlIntellisense.active",
           "group": "z_tsql@1"
@@ -135,7 +141,8 @@
       ],
       "view/title": [
         { "command": "tsql-intellisense.addConnection", "when": "view == tsqlConnections", "group": "navigation" },
-        { "command": "tsql-intellisense.refreshSchema", "when": "view == tsqlConnections", "group": "navigation" }
+        { "command": "tsql-intellisense.refreshSchema", "when": "view == tsqlConnections", "group": "navigation" },
+        { "command": "tsql-intellisense.openStyleSettings", "when": "view == tsqlConnections", "group": "navigation" }
       ],
       "view/item/context": [
         { "command": "tsql-intellisense.treeConnect", "when": "viewItem == connection.disconnected", "group": "1_connection" },
