@@ -85,6 +85,14 @@
         "command": "tsql-intellisense.setSnippetFolder",
         "title": "T-SQL IntelliSense: Set Snippet Folder"
       },
+      {
+        "command": "tsql-intellisense.formatSql",
+        "title": "T-SQL IntelliSense: Format SQL"
+      },
+      {
+        "command": "tsql-intellisense.setStyleFolder",
+        "title": "T-SQL IntelliSense: Set Style Folder"
+      },
       { "command": "tsql-intellisense.addConnection", "title": "T-SQL IntelliSense: Add Connection", "icon": "$(add)" },
       { "command": "tsql-intellisense.editConnection", "title": "T-SQL IntelliSense: Edit Connection", "icon": "$(edit)" },
       { "command": "tsql-intellisense.deleteConnection", "title": "T-SQL IntelliSense: Delete Connection", "icon": "$(trash)" },
@@ -203,6 +211,11 @@
       {
         "command": "tsql-intellisense.openProjectFile",
         "key": "ctrl+f11",
+        "when": "editorLangId == sql && tsqlIntellisense.active"
+      },
+      {
+        "command": "tsql-intellisense.formatSql",
+        "key": "ctrl+k y",
         "when": "editorLangId == sql && tsqlIntellisense.active"
       }
     ],
@@ -337,6 +350,11 @@
           "type": "string",
           "default": "",
           "description": "Redgate SQL Prompt snippet JSON dosyalarını içeren dizin yolu"
+        },
+        "tsql-intellisense.styleFolder": {
+          "type": "string",
+          "default": "",
+          "description": "Redgate SQL Prompt stil dosyalarını (.json) içeren dizin yolu"
         }
       }
     }
@@ -345,7 +363,7 @@
     "build": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node && esbuild src/extension.web.ts --bundle --outfile=dist/extension.web.js --external:vscode --format=cjs --platform=browser",
     "build:web": "esbuild src/extension.web.ts --bundle --outfile=dist/extension.web.js --external:vscode --format=cjs --platform=browser",
     "watch": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --watch",
-    "test": "npx ts-node test/contextDetection.test.ts && npx ts-node test/projectSync.test.ts",
+    "test": "npx ts-node test/contextDetection.test.ts && npx ts-node test/projectSync.test.ts && npx ts-node test/formatter.test.ts",
     "package": "vsce package"
   },
   "dependencies": {

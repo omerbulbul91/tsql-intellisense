@@ -12,6 +12,8 @@ import { ConnectionTreeProvider, FilterTarget } from './providers/connectionTree
 import { DatabaseItem, ObjectItem, ObjectType } from './providers/connectionTreeItems';
 import { TsqlCodeLensProvider } from './providers/sqlCodeLensProvider';
 import { ConnectionFormProvider } from './providers/connectionFormProvider';
+import { StyleLoader } from './formatter/styleLoader';
+import { FormatterProvider } from './providers/formatterProvider';
 
 let connectionManager: ConnectionManager;
 let schemaCache: SchemaCache;
@@ -215,6 +217,53 @@ export function activate(context: vscode.ExtensionContext) {
             if (result && result[0]) {
                 await vscode.workspace.getConfiguration('tsql-intellisense').update('snippetFolder', result[0].fsPath, vscode.ConfigurationTarget.Global);
                 vscode.window.showInformationMessage(`Snippet dizini ayarlandı: ${result[0].fsPath}`);
+            }
+        })
+    );
+
+    // ── SQL Formatter (style-based casing) ──
+    const styleOutputChannel = vscode.window.createOutputChannel('T-SQL Formatter');
+    const styleLoader = new StyleLoader(styleOutputChannel);
+    const styleFolder = vscode.workspace.getConfiguration('tsql-intellisense').get<string>('styleFolder', '');
+    styleLoader.loadFromFolder(styleFolder);
+
+    const formatterProvider = new FormatterProvider(styleLoader);
+    context.subscriptions.push(
+        vscode.languages.registerDocumentFormattingEditProvider({ language: 'sql', scheme: '*' }, formatterProvider),
+        vscode.languages.registerDocumentRangeFormattingEditProvider({ language: 'sql', scheme: '*' }, formatterProvider)
+    );
+
+    // Ctrl+K Y — format SQL
+    context.subscriptions.push(
+        vscode.commands.registerCommand('tsql-intellisense.formatSql', () => {
+            formatterProvider.formatActiveEditor();
+        })
+    );
+
+    // Set Style Folder command
+    context.subscriptions.push(
+        vscode.commands.registerCommand('tsql-intellisense.setStyleFolder', async () => {
+            const current = vscode.workspace.getConfiguration('tsql-intellisense').get<string>('styleFolder', '');
+            const result = await vscode.window.showOpenDialog({
+                canSelectFiles: false,
+                canSelectFolders: true,
+                canSelectMany: false,
+                openLabel: 'Stil Dizini Seç',
+                defaultUri: current ? vscode.Uri.file(current) : undefined
+            });
+            if (result && result[0]) {
+                await vscode.workspace.getConfiguration('tsql-intellisense').update('styleFolder', result[0].fsPath, vscode.ConfigurationTarget.Global);
+                vscode.window.showInformationMessage(`Stil dizini ayarlandı: ${result[0].fsPath}`);
+            }
+        })
+    );
+
+    // Reload style on config change
+    context.subscriptions.push(
+        vscode.workspace.onDidChangeConfiguration(e => {
+            if (e.affectsConfiguration('tsql-intellisense.styleFolder')) {
+                const folder = vscode.workspace.getConfiguration('tsql-intellisense').get<string>('styleFolder', '');
+                styleLoader.loadFromFolder(folder);
             }
         })
     );
