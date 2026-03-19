@@ -485,7 +485,7 @@ export function activate(context: vscode.ExtensionContext) {
                         { objectName: { type: TYPES.NVarChar, value: objName } }
                     );
                     if (result.rows.length > 0 && result.rows[0]['definition']) {
-                        script = result.rows[0]['definition'] as string;
+                        script = (result.rows[0]['definition'] as string).replace(/^\s*\n/, '').trimStart();
                         // Only CREATE → CREATE OR ALTER, with casing rule applied to the prefix
                         const { applyCasing } = require('./formatter/casingRule');
                         const { tokenize } = require('./formatter/sqlTokenizer');
