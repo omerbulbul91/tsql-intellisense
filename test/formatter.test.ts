@@ -353,6 +353,20 @@ assertLayout(
     joinLayout, 'CROSS JOIN (no ON)'
 );
 
+// --- CREATE OR ALTER VIEW preserved ---
+assertLayout(
+    'create or alter view vw_Test as select a, b from T',
+    'Create Or Alter View vw_Test As\nSelect  a, b\nFrom    T',
+    defaultLayout, 'CREATE OR ALTER VIEW prefix preserved'
+);
+
+// --- GO preserved ---
+assertLayout(
+    'select a from T\ngo',
+    'Select  a\nFrom    T\nGo',
+    defaultLayout, 'GO preserved'
+);
+
 // --- JOIN condition inline ---
 const joinInline: LayoutOptions = {
     maxLineLength: 120, placeCommasBeforeItems: true, alignItemsToTabStops: true,

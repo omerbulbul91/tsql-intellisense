@@ -27,6 +27,7 @@ interface Clause {
 
 interface StatementParts {
     clauses: Clause[];
+    prefix: string; // tokens before SELECT (e.g. CREATE OR ALTER VIEW ... AS)
     suffix: string; // trailing ;, comments, etc.
 }
 
@@ -41,7 +42,7 @@ export function applyLayout(tokens: Token[], options: LayoutOptions): string {
     for (const stmt of statements) {
         if (stmt.clauses.length === 0) {
             // No SELECT clauses found — return tokens as-is
-            results.push(stmt.suffix);
+            results.push(stmt.prefix + stmt.suffix);
             continue;
         }
 
@@ -94,7 +95,7 @@ export function applyLayout(tokens: Token[], options: LayoutOptions): string {
             formattedClauses.push(lines.join('\n'));
         }
 
-        let result = formattedClauses.join('\n');
+        let result = stmt.prefix + formattedClauses.join('\n');
         if (stmt.suffix) {
             result += stmt.suffix;
             // Add newline after statement separator if next statement follows
@@ -135,14 +136,20 @@ function splitStatements(tokens: Token[]): StatementParts[] {
 
     function flushStatement(suffix: string) {
         flushClause();
+        // Build prefix from tokens before the first clause (e.g. CREATE OR ALTER VIEW ... AS)
+        let prefixStr = suffixTokens.map(t => t.value).join('');
+        // If prefix ends with whitespace, replace with newline (SELECT starts on new line)
+        if (prefixStr && hasSelectClause) {
+            prefixStr = prefixStr.replace(/\s+$/, '\n');
+        }
         if (hasSelectClause) {
-            statements.push({ clauses: currentClauses, suffix });
+            statements.push({ clauses: currentClauses, prefix: prefixStr, suffix });
         } else {
             // Not a SELECT statement — return as-is
-            const raw = currentClauses.length > 0 || suffixTokens.length > 0
-                ? rebuildRaw(currentClauses, suffixTokens) + suffix
-                : suffix;
-            statements.push({ clauses: [], suffix: raw });
+            const raw = currentClauses.length > 0
+                ? prefixStr + rebuildRaw(currentClauses, []) + suffix
+                : prefixStr + suffix;
+            statements.push({ clauses: [], prefix: '', suffix: raw });
         }
         currentClauses = [];
         suffixTokens = [];
@@ -160,12 +167,14 @@ function splitStatements(tokens: Token[]): StatementParts[] {
         if (depth === 0 && t.type === 'punctuation' && t.value === ';') {
             flushStatement(';');
             i++;
+            // Skip whitespace after ; (will be replaced by \n in output)
+            while (i < tokens.length && tokens[i].type === 'whitespace') i++;
             continue;
         }
         if (depth === 0 && t.type === 'keyword' && t.value.toUpperCase() === 'GO') {
             flushStatement('');
-            // GO itself becomes a separate "statement"
-            statements.push({ clauses: [], suffix: t.value });
+            // GO itself becomes a separate "statement" with newline prefix
+            statements.push({ clauses: [], prefix: '\n', suffix: t.value });
             i++;
             // Skip whitespace after GO
             while (i < tokens.length && tokens[i].type === 'whitespace') {
