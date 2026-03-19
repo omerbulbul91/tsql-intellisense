@@ -1276,7 +1276,7 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.commands.registerCommand('tsql-intellisense.openProjectFile', async (item?: ObjectItem) => {
             const profile = connectionManager.currentProfile;
             if (!profile) {
-                vscode.window.showWarningMessage('Not connected to a database');
+                vscode.window.showWarningMessage('Open Project File: Not connected');
                 return;
             }
 
@@ -1285,9 +1285,15 @@ export function activate(context: vscode.ExtensionContext) {
             let objectType: ObjectType;
             if (!item) {
                 const editor = vscode.window.activeTextEditor;
-                if (!editor) { return; }
+                if (!editor) {
+                    vscode.window.showWarningMessage('Open Project File: No active editor');
+                    return;
+                }
                 const wordRange = editor.document.getWordRangeAtPosition(editor.selection.active, /[\w]+/);
-                if (!wordRange) { return; }
+                if (!wordRange) {
+                    vscode.window.showWarningMessage('Open Project File: No word at cursor');
+                    return;
+                }
                 const word = editor.document.getText(wordRange);
                 const obj = schemaCache.findObject(word);
                 if (obj) {
