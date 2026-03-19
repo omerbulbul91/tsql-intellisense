@@ -26,19 +26,24 @@ export class StyleFormProvider {
         StyleFormProvider.currentPanel = panel;
         panel.iconPath = new vscode.ThemeIcon('symbol-color');
 
-        const options = styleLoader.getCasingOptions();
+        const casingOpts = styleLoader.getCasingOptions();
+        const layoutOpts = styleLoader.getLayoutOptions();
         const styleName = styleLoader.getStyleName();
         const styleFile = vscode.workspace.getConfiguration('tsql-intellisense').get<string>('styleFile', '');
 
-        panel.webview.html = StyleFormProvider.getHtml(options, styleName, styleFile);
+        panel.webview.html = StyleFormProvider.getHtml(casingOpts, layoutOpts, styleName, styleFile);
 
         panel.webview.onDidReceiveMessage(async (msg) => {
             switch (msg.cmd) {
                 case 'save': {
-                    // Save to VS Code settings as inline style
                     const config = vscode.workspace.getConfiguration('tsql-intellisense');
-                    await config.update('styleOverrides', msg.casing, vscode.ConfigurationTarget.Global);
-                    styleLoader.applyOverrides(msg.casing);
+                    const overrides = { ...msg.casing, lists: msg.lists };
+                    await config.update('styleOverrides', overrides, vscode.ConfigurationTarget.Global);
+                    if (msg.maxLineLength !== undefined) {
+                        await config.update('maxLineLength', msg.maxLineLength, vscode.ConfigurationTarget.Global);
+                        styleLoader.setMaxLineLength(msg.maxLineLength);
+                    }
+                    styleLoader.applyOverrides(overrides);
                     panel.webview.postMessage({ cmd: 'saved' });
                     vscode.window.showInformationMessage(`Stil ayarları kaydedildi`);
                     break;
@@ -56,11 +61,13 @@ export class StyleFormProvider {
                         const filePath = result[0].fsPath;
                         await vscode.workspace.getConfiguration('tsql-intellisense').update('styleFile', filePath, vscode.ConfigurationTarget.Global);
                         await styleLoader.loadFromFile(filePath);
-                        const newOptions = styleLoader.getCasingOptions();
+                        const newCasing = styleLoader.getCasingOptions();
+                        const newLayout = styleLoader.getLayoutOptions();
                         const newName = styleLoader.getStyleName();
                         panel.webview.postMessage({
                             cmd: 'styleLoaded',
-                            casing: newOptions,
+                            casing: newCasing,
+                            layout: newLayout,
                             styleName: newName,
                             styleFile: filePath
                         });
@@ -71,11 +78,13 @@ export class StyleFormProvider {
                     const config = vscode.workspace.getConfiguration('tsql-intellisense');
                     await config.update('styleOverrides', undefined, vscode.ConfigurationTarget.Global);
                     await config.update('styleFile', '', vscode.ConfigurationTarget.Global);
+                    await config.update('maxLineLength', 120, vscode.ConfigurationTarget.Global);
+                    styleLoader.setMaxLineLength(120);
                     await styleLoader.loadFromFile('');
-                    const defaults = styleLoader.getCasingOptions();
                     panel.webview.postMessage({
                         cmd: 'styleLoaded',
-                        casing: defaults,
+                        casing: styleLoader.getCasingOptions(),
+                        layout: styleLoader.getLayoutOptions(),
                         styleName: 'RENIUMSTYLE (default)',
                         styleFile: ''
                     });
@@ -91,6 +100,7 @@ export class StyleFormProvider {
 
     private static getHtml(
         options: { reservedKeywords: CasingMode; builtInFunctions: CasingMode; builtInDataTypes: CasingMode },
+        layout: { maxLineLength: number; placeCommasBeforeItems: boolean; alignItemsToTabStops: boolean },
         styleName: string,
         styleFile: string
     ): string {
@@ -329,7 +339,7 @@ export class StyleFormProvider {
         <div class="sidebar">
             <div class="section-title">Global</div>
             <div class="menu-item disabled">Whitespace</div>
-            <div class="menu-item disabled">Lists</div>
+            <div class="menu-item" onclick="showSection('lists')">Lists</div>
             <div class="menu-item disabled">Parentheses</div>
             <div class="menu-item active" onclick="showSection('casing')">Casing</div>
 
@@ -353,49 +363,80 @@ export class StyleFormProvider {
 
         <div class="content">
             <div class="content-body">
-                <h2>Casing</h2>
+                <!-- Casing Section -->
+                <div id="section-casing">
+                    <h2>Casing</h2>
 
-                <h3>Built-in keywords, functions and types</h3>
+                    <h3>Built-in keywords, functions and types</h3>
 
-                <div class="form-row">
-                    <label>Reserved keywords:</label>
-                    <select id="reservedKeywords" onchange="updatePreview()">
-                        <option value="upperCamelCase" ${options.reservedKeywords === 'upperCamelCase' ? 'selected' : ''}>UpperCamelCase</option>
-                        <option value="uppercase" ${options.reservedKeywords === 'uppercase' ? 'selected' : ''}>UPPERCASE</option>
-                        <option value="lowercase" ${options.reservedKeywords === 'lowercase' ? 'selected' : ''}>lowercase</option>
-                        <option value="leaveAsIs" ${options.reservedKeywords === 'leaveAsIs' ? 'selected' : ''}>Leave as is</option>
-                    </select>
+                    <div class="form-row">
+                        <label>Reserved keywords:</label>
+                        <select id="reservedKeywords" onchange="updatePreview()">
+                            <option value="upperCamelCase" ${options.reservedKeywords === 'upperCamelCase' ? 'selected' : ''}>UpperCamelCase</option>
+                            <option value="uppercase" ${options.reservedKeywords === 'uppercase' ? 'selected' : ''}>UPPERCASE</option>
+                            <option value="lowercase" ${options.reservedKeywords === 'lowercase' ? 'selected' : ''}>lowercase</option>
+                            <option value="leaveAsIs" ${options.reservedKeywords === 'leaveAsIs' ? 'selected' : ''}>Leave as is</option>
+                        </select>
+                    </div>
+
+                    <div class="form-row">
+                        <label>Built-in functions:</label>
+                        <select id="builtInFunctions" onchange="updatePreview()">
+                            <option value="uppercase" ${options.builtInFunctions === 'uppercase' ? 'selected' : ''}>UPPERCASE</option>
+                            <option value="upperCamelCase" ${options.builtInFunctions === 'upperCamelCase' ? 'selected' : ''}>UpperCamelCase</option>
+                            <option value="lowercase" ${options.builtInFunctions === 'lowercase' ? 'selected' : ''}>lowercase</option>
+                            <option value="leaveAsIs" ${options.builtInFunctions === 'leaveAsIs' ? 'selected' : ''}>Leave as is</option>
+                        </select>
+                    </div>
+
+                    <div class="form-row">
+                        <label>Built-in data types:</label>
+                        <select id="builtInDataTypes" onchange="updatePreview()">
+                            <option value="upperCamelCase" ${options.builtInDataTypes === 'upperCamelCase' ? 'selected' : ''}>UpperCamelCase</option>
+                            <option value="uppercase" ${options.builtInDataTypes === 'uppercase' ? 'selected' : ''}>UPPERCASE</option>
+                            <option value="lowercase" ${options.builtInDataTypes === 'lowercase' ? 'selected' : ''}>lowercase</option>
+                            <option value="leaveAsIs" ${options.builtInDataTypes === 'leaveAsIs' ? 'selected' : ''}>Leave as is</option>
+                        </select>
+                    </div>
+
+                    <div class="info-bar">
+                        <span class="icon">ℹ</span>
+                        These options will also format your code when you use Format SQL (Ctrl+K Y).
+                    </div>
+
+                    <h3>User-defined objects</h3>
+                    <div class="checkbox-row">
+                        <input type="checkbox" id="useObjectDefinitionCase" checked disabled>
+                        <label for="useObjectDefinitionCase">Use object definition case</label>
+                    </div>
                 </div>
 
-                <div class="form-row">
-                    <label>Built-in functions:</label>
-                    <select id="builtInFunctions" onchange="updatePreview()">
-                        <option value="uppercase" ${options.builtInFunctions === 'uppercase' ? 'selected' : ''}>UPPERCASE</option>
-                        <option value="upperCamelCase" ${options.builtInFunctions === 'upperCamelCase' ? 'selected' : ''}>UpperCamelCase</option>
-                        <option value="lowercase" ${options.builtInFunctions === 'lowercase' ? 'selected' : ''}>lowercase</option>
-                        <option value="leaveAsIs" ${options.builtInFunctions === 'leaveAsIs' ? 'selected' : ''}>Leave as is</option>
-                    </select>
-                </div>
+                <!-- Lists Section -->
+                <div id="section-lists" style="display:none">
+                    <h2>Lists</h2>
 
-                <div class="form-row">
-                    <label>Built-in data types:</label>
-                    <select id="builtInDataTypes" onchange="updatePreview()">
-                        <option value="upperCamelCase" ${options.builtInDataTypes === 'upperCamelCase' ? 'selected' : ''}>UpperCamelCase</option>
-                        <option value="uppercase" ${options.builtInDataTypes === 'uppercase' ? 'selected' : ''}>UPPERCASE</option>
-                        <option value="lowercase" ${options.builtInDataTypes === 'lowercase' ? 'selected' : ''}>lowercase</option>
-                        <option value="leaveAsIs" ${options.builtInDataTypes === 'leaveAsIs' ? 'selected' : ''}>Leave as is</option>
-                    </select>
-                </div>
+                    <div class="form-row">
+                        <label>Max line length:</label>
+                        <input type="number" id="maxLineLength" value="${layout.maxLineLength}" min="0" max="500"
+                            style="width:100px; padding:5px 8px; font-size:13px; font-family:var(--vscode-font-family); background:var(--vscode-input-background); color:var(--vscode-input-foreground); border:1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius:2px; outline:none;"
+                            onchange="updatePreview()" />
+                        <span style="font-size:12px; color:var(--vscode-descriptionForeground)">0 = no wrap</span>
+                    </div>
 
-                <div class="info-bar">
-                    <span class="icon">ℹ</span>
-                    These options will also format your code when you use Format SQL (Ctrl+K Y).
-                </div>
+                    <div class="checkbox-row" style="margin-left:0">
+                        <input type="checkbox" id="placeCommasBeforeItems" ${layout.placeCommasBeforeItems ? 'checked' : ''} onchange="updatePreview()">
+                        <label for="placeCommasBeforeItems">Place commas before items</label>
+                    </div>
 
-                <h3>User-defined objects</h3>
-                <div class="checkbox-row">
-                    <input type="checkbox" id="useObjectDefinitionCase" checked disabled>
-                    <label for="useObjectDefinitionCase">Use object definition case</label>
+                    <div class="checkbox-row" style="margin-left:0">
+                        <input type="checkbox" id="alignItemsToTabStops" ${layout.alignItemsToTabStops ? 'checked' : ''} onchange="updatePreview()">
+                        <label for="alignItemsToTabStops">Align items to tab stops (clause padding)</label>
+                    </div>
+
+                    <div class="info-bar">
+                        <span class="icon">ℹ</span>
+                        These options affect SELECT column list formatting.
+                    </div>
                 </div>
             </div>
 
@@ -481,7 +522,12 @@ export class StyleFormProvider {
                     reservedKeywords: document.getElementById('reservedKeywords').value,
                     builtInFunctions: document.getElementById('builtInFunctions').value,
                     builtInDataTypes: document.getElementById('builtInDataTypes').value,
-                }
+                },
+                lists: {
+                    placeCommasBeforeItems: document.getElementById('placeCommasBeforeItems').checked,
+                    alignItemsToTabStops: document.getElementById('alignItemsToTabStops').checked,
+                },
+                maxLineLength: parseInt(document.getElementById('maxLineLength').value) || 0,
             });
         }
 
@@ -494,9 +540,11 @@ export class StyleFormProvider {
         }
 
         function showSection(name) {
-            // Future: switch between sections
             document.querySelectorAll('.menu-item').forEach(el => el.classList.remove('active'));
             event.target.classList.add('active');
+            document.querySelectorAll('[id^="section-"]').forEach(el => el.style.display = 'none');
+            const sec = document.getElementById('section-' + name);
+            if (sec) sec.style.display = '';
         }
 
         window.addEventListener('message', (e) => {
@@ -507,6 +555,11 @@ export class StyleFormProvider {
                 document.getElementById('reservedKeywords').value = msg.casing.reservedKeywords;
                 document.getElementById('builtInFunctions').value = msg.casing.builtInFunctions;
                 document.getElementById('builtInDataTypes').value = msg.casing.builtInDataTypes;
+                if (msg.layout) {
+                    document.getElementById('maxLineLength').value = msg.layout.maxLineLength;
+                    document.getElementById('placeCommasBeforeItems').checked = msg.layout.placeCommasBeforeItems;
+                    document.getElementById('alignItemsToTabStops').checked = msg.layout.alignItemsToTabStops;
+                }
                 document.getElementById('styleName').textContent = msg.styleName;
                 document.getElementById('fileInfo').textContent = msg.styleFile || 'No file — using defaults';
                 updatePreview();
