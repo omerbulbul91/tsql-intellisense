@@ -95,7 +95,16 @@ interface Token {
 7. **Whitespace** — `\s+`
 8. **Word** — `[a-zA-Z_@#][a-zA-Z0-9_@#]*` → keyword/function/datatype/identifier ayrımı
 
-Word sınıflandırma: kelime (case-insensitive) keyword listesinde → `keyword`, function listesinde → `function`, datatype listesinde → `datatype`, hiçbiri → `identifier`.
+**Word sınıflandırma (öncelik sırası):**
+
+Bir kelime birden fazla listede bulunabilir (ör. `LEFT` hem keyword hem function, `CURSOR`/`TABLE` hem keyword hem datatype). Sınıflandırma iki aşamalıdır:
+
+1. **Tokenizer** kelimeyi ilk eşleşen listeye göre sınıflar: function → datatype → keyword → identifier
+2. **Post-tokenization düzeltme** (casingRule içinde): sonraki non-whitespace token `(` ise → `function`, değilse keyword listesinde varsa → `keyword` olarak yeniden sınıflandırılır
+
+Bu sayede `LEFT('abc', 2)` → function, `LEFT JOIN` → keyword olarak doğru casing alır.
+
+**`@@` sistem değişkenleri:** Word regex `[a-zA-Z_@#]` ile başladığı için `@@ROWCOUNT` tek bir word token olarak yakalanır. Function listesinde olduğundan `function` olarak sınıflanır.
 
 ### Keyword Listesi
 
@@ -107,7 +116,7 @@ INSERT, UPDATE, DELETE, SET, EXEC, EXECUTE,
 CREATE, ALTER, DROP, TRUNCATE,
 DECLARE, BEGIN, END, IF, ELSE, WHILE, RETURN, BREAK, CONTINUE,
 TRY, CATCH, THROW, RAISERROR,
-CASE, WHEN, THEN, ELSE, END,
+CASE, WHEN, THEN,
 GO, PRINT, USE,
 TRANSACTION, COMMIT, ROLLBACK, SAVE,
 PROCEDURE, PROC, FUNCTION, TABLE, VIEW, INDEX, TRIGGER, DATABASE, SCHEMA,
@@ -212,8 +221,23 @@ interface SqlStyle {
 ```
 
 - `tsql-intellisense.styleFolder` ayarından dizin okunur
-- Dizindeki ilk `.json` dosyası yüklenir
+- Dizindeki `.json` dosyaları alfabetik sırayla listelenir, ilki yüklenir
+- JSON parse hatası veya eksik `casing` bölümü → varsayılana fallback + uyarı mesajı
 - Ayar boşsa → embedded RENIUMSTYLE varsayılan kullanılır
+
+**RENIUMSTYLE varsayılan değerleri:**
+```json
+{
+  "casing": {
+    "reservedKeywords": "upperCamelCase",
+    "builtInFunctions": "uppercase",
+    "builtInDataTypes": "upperCamelCase",
+    "useObjectDefinitionCase": true
+  }
+}
+```
+
+**`useObjectDefinitionCase`:** `true` olduğunda identifier'lara (tablo, kolon, SP adları) dokunulmaz — casing yalnızca `keyword`, `function`, `datatype` token'larına uygulanır. `false` olduğunda da aynı davranış (Faz 1'de identifier casing desteklenmez). Bu alan Redgate uyumluluğu için tutulur.
 
 ### VS Code Entegrasyonu
 
@@ -297,9 +321,19 @@ context.subscriptions.push(
 - `[select]` → değişmemiş (identifier)
 - Seçim formatla → sadece seçim değişmiş
 - Tüm dosya formatla → tüm dosya değişmiş
+- `left(Name, 3)` → `LEFT` (function casing), `left join` → `Left Join` (keyword casing)
+- `@@ROWCOUNT` → function casing uygulanmış
+- `EXEC('select * from T')` → string içi dokunulmamış
+- `''''` (escaped quotes) → string olarak doğru parse
+- `/* multi\nline\ncomment */` → comment olarak doğru parse
+- Malformed stil JSON → uyarı mesajı + varsayılana fallback
 
 ### Bilinen Sınırlamalar (Faz 1)
 
 - Sadece casing yapılır, whitespace/indentation değişmez
 - Stil dosyasının sadece `casing` bölümü okunur
-- `LEFT` kelimesi hem keyword (LEFT JOIN) hem function (LEFT(...)) olabilir — bağlam analizi yapılmaz, function listesi öncelikli (eğer parantez açılıyorsa function, değilse keyword olarak değerlendirilebilir — bu Faz 1'de basit tutulur, sonraki token'a bakılır)
+- `LEFT`/`RIGHT` gibi çift anlamlı kelimeler sonraki token'a bakılarak ayrıştırılır (post-tokenization)
+- Double-quoted identifier (`"TableName"`) desteklenmez — sadece `[bracketed]` identifier desteklenir
+- `::` scope resolution operatörü (`HIERARCHYID::Parse()`) özel olarak işlenmez
+- `GO` casing'e dahildir — bazı araçlar `GO`'yu case-sensitive işler, bu risk olarak not edilmiştir
+- `editor.formatOnSave` ayarı açıksa `DocumentFormattingEditProvider` tetiklenir — bu beklenen davranıştır
