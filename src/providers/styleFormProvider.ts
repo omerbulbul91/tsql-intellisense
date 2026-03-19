@@ -752,7 +752,7 @@ export class StyleFormProvider {
                 </div>
             </div>
 
-            <div class="preview">
+            <div class="preview" id="formatPreview">
                 <pre id="previewCode"></pre>
             </div>
         </div>
@@ -894,6 +894,9 @@ export class StyleFormProvider {
             document.querySelectorAll('[id^="section-"]').forEach(el => el.style.display = 'none');
             const sec = document.getElementById('section-' + name);
             if (sec) sec.style.display = '';
+            // Show format preview only for style sections
+            const formatPreview = document.getElementById('formatPreview');
+            formatPreview.style.display = (name === 'casing' || name === 'lists') ? '' : 'none';
             updatePreview();
             if (name === 'snippets' && !snippetsLoaded) {
                 vscode.postMessage({ cmd: 'loadSnippets' });
