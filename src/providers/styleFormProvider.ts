@@ -62,6 +62,17 @@ export class StyleFormProvider {
                         await config.update('aliases.capitaliseAliases', msg.aliases.capitaliseAliases, vscode.ConfigurationTarget.Global);
                         await config.update('aliases.prefixesToIgnore', msg.aliases.prefixesToIgnore, vscode.ConfigurationTarget.Global);
                     }
+                    // VS Code word suggestions for SQL
+                    if (msg.disableWordSuggestions !== undefined) {
+                        const langConfig = vscode.workspace.getConfiguration('', { languageId: 'sql' });
+                        if (msg.disableWordSuggestions) {
+                            await langConfig.update('editor.wordBasedSuggestions', 'off', vscode.ConfigurationTarget.Global, true);
+                            await langConfig.update('editor.suggest.showWords', false, vscode.ConfigurationTarget.Global, true);
+                        } else {
+                            await langConfig.update('editor.wordBasedSuggestions', undefined, vscode.ConfigurationTarget.Global, true);
+                            await langConfig.update('editor.suggest.showWords', undefined, vscode.ConfigurationTarget.Global, true);
+                        }
+                    }
                     // Join conditions
                     if (msg.joinConditions) {
                         await config.update('joinMatchingNames', msg.joinConditions.matchingNames, vscode.ConfigurationTarget.Global);
@@ -610,10 +621,14 @@ export class StyleFormProvider {
                         <label for="listSystemObjects">List system objects</label>
                     </div>
 
-                    <div class="info-bar">
-                        <span class="icon">ℹ</span>
-                        Most suggestion behavior is controlled by VS Code's editor.suggest.* settings. These options are SQL-specific overrides.
+                    <h3>VS Code integration</h3>
+                    <div class="checkbox-row" style="margin-left:0">
+                        <input type="checkbox" id="disableWordSuggestions" checked>
+                        <label for="disableWordSuggestions">Disable VS Code word-based suggestions for SQL files</label>
                     </div>
+                    <p style="font-size:12px; color:var(--vscode-descriptionForeground); margin-left:24px;">
+                        Prevents duplicate suggestions from VS Code's built-in word completion in SQL files.
+                    </p>
                 </div>
 
                 <!-- Join Conditions Section -->
@@ -1097,6 +1112,7 @@ export class StyleFormProvider {
                     capitaliseAliases: document.getElementById('capitaliseAliases').checked,
                     prefixesToIgnore: prefixes,
                 },
+                disableWordSuggestions: document.getElementById('disableWordSuggestions').checked,
                 joinConditions: {
                     matchingNames: document.getElementById('joinMatchingNames').checked,
                     swapOrder: document.getElementById('swapJoinColumnOrder').checked,
