@@ -1295,12 +1295,22 @@ export function activate(context: vscode.ExtensionContext) {
                     vscode.window.showWarningMessage('Open Project File: No active editor');
                     return;
                 }
+                let word: string | undefined;
                 const wordRange = editor.document.getWordRangeAtPosition(editor.selection.active, /[\w]+/);
-                if (!wordRange) {
-                    vscode.window.showWarningMessage('Open Project File: No word at cursor');
+                if (wordRange) {
+                    word = editor.document.getText(wordRange);
+                } else {
+                    // Cursor not on a word — scan current line for any known object name
+                    const lineText = editor.document.lineAt(editor.selection.active.line).text;
+                    const words = lineText.match(/[\w]+/g) || [];
+                    for (const w of words) {
+                        if (schemaCache.findObject(w)) { word = w; break; }
+                    }
+                }
+                if (!word) {
+                    vscode.window.showWarningMessage('Open Project File: No object found at cursor or on current line');
                     return;
                 }
-                const word = editor.document.getText(wordRange);
                 const obj = schemaCache.findObject(word);
                 if (obj) {
                     const typeMap: Record<string, ObjectType> = { TABLE: 'table', VIEW: 'view', PROCEDURE: 'sp', FUNCTION: 'func' };
