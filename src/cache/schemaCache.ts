@@ -21,7 +21,7 @@ export interface ColumnInfo {
 
 export interface ObjectInfo {
     name: string;
-    type: 'TABLE' | 'VIEW' | 'PROCEDURE' | 'FUNCTION';
+    type: 'TABLE' | 'VIEW' | 'PROCEDURE' | 'FUNCTION' | 'TRIGGER';
     columns?: ColumnInfo[];
 }
 
@@ -52,6 +52,9 @@ export class SchemaCache {
     private objects: Map<string, ObjectInfo> = new Map();
     private columnsLoaded: Set<string> = new Set();
     private allColumnsLoaded = false;
+    /** Extra DB objects loaded via cross-DB queries: dbName → objectKey → ObjectInfo */
+    private extraDbObjects: Map<string, Map<string, ObjectInfo>> = new Map();
+    private extraDbColumnsLoaded: Set<string> = new Set(); // key: "dbName::tableName"
     private foreignKeys: ForeignKeyInfo[] = [];
     private fkLoaded = false;
     private triggers: Map<string, TriggerInfo[]> = new Map();
@@ -60,8 +63,8 @@ export class SchemaCache {
     private indexesLoaded = false;
     private viewDefinitions: Map<string, string> = new Map();
     private viewDefsLoaded = false;
-    private lastRefresh: Date | null = null;
     private refreshTimer: NodeJS.Timeout | null = null;
+    private _loadedDbName: string | null = null;
     private _onSchemaLoaded = new vscode.EventEmitter<void>();
     public readonly onSchemaLoaded = this._onSchemaLoaded.event;
 
@@ -69,6 +72,10 @@ export class SchemaCache {
 
     get isLoaded(): boolean {
         return this.objects.size > 0;
+    }
+
+    get loadedDbName(): string | null {
+        return this._loadedDbName;
     }
 
     get isFullyLoaded(): boolean {
@@ -79,12 +86,115 @@ export class SchemaCache {
         return this.objects.size;
     }
 
+    /** Check if a specific DB's object names are loaded (main cache or extra cache) */
+    isLoadedForDb(dbName: string): boolean {
+        const db = dbName.toLowerCase();
+        if (this._loadedDbName?.toLowerCase() === db) { return this.isLoaded; }
+        return this.extraDbObjects.has(db);
+    }
+
+    /**
+     * Load object names for any DB via cross-DB INFORMATION_SCHEMA queries.
+     * Does NOT reconnect — works from current active connection.
+     */
+    async loadObjectNamesForDb(dbName: string): Promise<void> {
+        const dbKey = dbName.toLowerCase();
+
+        // If main cache is already loaded for this DB, nothing to do
+        if (this._loadedDbName?.toLowerCase() === dbKey) {
+            return;
+        }
+
+        if (!this.connectionManager.isConnected) { return; }
+        if (this.extraDbObjects.has(dbKey)) { return; } // already loaded
+
+        const safe = dbName.replace(/\]/g, ']]');
+        const result = await this.connectionManager.executeQuery(
+            `SELECT name, type FROM (
+                SELECT TABLE_NAME as name,
+                    CASE TABLE_TYPE WHEN 'BASE TABLE' THEN 'TABLE' ELSE 'VIEW' END as type
+                FROM [${safe}].INFORMATION_SCHEMA.TABLES
+                UNION ALL
+                SELECT ROUTINE_NAME, ROUTINE_TYPE
+                FROM [${safe}].INFORMATION_SCHEMA.ROUTINES
+                UNION ALL
+                SELECT name, 'TRIGGER'
+                FROM [${safe}].sys.triggers
+                WHERE parent_class = 1
+            ) t ORDER BY name`
+        );
+
+        const map = new Map<string, ObjectInfo>();
+        for (const row of result.rows) {
+            const name = row['name'] as string;
+            const rawType = row['type'] as string;
+            const type = rawType === 'TABLE' ? 'TABLE'
+                : rawType === 'VIEW' ? 'VIEW'
+                : rawType === 'PROCEDURE' ? 'PROCEDURE'
+                : rawType === 'TRIGGER' ? 'TRIGGER'
+                : 'FUNCTION';
+            map.set(name.toLowerCase(), { name, type });
+        }
+        this.extraDbObjects.set(dbKey, map);
+    }
+
+    /** Load columns for a table in any DB (routes to main cache if dbName is the active DB) */
+    async loadColumnsForDbTable(dbName: string, tableName: string): Promise<ColumnInfo[]> {
+        const dbKey = dbName.toLowerCase();
+        const activeDb = this.connectionManager.currentProfile?.database?.toLowerCase();
+        // If it's the active DB, use the main cache path
+        if (activeDb === dbKey) {
+            return this.getColumns(tableName);
+        }
+
+        const cacheKey = `${dbKey}::${tableName.toLowerCase()}`;
+
+        const dbMap = this.extraDbObjects.get(dbKey);
+        if (!dbMap) { return []; }
+
+        const obj = dbMap.get(tableName.toLowerCase());
+        if (!obj) { return []; }
+
+        if (this.extraDbColumnsLoaded.has(cacheKey)) {
+            return obj.columns || [];
+        }
+
+        if (!this.connectionManager.isConnected) { return []; }
+
+        const safe = dbName.replace(/\]/g, ']]');
+        const result = await this.connectionManager.executeQuery(
+            `SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE, CHARACTER_MAXIMUM_LENGTH, ORDINAL_POSITION
+             FROM [${safe}].INFORMATION_SCHEMA.COLUMNS
+             WHERE TABLE_NAME = @tableName
+             ORDER BY ORDINAL_POSITION`,
+            { tableName: { type: TYPES.NVarChar, value: tableName } }
+        );
+
+        obj.columns = result.rows.map(row => ({
+            name: row['COLUMN_NAME'] as string,
+            dataType: row['DATA_TYPE'] as string,
+            isNullable: row['IS_NULLABLE'] === 'YES',
+            maxLength: row['CHARACTER_MAXIMUM_LENGTH'] as number | null,
+            ordinalPosition: row['ORDINAL_POSITION'] as number,
+        }));
+        this.extraDbColumnsLoaded.add(cacheKey);
+        return obj.columns;
+    }
+
+    /** Get objects (tables/views/SPs/funcs) for a specific DB (or active if not specified) */
+    getObjectsForDb(dbName: string): Map<string, ObjectInfo> {
+        const dbKey = dbName.toLowerCase();
+        if (!dbName || this._loadedDbName?.toLowerCase() === dbKey) { return this.objects; }
+        return this.extraDbObjects.get(dbKey) || new Map();
+    }
+
     /** Load all object names (tables, views, SPs, functions) */
     async loadObjectNames(): Promise<void> {
         if (!this.connectionManager.isConnected) {
             return;
         }
 
+        this._loadedDbName = this.connectionManager.currentProfile?.database ?? null;
         this.objects.clear();
         this.columnsLoaded.clear();
         this.allColumnsLoaded = false;
@@ -113,7 +223,15 @@ export class SchemaCache {
             this.objects.set(name.toLowerCase(), { name, type: type as 'PROCEDURE' | 'FUNCTION' });
         }
 
-        this.lastRefresh = new Date();
+        // Load trigger names (names only — definitions loaded separately in loadTriggers)
+        const triggerNamesResult = await this.connectionManager.executeQuery(
+            `SELECT name FROM sys.triggers WHERE parent_class = 1 ORDER BY name`
+        );
+        for (const row of triggerNamesResult.rows) {
+            const name = row['name'] as string;
+            this.objects.set(name.toLowerCase(), { name, type: 'TRIGGER' });
+        }
+
         this._onSchemaLoaded.fire();
     }
 
@@ -148,12 +266,12 @@ export class SchemaCache {
         this.allColumnsLoaded = true;
     }
 
-    /** Load columns for a specific table (lazy) */
-    async loadColumnsFor(tableName: string): Promise<ColumnInfo[]> {
+    /** Load columns for a specific table (lazy, or force reload) */
+    async loadColumnsFor(tableName: string, forceReload = false): Promise<ColumnInfo[]> {
         const key = tableName.toLowerCase();
 
-        // Already cached
-        if (this.columnsLoaded.has(key)) {
+        // Already cached (skip if force reload)
+        if (!forceReload && this.columnsLoaded.has(key)) {
             return this.objects.get(key)?.columns || [];
         }
 
@@ -378,6 +496,18 @@ export class SchemaCache {
         await this.loadIndexes().catch(() => {});
         await this.loadTriggers().catch(() => {});
         await this.loadViewDefinitions().catch(() => {});
+    }
+
+    /** Fetch OBJECT_DEFINITION for a single object live from the DB */
+    async fetchObjectDefinition(objectName: string): Promise<string | null> {
+        if (!this.connectionManager.isConnected) { return null; }
+        try {
+            const result = await this.connectionManager.executeQuery(
+                `SELECT OBJECT_DEFINITION(OBJECT_ID(@n)) AS def`,
+                { n: { type: TYPES.NVarChar, value: objectName } }
+            );
+            return (result.rows[0]?.['def'] as string) ?? null;
+        } catch { return null; }
     }
 
     dispose(): void {

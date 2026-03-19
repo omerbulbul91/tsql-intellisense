@@ -19,6 +19,7 @@
     "onLanguage:sql"
   ],
   "main": "./dist/extension.js",
+  "browser": "./dist/extension.web.js",
   "contributes": {
     "commands": [
       {
@@ -32,6 +33,11 @@
       {
         "command": "tsql-intellisense.refreshSchema",
         "title": "T-SQL IntelliSense: Refresh Schema Cache",
+        "icon": "$(sync)"
+      },
+      {
+        "command": "tsql-intellisense.refreshDocumentCache",
+        "title": "T-SQL IntelliSense: Refresh Cache for This File",
         "icon": "$(sync)"
       },
       {
@@ -89,9 +95,20 @@
       { "command": "tsql-intellisense.newQueryFromTree", "title": "New Query", "icon": "$(new-file)" },
       { "command": "tsql-intellisense.switchDatabase", "title": "Switch Database", "icon": "$(database)" },
       { "command": "tsql-intellisense.filterItems", "title": "Filter...", "icon": "$(filter)" },
-      { "command": "tsql-intellisense.clearFilter", "title": "Clear Filter", "icon": "$(filter-filled)" }
+      { "command": "tsql-intellisense.clearFilter", "title": "Clear Filter", "icon": "$(filter-filled)" },
+      { "command": "tsql-intellisense.loadDatabaseSchema", "title": "Refresh DB Schema", "icon": "$(sync)" },
+      { "command": "tsql-intellisense.toggleResultsPanel", "title": "T-SQL IntelliSense: Toggle Query Results Panel" },
+      { "command": "tsql-intellisense.selectInObjectExplorer", "title": "Select in Object Explorer" },
+      { "command": "tsql-intellisense.openProjectFile", "title": "Open Project File", "icon": "$(go-to-file)" }
     ],
     "menus": {
+      "editor/context": [
+        {
+          "command": "tsql-intellisense.selectInObjectExplorer",
+          "when": "editorLangId == sql && tsqlIntellisense.active",
+          "group": "z_tsql@1"
+        }
+      ],
       "editor/title": [
         {
           "command": "tsql-intellisense.runQuery",
@@ -128,8 +145,13 @@
         { "command": "tsql-intellisense.refreshSchema", "when": "viewItem == connection.connected", "group": "inline" },
         { "command": "tsql-intellisense.deleteConnection", "when": "viewItem =~ /^connection\\./", "group": "inline" },
         { "command": "tsql-intellisense.newQueryFromTree", "when": "viewItem == database.connected", "group": "inline" },
-        { "command": "tsql-intellisense.switchDatabase", "when": "viewItem == database", "group": "inline" },
-        { "command": "tsql-intellisense.filterItems", "when": "viewItem =~ /^folder\\./", "group": "inline" }
+        { "command": "tsql-intellisense.loadDatabaseSchema", "when": "viewItem == database.connected", "group": "inline" },
+        { "command": "tsql-intellisense.newQueryFromTree", "when": "viewItem == database", "group": "inline" },
+        { "command": "tsql-intellisense.loadDatabaseSchema", "when": "viewItem == database", "group": "inline" },
+        { "command": "tsql-intellisense.filterItems", "when": "viewItem =~ /^folder\\./", "group": "inline" },
+        { "command": "tsql-intellisense.refreshSchema", "when": "viewItem =~ /^folder\\./", "group": "inline" },
+        { "command": "tsql-intellisense.openProjectFile", "when": "viewItem == table || viewItem == view || viewItem == sp || viewItem == func", "group": "inline" },
+        { "command": "tsql-intellisense.openProjectFile", "when": "viewItem == table || viewItem == view || viewItem == sp || viewItem == func", "group": "navigation" }
       ]
     },
     "keybindings": [
@@ -162,6 +184,26 @@
         "command": "tsql-intellisense.queryShortcut3",
         "key": "ctrl+3",
         "when": "editorLangId == sql"
+      },
+      {
+        "command": "tsql-intellisense.refreshDocumentCache",
+        "key": "ctrl+shift+d",
+        "when": "editorLangId == sql && tsqlIntellisense.active"
+      },
+      {
+        "command": "tsql-intellisense.toggleResultsPanel",
+        "key": "ctrl+r",
+        "when": "editorLangId == sql && tsqlIntellisense.active"
+      },
+      {
+        "command": "tsql-intellisense.selectInObjectExplorer",
+        "key": "ctrl+f12",
+        "when": "editorLangId == sql && tsqlIntellisense.active"
+      },
+      {
+        "command": "tsql-intellisense.openProjectFile",
+        "key": "ctrl+f11",
+        "when": "editorLangId == sql && tsqlIntellisense.active"
       }
     ],
     "viewsContainers": {
@@ -243,6 +285,11 @@
               "projectPath": {
                 "type": "string",
                 "description": "SQL Server Database Project directory path for automatic file sync on DDL execution"
+              },
+              "databaseProjects": {
+                "type": "object",
+                "description": "Per-database project paths: { \"DbName\": \"c:\\\\path\\\\to\\\\project\" }",
+                "additionalProperties": { "type": "string" }
               }
             },
             "required": [
@@ -295,7 +342,8 @@
     }
   },
   "scripts": {
-    "build": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node",
+    "build": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node && esbuild src/extension.web.ts --bundle --outfile=dist/extension.web.js --external:vscode --format=cjs --platform=browser",
+    "build:web": "esbuild src/extension.web.ts --bundle --outfile=dist/extension.web.js --external:vscode --format=cjs --platform=browser",
     "watch": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --watch",
     "test": "npx ts-node test/contextDetection.test.ts && npx ts-node test/projectSync.test.ts",
     "package": "vsce package"

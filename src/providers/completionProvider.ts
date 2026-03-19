@@ -1,9 +1,10 @@
 import * as vscode from 'vscode';
 import { SchemaCache } from '../cache/schemaCache';
+import { QueryRunner } from './queryRunner';
 import { SqlContextType, SqlContext, detectContext, getCurrentStatement, extractNonAggColumns } from '../parser/sqlContext';
 
 export class TsqlCompletionProvider implements vscode.CompletionItemProvider {
-    constructor(private schemaCache: SchemaCache) {}
+    constructor(private schemaCache: SchemaCache, private queryRunner?: QueryRunner) {}
 
     async provideCompletionItems(
         document: vscode.TextDocument,
@@ -11,7 +12,14 @@ export class TsqlCompletionProvider implements vscode.CompletionItemProvider {
         _token: vscode.CancellationToken,
         _context: vscode.CompletionContext
     ): Promise<vscode.CompletionList | undefined> {
-        if (!this.schemaCache.isLoaded) {
+        // Determine the effective DB for this document
+        const docDb = this.queryRunner?.getDocumentDatabase(document.uri);
+        const dbName = docDb?.dbName;
+
+        // Check if schema is loaded for this doc's DB
+        const effectiveObjects = dbName ? this.schemaCache.getObjectsForDb(dbName) : null;
+        const isLoaded = effectiveObjects ? effectiveObjects.size > 0 : this.schemaCache.isLoaded;
+        if (!isLoaded) {
             return undefined;
         }
 
@@ -24,19 +32,19 @@ export class TsqlCompletionProvider implements vscode.CompletionItemProvider {
 
         switch (context.type) {
             case SqlContextType.AFTER_FROM_JOIN:
-                return this.completeTableNames(context.prefix);
+                return this.completeTableNames(context.prefix, dbName);
 
             case SqlContextType.AFTER_EXEC:
-                return this.completeProcedureNames(context.prefix);
+                return this.completeProcedureNames(context.prefix, dbName);
 
             case SqlContextType.AFTER_ALIAS_DOT:
-                return await this.completeColumns(context.tableName!, context.prefix);
+                return await this.completeColumns(context.tableName!, context.prefix, dbName);
 
             case SqlContextType.AFTER_ALTER_PROC:
-                return this.completeAlterProc();
+                return this.completeAlterProc(dbName);
 
             case SqlContextType.AFTER_SELECT:
-                return await this.completeColumnsWithAlias(context.tableName!, context.prefix, context.alias, position);
+                return await this.completeColumnsWithAlias(context.tableName!, context.prefix, context.alias, position, dbName);
 
             case SqlContextType.AFTER_TABLE_NAME:
                 return this.completeAfterTableName(context.tableName);
@@ -45,16 +53,16 @@ export class TsqlCompletionProvider implements vscode.CompletionItemProvider {
                 return this.completeOrderByDirection(context.prefix);
 
             case SqlContextType.AFTER_ON:
-                return await this.completeJoinCondition(context);
+                return await this.completeJoinCondition(context, dbName);
 
             case SqlContextType.AFTER_GROUP_BY:
-                return await this.completeGroupBy(context, statementText);
+                return await this.completeGroupBy(context, statementText, dbName);
 
             case SqlContextType.AFTER_ALTER_CREATE:
                 return this.completeAlterCreateObjects(context.prefix);
 
             case SqlContextType.AFTER_ALTER_OBJECT:
-                return this.completeObjectsByType(context.alias, context.prefix);
+                return this.completeObjectsByType(context.alias, context.prefix, dbName);
 
             case SqlContextType.NONE:
                 return this.completeStatementStart(context.prefix);
@@ -106,9 +114,11 @@ export class TsqlCompletionProvider implements vscode.CompletionItemProvider {
     }
 
     /** Complete ALTER PROC — selecting an SP triggers fetching its code */
-    private completeAlterProc(): vscode.CompletionList {
+    private completeAlterProc(dbName?: string): vscode.CompletionList {
         const items: vscode.CompletionItem[] = [];
-        const procedures = this.schemaCache.getProcedures();
+        const procedures = dbName
+            ? Array.from(this.schemaCache.getObjectsForDb(dbName).values()).filter(o => o.type === 'PROCEDURE')
+            : this.schemaCache.getProcedures();
 
         for (const obj of procedures) {
             // Skip functions that DB reports as PROCEDURE (F_, FN_, Fn_ prefixes)
@@ -127,7 +137,25 @@ export class TsqlCompletionProvider implements vscode.CompletionItemProvider {
             items.push(item);
         }
 
-        return new vscode.CompletionList(items, true);
+        const list = new vscode.CompletionList(items, true);
+        (list as any).__isAlterProc = true;
+        return list;
+    }
+
+    /** Lazily fetch live object definition for ALTER PROC/VIEW/FUNCTION/TRIGGER hover preview */
+    async resolveCompletionItem(item: vscode.CompletionItem): Promise<vscode.CompletionItem> {
+        const detail = item.detail ?? '';
+        const fetchable = detail === 'PROCEDURE — select to fetch code'
+            || detail === 'VIEW' || detail === 'FUNCTION' || detail === 'TRIGGER';
+        if (!fetchable) { return item; }
+        const name = typeof item.label === 'string' ? item.label : item.label.label;
+        const def = await this.schemaCache.fetchObjectDefinition(name);
+        if (def) {
+            const md = new vscode.MarkdownString();
+            md.appendCodeblock(def, 'sql');
+            item.documentation = md;
+        }
+        return item;
     }
 
     /** Suggest object types after ALTER/CREATE */
@@ -176,26 +204,28 @@ export class TsqlCompletionProvider implements vscode.CompletionItemProvider {
     }
 
     /** Suggest objects by type: ALTER TABLE → tables, ALTER VIEW → views, etc. */
-    private completeObjectsByType(objType?: string, prefix?: string): vscode.CompletionList {
+    private completeObjectsByType(objType?: string, prefix?: string, dbName?: string): vscode.CompletionList {
         const items: vscode.CompletionItem[] = [];
         const type = (objType || '').toUpperCase();
 
+        const dbObjects = dbName ? this.schemaCache.getObjectsForDb(dbName) : null;
+
         let objects: { name: string; type: string }[] = [];
         if (type === 'TABLE') {
-            objects = this.schemaCache.getTablesAndViews().filter(o => o.type === 'TABLE');
+            objects = dbObjects
+                ? Array.from(dbObjects.values()).filter(o => o.type === 'TABLE')
+                : this.schemaCache.getTablesAndViews().filter(o => o.type === 'TABLE');
         } else if (type === 'VIEW') {
-            objects = this.schemaCache.getTablesAndViews().filter(o => o.type === 'VIEW');
+            objects = dbObjects
+                ? Array.from(dbObjects.values()).filter(o => o.type === 'VIEW')
+                : this.schemaCache.getTablesAndViews().filter(o => o.type === 'VIEW');
         } else if (type === 'FUNCTION') {
-            objects = this.schemaCache.getFunctions();
+            objects = dbObjects
+                ? Array.from(dbObjects.values()).filter(o => o.type === 'FUNCTION')
+                : this.schemaCache.getFunctions();
         } else if (type === 'TRIGGER') {
-            // Collect all trigger names from all tables
-            const allTables = this.schemaCache.getTablesAndViews().filter(o => o.type === 'TABLE');
-            for (const t of allTables) {
-                const triggers = this.schemaCache.getTriggers(t.name);
-                for (const trig of triggers) {
-                    objects.push({ name: trig.name, type: 'TRIGGER' });
-                }
-            }
+            const sourceMap = dbObjects || this.schemaCache.getObjectsForDb('');
+            objects = Array.from(sourceMap.values()).filter(o => o.type === 'TRIGGER');
         }
 
         for (const obj of objects) {
@@ -274,7 +304,7 @@ export class TsqlCompletionProvider implements vscode.CompletionItemProvider {
     }
 
     /** GROUP BY completion: "All non-aggregated columns" snippet + aliases + columns */
-    private async completeGroupBy(context: SqlContext, statementText: string): Promise<vscode.CompletionList> {
+    private async completeGroupBy(context: SqlContext, statementText: string, dbName?: string): Promise<vscode.CompletionList> {
         const items: vscode.CompletionItem[] = [];
         const { aliases } = context;
 
@@ -311,7 +341,9 @@ export class TsqlCompletionProvider implements vscode.CompletionItemProvider {
             let colIndex = 0;
             for (let i = 0; i < aliases.length; i++) {
                 const a = aliases[i];
-                const columns = await this.schemaCache.getColumns(a.tableName);
+                const columns = dbName
+                    ? await this.schemaCache.loadColumnsForDbTable(dbName, a.tableName)
+                    : await this.schemaCache.getColumns(a.tableName);
                 for (const col of columns) {
                     const displayName = `${a.alias}.${col.name}`;
                     const item = new vscode.CompletionItem(displayName);
@@ -334,7 +366,7 @@ export class TsqlCompletionProvider implements vscode.CompletionItemProvider {
     }
 
     /** Suggest join conditions: FK matches first, then same-name columns, then aliases */
-    private async completeJoinCondition(context: SqlContext): Promise<vscode.CompletionList> {
+    private async completeJoinCondition(context: SqlContext, dbName?: string): Promise<vscode.CompletionList> {
         const items: vscode.CompletionItem[] = [];
         const { joinedTable, joinedAlias, aliases } = context;
 
@@ -360,7 +392,9 @@ export class TsqlCompletionProvider implements vscode.CompletionItemProvider {
             let colIndex = 0;
             for (let i = 0; i < aliases.length; i++) {
                 const a = aliases[i];
-                const columns = await this.schemaCache.getColumns(a.tableName);
+                const columns = dbName
+                    ? await this.schemaCache.loadColumnsForDbTable(dbName, a.tableName)
+                    : await this.schemaCache.getColumns(a.tableName);
                 for (const col of columns) {
                     const displayName = `${a.alias}.${col.name}`;
                     const item = new vscode.CompletionItem(displayName);
@@ -388,7 +422,9 @@ export class TsqlCompletionProvider implements vscode.CompletionItemProvider {
         }
 
         // Get columns of the joined table
-        const joinedColumns = await this.schemaCache.getColumns(joinedTable);
+        const joinedColumns = dbName
+            ? await this.schemaCache.loadColumnsForDbTable(dbName, joinedTable)
+            : await this.schemaCache.getColumns(joinedTable);
 
         // Find other tables in the statement (FROM table and other JOINs)
         const otherAliases = aliases.filter(a => a.alias.toLowerCase() !== joinedAlias.toLowerCase());
@@ -397,7 +433,9 @@ export class TsqlCompletionProvider implements vscode.CompletionItemProvider {
         let sortIndex = 0;
 
         for (const other of otherAliases) {
-            const otherColumns = await this.schemaCache.getColumns(other.tableName);
+            const otherColumns = dbName
+                ? await this.schemaCache.loadColumnsForDbTable(dbName, other.tableName)
+                : await this.schemaCache.getColumns(other.tableName);
 
             // 1. FK relationships (highest priority)
             const fks = this.schemaCache.getForeignKeysBetween(joinedTable, other.tableName);
@@ -469,9 +507,11 @@ export class TsqlCompletionProvider implements vscode.CompletionItemProvider {
         return new vscode.CompletionList(items, true);
     }
 
-    private completeTableNames(prefix?: string): vscode.CompletionList {
+    private completeTableNames(prefix?: string, dbName?: string): vscode.CompletionList {
         const items: vscode.CompletionItem[] = [];
-        const tablesAndViews = this.schemaCache.getTablesAndViews();
+        const tablesAndViews = dbName
+            ? Array.from(this.schemaCache.getObjectsForDb(dbName).values()).filter(o => o.type === 'TABLE' || o.type === 'VIEW')
+            : this.schemaCache.getTablesAndViews();
 
         for (const obj of tablesAndViews) {
             const alias = this.generateAlias(obj.name);
@@ -663,9 +703,11 @@ export class TsqlCompletionProvider implements vscode.CompletionItemProvider {
         return withoutPrefix[0].toLowerCase();
     }
 
-    private completeProcedureNames(prefix?: string): vscode.CompletionList {
+    private completeProcedureNames(prefix?: string, dbName?: string): vscode.CompletionList {
         const items: vscode.CompletionItem[] = [];
-        const procedures = this.schemaCache.getProcedures();
+        const procedures = dbName
+            ? Array.from(this.schemaCache.getObjectsForDb(dbName).values()).filter(o => o.type === 'PROCEDURE')
+            : this.schemaCache.getProcedures();
 
         for (const obj of procedures) {
             const item = new vscode.CompletionItem(obj.name);
@@ -686,9 +728,11 @@ export class TsqlCompletionProvider implements vscode.CompletionItemProvider {
     }
 
     /** Complete columns with alias prefix (for SELECT/WHERE context) */
-    private async completeColumnsWithAlias(tableName: string, prefix?: string, alias?: string, position?: vscode.Position): Promise<vscode.CompletionList> {
+    private async completeColumnsWithAlias(tableName: string, prefix?: string, alias?: string, position?: vscode.Position, dbName?: string): Promise<vscode.CompletionList> {
         const items: vscode.CompletionItem[] = [];
-        const columns = await this.schemaCache.getColumns(tableName);
+        const columns = dbName
+            ? await this.schemaCache.loadColumnsForDbTable(dbName, tableName)
+            : await this.schemaCache.getColumns(tableName);
         const aliasPrefix = alias ? `${alias}.` : '';
 
         // Calculate range that includes * or typed prefix
@@ -780,9 +824,11 @@ export class TsqlCompletionProvider implements vscode.CompletionItemProvider {
     }
 
     /** Complete columns without alias (for alias.dot context) */
-    private async completeColumns(tableName: string, prefix?: string): Promise<vscode.CompletionList> {
+    private async completeColumns(tableName: string, prefix?: string, dbName?: string): Promise<vscode.CompletionList> {
         const items: vscode.CompletionItem[] = [];
-        const columns = await this.schemaCache.getColumns(tableName);
+        const columns = dbName
+            ? await this.schemaCache.loadColumnsForDbTable(dbName, tableName)
+            : await this.schemaCache.getColumns(tableName);
         const { pkColumns, fkColumns } = this.getColumnKeyInfo(tableName);
 
         for (const col of columns) {

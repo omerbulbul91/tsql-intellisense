@@ -78,22 +78,6 @@ export class QueryRunner implements vscode.WebviewViewProvider {
             const picked = await this.promptSelectDatabase();
             if (!picked) { return; }
         }
-        // docDb has a specific DB → auto-switch if needed
-        else if (docDb) {
-            const currentProfile = this.connectionManager.currentProfile;
-            if (currentProfile && currentProfile.database.toLowerCase() !== docDb.dbName.toLowerCase()) {
-                // Need to switch database
-                const profiles = this.connectionManager.getSavedProfiles();
-                const baseProfile = profiles.find(p => p.name === docDb.profileName) || currentProfile;
-                const switchedProfile = { ...baseProfile, database: docDb.dbName };
-                try {
-                    await this.connectionManager.connect(switchedProfile);
-                } catch (err: any) {
-                    vscode.window.showErrorMessage(`Failed to switch to ${docDb.dbName}: ${err.message}`);
-                    return;
-                }
-            }
-        }
 
         // Get selected text or full document
         const selection = editor.selection;

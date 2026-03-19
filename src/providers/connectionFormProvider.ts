@@ -62,6 +62,13 @@ export class ConnectionFormProvider {
                     } else {
                         await ConnectionFormProvider.saveProfile(msg.profile, msg.originalName);
                     }
+                    // Sync in-memory activeProfile so tree reflects new databaseProjects immediately
+                    if (msg.profile.databaseProjects) {
+                        connectionManager.updateDatabaseProjects(
+                            msg.originalName || msg.profile.name,
+                            msg.profile.databaseProjects
+                        );
+                    }
                     treeProvider.refresh();
                     const updatedSaved = connectionManager.getSavedProfiles();
                     panel.webview.postMessage({ cmd: 'saved', saved: updatedSaved });
@@ -217,10 +224,20 @@ export class ConnectionFormProvider {
 
     private static async saveProfile(profile: ConnectionProfile, originalName?: string, mergeInto?: string): Promise<void> {
         const config = vscode.workspace.getConfiguration('tsql-intellisense');
-        const connections = config.get<any[]>('connections', []);
-        const target = vscode.workspace.workspaceFolders
-            ? vscode.ConfigurationTarget.Workspace
-            : vscode.ConfigurationTarget.Global;
+        const inspected = config.inspect<any[]>('connections');
+        // Detect correct scope and deep-copy to get a mutable array
+        let target = vscode.ConfigurationTarget.Global;
+        let rawConns: any[];
+        if (inspected?.workspaceFolderValue !== undefined) {
+            target = vscode.ConfigurationTarget.WorkspaceFolder;
+            rawConns = JSON.parse(JSON.stringify(inspected.workspaceFolderValue));
+        } else if (inspected?.workspaceValue !== undefined) {
+            target = vscode.ConfigurationTarget.Workspace;
+            rawConns = JSON.parse(JSON.stringify(inspected.workspaceValue));
+        } else {
+            rawConns = JSON.parse(JSON.stringify(inspected?.globalValue || []));
+        }
+        const connections: any[] = rawConns;
 
         if (mergeInto) {
             // Merge into existing duplicate profile
@@ -228,7 +245,7 @@ export class ConnectionFormProvider {
             if (idx >= 0) {
                 const existingDbProjects = connections[idx].databaseProjects || {};
                 const newDbProjects = profile.databaseProjects || {};
-                connections[idx].databaseProjects = { ...existingDbProjects, ...newDbProjects };
+                connections[idx].databaseProjects = ConnectionFormProvider.mergeDbProjects(existingDbProjects, newDbProjects);
                 if (profile.database) {
                     connections[idx].database = profile.database;
                 }
@@ -238,7 +255,7 @@ export class ConnectionFormProvider {
             if (idx >= 0) {
                 const existingDbProjects = connections[idx].databaseProjects || {};
                 const newDbProjects = profile.databaseProjects || {};
-                profile.databaseProjects = { ...existingDbProjects, ...newDbProjects };
+                profile.databaseProjects = ConnectionFormProvider.mergeDbProjects(existingDbProjects, newDbProjects);
                 connections[idx] = profile;
             } else {
                 connections.push(profile);
@@ -247,7 +264,28 @@ export class ConnectionFormProvider {
             connections.push(profile);
         }
 
-        await config.update('connections', connections, target);
+        try {
+            await config.update('connections', connections, target);
+        } catch (err: any) {
+            vscode.window.showErrorMessage(`T-SQL IntelliSense: Failed to save connection — ${err.message}`);
+            throw err;
+        }
+    }
+
+    /** Merge databaseProjects: empty string value = delete that key */
+    private static mergeDbProjects(
+        existing: Record<string, string>,
+        incoming: Record<string, string>
+    ): Record<string, string> {
+        const merged: Record<string, string> = { ...existing };
+        for (const [db, path] of Object.entries(incoming)) {
+            if (path) {
+                merged[db] = path;
+            } else {
+                delete merged[db];
+            }
+        }
+        return merged;
     }
 
     static escapeHtml(str: string): string {
@@ -266,12 +304,14 @@ export class ConnectionFormProvider {
         const savedJson = JSON.stringify(saved.map(s => ({
             name: s.name, server: s.server, database: s.database,
             user: s.user, password: s.password, port: s.port,
-            trustServerCertificate: s.trustServerCertificate, encrypt: s.encrypt, projectPath: s.projectPath,
+            trustServerCertificate: s.trustServerCertificate, encrypt: s.encrypt,
+            projectPath: s.projectPath, databaseProjects: s.databaseProjects,
         })));
         const recentJson = JSON.stringify(recent.map(r => ({
             name: r.name, server: r.server, database: r.database,
             user: r.user, password: r.password, port: r.port,
-            trustServerCertificate: r.trustServerCertificate, projectPath: r.projectPath,
+            trustServerCertificate: r.trustServerCertificate,
+            projectPath: r.projectPath, databaseProjects: r.databaseProjects,
         })));
 
         return /*html*/`<!DOCTYPE html>
@@ -451,7 +491,7 @@ export class ConnectionFormProvider {
         <div class="form-group" id="projectPathGroup" style="display:${p?.database ? 'block' : 'none'}">
             <label>Project Path <span style="font-weight:normal;text-transform:none">(for <span id="projectDbLabel">${p?.database ? e(p.database) : ''}</span>)</span></label>
             <div class="browse-group">
-                <input id="projectPath" value="" placeholder="Optional: SQL project folder for this database" />
+                <input id="projectPath" value="${p ? e((p.databaseProjects && p.database && p.databaseProjects[p.database]) ? p.databaseProjects[p.database] : (p.projectPath || '')) : ''}" placeholder="Optional: SQL project folder for this database" />
                 <button class="btn-secondary" onclick="browse()">Browse</button>
             </div>
         </div>
@@ -601,7 +641,8 @@ export class ConnectionFormProvider {
             encrypt: document.getElementById('encrypt').value,
         };
         const projPath = document.getElementById('projectPath').value.trim();
-        if (profile.database && projPath) {
+        if (profile.database) {
+            // Always send databaseProjects key; empty string = delete signal
             profile.databaseProjects = {};
             profile.databaseProjects[profile.database] = projPath;
         }

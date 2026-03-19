@@ -1,11 +1,13 @@
 import * as vscode from 'vscode';
 import { ConnectionManager, TYPES } from '../connection/connectionManager';
 import { SchemaCache } from '../cache/schemaCache';
+import { QueryRunner } from './queryRunner';
 
 export class TsqlDefinitionProvider implements vscode.DefinitionProvider {
     constructor(
         private connectionManager: ConnectionManager,
-        private schemaCache: SchemaCache
+        private schemaCache: SchemaCache,
+        private queryRunner?: QueryRunner
     ) {}
 
     async provideDefinition(
@@ -35,8 +37,12 @@ export class TsqlDefinitionProvider implements vscode.DefinitionProvider {
 
         if (!script) { return undefined; }
 
-        // Open script in new untitled editor
+        // Open script in new untitled editor, inheriting source document's DB association
+        const sourceDb = this.queryRunner?.getDocumentDatabase(document.uri);
         const doc = await vscode.workspace.openTextDocument({ content: script, language: 'sql' });
+        if (sourceDb) {
+            this.queryRunner!.setDocumentDatabase(doc.uri, sourceDb);
+        }
         await vscode.window.showTextDocument(doc, { preview: false });
 
         // Return a dummy location (required by API but we already opened the doc)
