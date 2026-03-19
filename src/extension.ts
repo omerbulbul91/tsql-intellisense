@@ -475,45 +475,25 @@ export function activate(context: vscode.ExtensionContext) {
             if (obj && obj.type === 'TABLE') {
                 script = buildObjectScript(objName);
             } else {
-                // Try project file first (preserves user formatting)
-                const profile = connectionManager.currentProfile;
-                if (profile) {
-                    const dbName = profile.database;
-                    const projectPath = (profile as any).databaseProjects?.[dbName]
-                        ?? (profile as any).databaseProjects?.[dbName?.toLowerCase()]
-                        ?? (profile as any).projectPath;
-                    if (projectPath) {
-                        const fs = require('fs');
-                        const typeMap: Record<string, string> = { VIEW: 'Views', PROCEDURE: 'Stored Procedures', FUNCTION: 'Functions', TRIGGER: 'Triggers' };
-                        const subDir = obj ? typeMap[obj.type] || '' : '';
-                        const candidates = subDir
-                            ? [`${projectPath}/dbo/${subDir}/${objName}.sql`, `${projectPath}/${subDir}/${objName}.sql`]
-                            : Object.values(typeMap).flatMap(d => [`${projectPath}/dbo/${d}/${objName}.sql`, `${projectPath}/${d}/${objName}.sql`]);
-                        for (const fp of candidates) {
-                            if (fs.existsSync(fp)) {
-                                script = fs.readFileSync(fp, 'utf-8');
-                                break;
-                            }
-                        }
+                // Always fetch from DB — no formatting, preserve DB definition as-is
+                try {
+                    const result = await connectionManager.executeQuery(
+                        `SELECT COALESCE(
+                            OBJECT_DEFINITION(OBJECT_ID(@objectName)),
+                            OBJECT_DEFINITION(OBJECT_ID(@objectName, 'TR'))
+                        ) AS [definition]`,
+                        { objectName: { type: TYPES.NVarChar, value: objName } }
+                    );
+                    if (result.rows.length > 0 && result.rows[0]['definition']) {
+                        script = result.rows[0]['definition'] as string;
+                        // Only CREATE → CREATE OR ALTER, with casing rule applied to the prefix
+                        const { applyCasing } = require('./formatter/casingRule');
+                        const { tokenize } = require('./formatter/sqlTokenizer');
+                        const prefixTokens = tokenize('CREATE OR ALTER ');
+                        const casedPrefix = applyCasing(prefixTokens, styleLoader.getCasingOptions());
+                        script = script.replace(/^(\s*)CREATE\s+/i, '$1' + casedPrefix);
                     }
-                }
-
-                // Fallback: fetch from DB
-                if (!script) {
-                    try {
-                        const result = await connectionManager.executeQuery(
-                            `SELECT COALESCE(
-                                OBJECT_DEFINITION(OBJECT_ID(@objectName)),
-                                OBJECT_DEFINITION(OBJECT_ID(@objectName, 'TR'))
-                            ) AS [definition]`,
-                            { objectName: { type: TYPES.NVarChar, value: objName } }
-                        );
-                        if (result.rows.length > 0 && result.rows[0]['definition']) {
-                            script = result.rows[0]['definition'] as string;
-                            script = script.replace(/^(\s*)CREATE\s+/i, '$1CREATE OR ALTER ');
-                        }
-                    } catch {}
-                }
+                } catch {}
             }
 
             if (!script) {
@@ -523,8 +503,11 @@ export function activate(context: vscode.ExtensionContext) {
 
             const editor = vscode.window.activeTextEditor;
             if (editor) {
-                // Insert as-is (no formatting — preserves user's saved format)
-                const scriptWithGo = script!.trimEnd() + '\nGO\n';
+                // GO with active casing
+                const { applyCasing: caseFn } = require('./formatter/casingRule');
+                const { tokenize: tok } = require('./formatter/sqlTokenizer');
+                const goText = caseFn(tok('GO'), styleLoader.getCasingOptions());
+                const scriptWithGo = script!.trimEnd() + '\n' + goText + '\n';
                 const cursorLine = editor.selection.active.line;
                 const lineRange = editor.document.lineAt(cursorLine).rangeIncludingLineBreak;
                 await editor.edit(editBuilder => {
