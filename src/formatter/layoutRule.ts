@@ -104,7 +104,8 @@ export function applyLayout(tokens: Token[], options: LayoutOptions): string {
         results.push(result);
     }
 
-    return results.join('');
+    // Join and remove redundant blank lines
+    return results.join('').replace(/\n{3,}/g, '\n\n').replace(/\n\n(Go\b)/gi, '\n$1');
 }
 
 /**
@@ -174,7 +175,6 @@ function splitStatements(tokens: Token[]): StatementParts[] {
         if (depth === 0 && t.type === 'keyword' && t.value.toUpperCase() === 'GO') {
             flushStatement('\n' + t.value + '\n');
             i++;
-            // Skip whitespace after GO
             while (i < tokens.length && tokens[i].type === 'whitespace') i++;
             continue;
         }
