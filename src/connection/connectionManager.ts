@@ -36,6 +36,11 @@ export class ConnectionManager {
     public readonly onConnectionChanged = this._onConnectionChanged.event;
     private requestQueue: (() => void)[] = [];
     private isRequestRunning = false;
+    private pendingConnection: Connection | null = null;
+    private _connectingProfileName: string | null = null;
+
+    get connectingProfileName(): string | null { return this._connectingProfileName; }
+    get isConnecting(): boolean { return this.pendingConnection !== null; }
 
     constructor() {
         this.statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
@@ -113,9 +118,9 @@ export class ConnectionManager {
             // Skip if no server defined
             if (!mc.server) { continue; }
 
-            // Skip duplicates (same server+database already in our list)
+            // Skip duplicates — same server already in our own profiles
             const isDuplicate = profiles.some(
-                p => p.server === mc.server && p.database === mc.database
+                p => p.server === mc.server
             );
             if (isDuplicate) { continue; }
 
@@ -163,8 +168,12 @@ export class ConnectionManager {
             };
 
             const conn = new Connection(config);
+            this.pendingConnection = conn;
+            this._connectingProfileName = profile.name;
 
             conn.on('connect', (err) => {
+                this.pendingConnection = null;
+                this._connectingProfileName = null;
                 if (err) {
                     this.connection = null;
                     this.activeProfile = null;
@@ -180,6 +189,8 @@ export class ConnectionManager {
             });
 
             conn.on('error', (err) => {
+                this.pendingConnection = null;
+                this._connectingProfileName = null;
                 vscode.window.showErrorMessage(`T-SQL IntelliSense: Connection error - ${err.message}`);
                 this.connection = null;
                 this.activeProfile = null;
@@ -189,6 +200,15 @@ export class ConnectionManager {
 
             conn.connect();
         });
+    }
+
+    /** Cancel an in-progress connection attempt */
+    cancelConnect(): void {
+        if (this.pendingConnection) {
+            try { this.pendingConnection.close(); } catch { /* ignore */ }
+            this.pendingConnection = null;
+            this._connectingProfileName = null;
+        }
     }
 
     /** Disconnect from the current database */
@@ -424,24 +444,50 @@ export class ConnectionManager {
         }
     }
 
+    /**
+     * Lightweight DB switch — executes USE [db] on current connection.
+     * No reconnect, no schema reload. Does NOT update the status bar.
+     */
+    async softSwitchDatabase(dbName: string): Promise<void> {
+        if (!this.connection || !this.activeProfile) { return; }
+        if (this.activeProfile.database.toLowerCase() === dbName.toLowerCase()) { return; }
+        try {
+            const safe = dbName.replace(/\]/g, ']]');
+            await this.executeQuery(`USE [${safe}]`);
+            this.activeProfile = { ...this.activeProfile, database: dbName };
+            // Status bar is controlled by showEditorDb — don't update here
+        } catch {
+            // Silently fail — DB may not exist or no permission
+        }
+    }
+
+    showEditorDb(_dbName: string | null): void {
+        // No-op: status bar only shows connection name, not per-file DB
+    }
+
     refreshStatusBar(): void {
         this.updateStatusBar();
     }
 
+    /** Merge databaseProjects into active profile. Empty string value = delete that key. */
+    updateDatabaseProjects(profileName: string, databaseProjects: Record<string, string>): void {
+        if (this.activeProfile && this.activeProfile.name === profileName) {
+            const merged: Record<string, string> = { ...(this.activeProfile.databaseProjects || {}) };
+            for (const [db, path] of Object.entries(databaseProjects)) {
+                if (path) { merged[db] = path; } else { delete merged[db]; }
+            }
+            this.activeProfile.databaseProjects = merged;
+            this.updateStatusBar();
+        }
+    }
+
     private updateStatusBar(): void {
         if (this.activeProfile) {
-            const db = this.activeProfile.database;
-            const projectPath = this.activeProfile.databaseProjects?.[db];
-            const folderIcon = projectPath ? '$(folder)' : '$(folder-x)';
-            const shortName = this.activeProfile.name.substring(0, 3).toUpperCase();
-            this.statusBarItem.text = `$(database) ${folderIcon} ${shortName} / ${db}`;
-            const projectInfo = projectPath
-                ? `Project: ${projectPath}`
-                : 'Project: Not configured';
-            this.statusBarItem.tooltip = `${this.activeProfile.name}\n${this.activeProfile.server} / ${db}\n${projectInfo}\nClick to switch connection`;
+            this.statusBarItem.text = `$(database) ${this.activeProfile.name}`;
+            this.statusBarItem.tooltip = `${this.activeProfile.server}\nClick to switch connection`;
             this.statusBarItem.backgroundColor = undefined;
         } else {
-            this.statusBarItem.text = '$(database) DB: Not connected';
+            this.statusBarItem.text = '$(database) Not connected';
             this.statusBarItem.tooltip = 'Click to connect to a database';
             this.statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
         }

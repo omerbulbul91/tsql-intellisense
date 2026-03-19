@@ -6,26 +6,25 @@ export class ConnectionItem extends vscode.TreeItem {
         public readonly profileName: string,
         public readonly server: string,
         public readonly database: string,
-        public readonly isActive: boolean,
+        isActive: boolean,
         public readonly projectPath?: string
     ) {
         super(profileName, vscode.TreeItemCollapsibleState.Collapsed);
-
+        this.id = `conn:${profileName}`;
         this.description = server;
-        this.contextValue = isActive ? 'connection.connected' : 'connection.disconnected';
+        this.update(isActive);
+    }
 
-        if (isActive) {
-            this.iconPath = new vscode.ThemeIcon('server', new vscode.ThemeColor('testing.iconPassed'));
-            this.tooltip = server;
-        } else {
-            this.iconPath = new vscode.ThemeIcon('server', new vscode.ThemeColor('disabledForeground'));
-            this.tooltip = `${server} — click to connect`;
-            this.command = {
-                command: 'tsql-intellisense.treeConnect',
-                title: 'Connect',
-                arguments: [profileName]
-            };
-        }
+    update(isActive: boolean): void {
+        this.contextValue = isActive ? 'connection.connected' : 'connection.disconnected';
+        this.iconPath = new vscode.ThemeIcon('server',
+            new vscode.ThemeColor(isActive ? 'charts.blue' : 'disabledForeground'));
+        this.tooltip = isActive ? this.server : `${this.server} — click to connect`;
+        this.command = isActive ? undefined : {
+            command: 'tsql-intellisense.treeConnect',
+            title: 'Connect',
+            arguments: [this.profileName]
+        };
     }
 }
 
@@ -33,12 +32,13 @@ export class ConnectionItem extends vscode.TreeItem {
 export class DatabasesFolderItem extends vscode.TreeItem {
     constructor(public readonly parentProfileName: string) {
         super('Databases', vscode.TreeItemCollapsibleState.Expanded);
+        this.id = `dbfolder:${parentProfileName}`;
         this.contextValue = 'folder.databases';
-        this.iconPath = new vscode.ThemeIcon('folder-opened');
+        this.iconPath = new vscode.ThemeIcon('folder-opened', new vscode.ThemeColor('charts.blue'));
     }
 
-    setExpanded(expanded: boolean): void {
-        this.iconPath = new vscode.ThemeIcon(expanded ? 'folder-opened' : 'folder');
+    updateDescription(count: number, suffix?: string): void {
+        this.description = suffix ? `(${count}) ${suffix}` : `(${count})`;
     }
 }
 
@@ -48,27 +48,16 @@ export class DatabaseItem extends vscode.TreeItem {
         public readonly dbName: string,
         public readonly isConnected: boolean,
         public readonly parentProfileName: string,
-        public readonly projectPath?: string
+        public readonly projectPath?: string,
+        /** true = non-active connection with cached data (shows >, no command) */
+        public readonly isCached: boolean = false
     ) {
-        super(
-            dbName,
-            isConnected ? vscode.TreeItemCollapsibleState.Expanded : vscode.TreeItemCollapsibleState.None
-        );
+        super(dbName, vscode.TreeItemCollapsibleState.Collapsed);
 
+        this.id = `db:${parentProfileName}::${dbName}`;
         this.contextValue = isConnected ? 'database.connected' : 'database';
-
-        if (isConnected) {
-            this.iconPath = new vscode.ThemeIcon('database', new vscode.ThemeColor('testing.iconPassed'));
-            this.tooltip = `${dbName} (connected)`;
-        } else {
-            this.iconPath = new vscode.ThemeIcon('database', new vscode.ThemeColor('disabledForeground'));
-            this.tooltip = `${dbName} — click to switch`;
-            this.command = {
-                command: 'tsql-intellisense.switchDatabase',
-                title: 'Switch Database',
-                arguments: [parentProfileName, dbName]
-            };
-        }
+        this.iconPath = new vscode.ThemeIcon('database', new vscode.ThemeColor('charts.blue'));
+        this.tooltip = dbName;
     }
 }
 
@@ -77,18 +66,27 @@ export class ProjectFolderItem extends vscode.TreeItem {
     constructor(public readonly projectPath: string) {
         super(`Project: ${projectPath}`, vscode.TreeItemCollapsibleState.None);
         this.contextValue = 'projectFolder';
-        this.iconPath = new vscode.ThemeIcon('folder-library');
+        this.iconPath = new vscode.ThemeIcon('folder-library', new vscode.ThemeColor('charts.green'));
         this.tooltip = projectPath;
     }
 }
 
 export type ObjectFolderType = 'tables' | 'views' | 'sps' | 'functions';
 
+const FOLDER_COLORS: Record<ObjectFolderType, string> = {
+    tables:    'charts.orange',
+    views:     'charts.blue',
+    sps:       'charts.purple',
+    functions: 'charts.yellow',
+};
+
 /** Folder node for Tables, Views, SPs, Functions */
 export class ObjectFolderItem extends vscode.TreeItem {
     constructor(
         public readonly folderType: ObjectFolderType,
-        public readonly count: number
+        public readonly count: number,
+        public readonly profileName: string = '',
+        public readonly dbName?: string
     ) {
         const labels: Record<ObjectFolderType, string> = {
             tables: 'Tables',
@@ -98,13 +96,14 @@ export class ObjectFolderItem extends vscode.TreeItem {
         };
 
         super(labels[folderType], vscode.TreeItemCollapsibleState.Collapsed);
+        this.id = `folder:${profileName}::${dbName ?? ''}::${folderType}`;
         this.description = `(${count})`;
         this.contextValue = `folder.${folderType}`;
-        this.iconPath = new vscode.ThemeIcon('folder');
+        this.iconPath = new vscode.ThemeIcon('folder', new vscode.ThemeColor(FOLDER_COLORS[folderType]));
     }
 
-    setExpanded(expanded: boolean): void {
-        this.iconPath = new vscode.ThemeIcon(expanded ? 'folder-opened' : 'folder');
+    updateCount(count: number): void {
+        this.description = `(${count})`;
     }
 
     updateDescription(totalCount: number, filteredCount: number, filterText?: string): void {
@@ -123,22 +122,29 @@ export class ObjectItem extends vscode.TreeItem {
     constructor(
         public readonly objectName: string,
         public readonly objectType: ObjectType,
-        public readonly hasTrigger: boolean = false
+        public readonly hasTrigger: boolean = false,
+        forceNonExpandable: boolean = false,
+        public readonly profileName?: string,
+        public readonly dbName?: string
     ) {
-        const isExpandable = objectType === 'table' || objectType === 'view';
+        const isExpandable = !forceNonExpandable && (objectType === 'table' || objectType === 'view');
         super(
             objectName,
             isExpandable ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None
         );
 
+        if (profileName) {
+            this.id = `obj:${profileName}::${dbName ?? ''}::${objectName}`;
+        }
         this.contextValue = objectType;
-        const icons: Record<ObjectType, string> = {
-            table: 'table',
-            view: 'window',
-            sp: 'symbol-event',
-            func: 'symbol-namespace',
+        const icons: Record<ObjectType, [string, string]> = {
+            table: ['table',          'charts.orange'],
+            view:  ['window',         'charts.blue'],
+            sp:    ['symbol-event',   'charts.purple'],
+            func:  ['symbol-namespace','charts.yellow'],
         };
-        this.iconPath = new vscode.ThemeIcon(icons[objectType]);
+        const [icon, color] = icons[objectType];
+        this.iconPath = new vscode.ThemeIcon(icon, new vscode.ThemeColor(color));
         this.tooltip = hasTrigger ? `${objectName} ⚡ (has triggers)` : objectName;
     }
 }
@@ -159,10 +165,10 @@ export class ColumnItem extends vscode.TreeItem {
 
         if (isPK) {
             this.contextValue = 'column.pk';
-            this.iconPath = new vscode.ThemeIcon('key');
+            this.iconPath = new vscode.ThemeIcon('key', new vscode.ThemeColor('charts.yellow'));
         } else if (isFK) {
             this.contextValue = 'column.fk';
-            this.iconPath = new vscode.ThemeIcon('link');
+            this.iconPath = new vscode.ThemeIcon('link', new vscode.ThemeColor('charts.blue'));
         } else {
             this.contextValue = 'column';
             this.iconPath = new vscode.ThemeIcon('symbol-field');
