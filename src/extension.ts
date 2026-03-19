@@ -1283,7 +1283,8 @@ export function activate(context: vscode.ExtensionContext) {
             // Called from editor (Ctrl+F11): resolve object from cursor word
             let objectName: string;
             let objectType: ObjectType;
-            if (!item) {
+            // Editor context menu may pass URI or other non-ObjectItem arg — treat as no item
+            if (!item || !(item instanceof ObjectItem)) {
                 const editor = vscode.window.activeTextEditor;
                 if (!editor) {
                     vscode.window.showWarningMessage('Open Project File: No active editor');
