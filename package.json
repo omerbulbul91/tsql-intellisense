@@ -580,7 +580,7 @@
       {
         "command": "tsql-intellisense.runQuery",
         "key": "f5",
-        "when": "editorLangId == sql && !inDebugMode && tsqlIntellisense.active"
+        "when": "editorLangId == sql && !inDebugMode && tsqlIntellisense.active && editorFocus"
       },
       {
         "command": "tsql-intellisense.newSqlFile",
