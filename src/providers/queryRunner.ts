@@ -306,7 +306,7 @@ export class QueryRunner implements vscode.WebviewViewProvider {
     .tab-content.active { display: block; }
     .table-container {
         overflow: auto;
-        max-height: calc(100vh - 80px);
+        height: calc(100vh - 70px);
     }
     table {
         width: 100%;
@@ -763,7 +763,7 @@ export class QueryRunner implements vscode.WebviewViewProvider {
     <div class="toolbar">
         <span class="info">${this.buildInfoText(result)}</span>
     </div>
-    <div style="overflow: auto; max-height: calc(100vh - 40px);">
+    <div style="overflow: auto; height: calc(100vh - 40px);">
         ${stackedContent}
         ${messagesHtml ? `<div class="stacked-section"><div class="stacked-header">Messages</div>${messagesHtml}</div>` : ''}
     </div>
