@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { ConnectionManager, ConnectionProfile, TYPES } from './connection/connectionManager';
 import { SchemaCache } from './cache/schemaCache';
+import { SchemaCacheManager } from './cache/schemaCacheManager';
 import { TsqlCompletionProvider } from './providers/completionProvider';
 import { AlterProcProvider } from './providers/alterProcProvider';
 import { QueryRunner } from './providers/queryRunner';
@@ -21,7 +22,7 @@ import { StyleFormProvider } from './providers/styleFormProvider';
 import { TranslationEditor } from './providers/translationEditor';
 
 let connectionManager: ConnectionManager;
-let schemaCache: SchemaCache;
+let schemaCacheManager: SchemaCacheManager;
 let alterProcProvider: AlterProcProvider;
 let queryRunner: QueryRunner;
 
@@ -31,7 +32,13 @@ export function activate(context: vscode.ExtensionContext) {
 
     // Initialize core components
     connectionManager = new ConnectionManager();
-    schemaCache = new SchemaCache(connectionManager);
+    schemaCacheManager = new SchemaCacheManager();
+    const schemaCache = schemaCacheManager.getOrCreate(
+        connectionManager.currentProfile?.name ?? '__default__',
+        connectionManager.currentProfile?.database ?? '__default__',
+        connectionManager
+    );
+    schemaCacheManager.active = schemaCache;
     alterProcProvider = new AlterProcProvider(connectionManager, schemaCache);
     queryRunner = new QueryRunner(connectionManager);
 
@@ -44,20 +51,22 @@ export function activate(context: vscode.ExtensionContext) {
         const profile = connectionManager.currentProfile;
         if (!profile) { return; }
         const dbName = profile.database;
-        await schemaCache.loadObjectNames();
-        schemaCache.startAutoRefresh();
+        const cache = schemaCacheManager.getOrCreate(profile.name, dbName, connectionManager);
+        schemaCacheManager.active = cache;
+        await cache.loadObjectNames();
+        cache.startAutoRefresh();
         vscode.window.showInformationMessage(
-            `T-SQL IntelliSense: Schema loaded (${schemaCache.objectCount} objects) — ${dbName}`
+            `T-SQL IntelliSense: Schema loaded (${cache.objectCount} objects) — ${dbName}`
         );
         const statusItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 0);
         statusItem.text = '$(sync~spin) T-SQL: Loading schema details...';
         statusItem.show();
-        await schemaCache.loadAllColumns().catch(e => console.error('loadAllColumns failed:', e));
-        await schemaCache.loadForeignKeys().catch(e => console.error('loadForeignKeys failed:', e));
-        await schemaCache.loadIndexes().catch(e => console.error('loadIndexes failed:', e));
-        await schemaCache.loadTriggers().catch(e => console.error('loadTriggers failed:', e));
-        await schemaCache.loadViewDefinitions().catch(e => console.error('loadViewDefinitions failed:', e));
-        statusItem.text = schemaCache.isFullyLoaded
+        await cache.loadAllColumns().catch(e => console.error('loadAllColumns failed:', e));
+        await cache.loadForeignKeys().catch(e => console.error('loadForeignKeys failed:', e));
+        await cache.loadIndexes().catch(e => console.error('loadIndexes failed:', e));
+        await cache.loadTriggers().catch(e => console.error('loadTriggers failed:', e));
+        await cache.loadViewDefinitions().catch(e => console.error('loadViewDefinitions failed:', e));
+        statusItem.text = cache.isFullyLoaded
             ? '$(check) T-SQL: Schema ready'
             : '$(warning) T-SQL: Schema partially loaded';
         setTimeout(() => statusItem.dispose(), 5000);
@@ -346,12 +355,14 @@ export function activate(context: vscode.ExtensionContext) {
                 vscode.window.showWarningMessage('T-SQL IntelliSense: Not connected');
                 return;
             }
+            const activeCache = schemaCacheManager.active;
+            if (!activeCache) { return; }
             await vscode.window.withProgress(
                 { location: vscode.ProgressLocation.Notification, title: 'Refreshing schema cache...' },
-                () => schemaCache.refresh()
+                () => activeCache.refresh()
             );
             vscode.window.showInformationMessage(
-                `T-SQL IntelliSense: Schema refreshed (${schemaCache.objectCount} objects)`
+                `T-SQL IntelliSense: Schema refreshed (${activeCache.objectCount} objects)`
             );
         })
     );
@@ -402,7 +413,7 @@ export function activate(context: vscode.ExtensionContext) {
             if (!connectionManager.isConnected) { return; }
 
             let script: string | null = null;
-            const obj = schemaCache.findObject(objName);
+            const obj = schemaCacheManager.active?.findObject(objName);
 
             if (obj && obj.type === 'TABLE') {
                 script = buildObjectScript(objName);
@@ -548,8 +559,8 @@ export function activate(context: vscode.ExtensionContext) {
 
             try {
                 const allColumns = dbName
-                    ? await schemaCache.loadColumnsForDbTable(dbName, tableName)
-                    : await schemaCache.getColumns(tableName);
+                    ? await schemaCacheManager.active?.loadColumnsForDbTable(dbName, tableName) ?? []
+                    : await schemaCacheManager.active?.getColumns(tableName) ?? [];
                 if (allColumns.length === 0) { return; }
 
                 // Skip IDENTITY columns
@@ -735,12 +746,12 @@ export function activate(context: vscode.ExtensionContext) {
 
     /** Build CREATE TABLE or VIEW definition script */
     function buildObjectScript(tableName: string): string | null {
-        const obj = schemaCache.findObject(tableName);
+        const obj = schemaCacheManager.active?.findObject(tableName);
         if (!obj) { return null; }
 
         // VIEW → return actual definition
         if (obj.type === 'VIEW') {
-            const viewDef = schemaCache.getViewDefinition(tableName);
+            const viewDef = schemaCacheManager.active?.getViewDefinition(tableName);
             return viewDef ? viewDef.trim() : null;
         }
 
@@ -761,7 +772,7 @@ export function activate(context: vscode.ExtensionContext) {
         lines.push(')');
         lines.push('GO');
 
-        const indexes = schemaCache.getIndexes(tableName);
+        const indexes = schemaCacheManager.active?.getIndexes(tableName) ?? [];
         const pk = indexes.find(idx => idx.isPrimaryKey);
         if (pk) {
             lines.push(`ALTER TABLE [dbo].[${tableName}] ADD CONSTRAINT [${pk.name}] PRIMARY KEY (${pk.columns})`);
@@ -773,13 +784,13 @@ export function activate(context: vscode.ExtensionContext) {
             lines.push('GO');
         }
 
-        const fks = schemaCache.getForeignKeysForTable(tableName);
+        const fks = schemaCacheManager.active?.getForeignKeysForTable(tableName) ?? [];
         for (const fk of fks) {
             lines.push(`ALTER TABLE [dbo].[${fk.parentTable}] ADD CONSTRAINT [${fk.fkName}] FOREIGN KEY ([${fk.parentColumn}]) REFERENCES [dbo].[${fk.referencedTable}] ([${fk.referencedColumn}])`);
             lines.push('GO');
         }
 
-        const triggers = schemaCache.getTriggers(tableName);
+        const triggers = schemaCacheManager.active?.getTriggers(tableName) ?? [];
         for (const trig of triggers) {
             if (trig.definition) {
                 lines.push(trig.definition.trim());
@@ -791,7 +802,7 @@ export function activate(context: vscode.ExtensionContext) {
     }
 
     // Project Sync: auto-update SQL project files after DDL execution
-    const projectSync = new ProjectSync(connectionManager, schemaCache);
+    const projectSync = new ProjectSync(connectionManager, schemaCache); // uses initial cache; ProjectSync reacts to onSchemaLoaded events
     queryRunner.onQueryExecuted(async ({ sql }) => {
         const profile = connectionManager.currentProfile;
         if (!profile) { return; }
@@ -1115,9 +1126,11 @@ export function activate(context: vscode.ExtensionContext) {
 
             if (isActiveDb) {
                 // Already on this DB — just refresh schema
+                const dbCache = schemaCacheManager.getOrCreate(profileName, dbName, connectionManager);
+                schemaCacheManager.active = dbCache;
                 await vscode.window.withProgress(
                     { location: vscode.ProgressLocation.Notification, title: 'Refreshing schema cache...' },
-                    () => schemaCache.refresh()
+                    () => dbCache.refresh()
                 );
                 // Only refresh this DB node — don't collapse other servers' trees
                 treeProvider.fullRefresh();
@@ -1160,10 +1173,12 @@ export function activate(context: vscode.ExtensionContext) {
                 // Refresh object names only (fast) — columns load lazily on first alias.col use
                 void (async () => {
                     await connectionManager.softSwitchDatabase(dbName);
-                    await schemaCache.loadObjectNames();
-                    schemaCache.startAutoRefresh();
+                    const dbCache = schemaCacheManager.getOrCreate(profileName, dbName, connectionManager);
+                    schemaCacheManager.active = dbCache;
+                    await dbCache.loadObjectNames();
+                    dbCache.startAutoRefresh();
                     vscode.window.showInformationMessage(
-                        `T-SQL IntelliSense: Objects loaded (${schemaCache.objectCount}) — ${dbName}`
+                        `T-SQL IntelliSense: Objects loaded (${dbCache.objectCount}) — ${dbName}`
                     );
                 })();
             } else if (node?.profileName) {
@@ -1356,7 +1371,7 @@ export function activate(context: vscode.ExtensionContext) {
             if (!wordRange) { return; }
             const word = editor.document.getText(wordRange);
 
-            const obj = schemaCache.findObject(word);
+            const obj = schemaCacheManager.active?.findObject(word);
             if (!obj) {
                 vscode.window.showWarningMessage(`"${word}" not found in schema cache`);
                 return;
@@ -1418,7 +1433,7 @@ export function activate(context: vscode.ExtensionContext) {
                     vscode.window.showWarningMessage('Open Project File: No word at cursor. Place cursor on an object name or select it.');
                     return;
                 }
-                const obj = schemaCache.findObject(word);
+                const obj = schemaCacheManager.active?.findObject(word);
                 if (obj) {
                     const typeMap: Record<string, ObjectType> = { TABLE: 'table', VIEW: 'view', PROCEDURE: 'sp', FUNCTION: 'func' };
                     objectName = obj.name;
@@ -1451,7 +1466,7 @@ export function activate(context: vscode.ExtensionContext) {
                 `${projectPath}/dbo/${subFolder}/${objectName}.sql`,
                 `${projectPath}/${subFolder}/${objectName}.sql`,
             ];
-            if (!schemaCache.findObject(objectName)) {
+            if (!schemaCacheManager.active?.findObject(objectName)) {
                 const allFolders = ['Views', 'Stored Procedures', 'Functions', 'Tables'];
                 for (const f of allFolders) {
                     searchPaths.push(`${projectPath}/dbo/${f}/${objectName}.sql`);
@@ -1476,15 +1491,39 @@ export function activate(context: vscode.ExtensionContext) {
         if (profile) {
             context.globalState.update('lastConnectionName', profile.name);
         } else {
-            schemaCache.stopAutoRefresh();
+            schemaCacheManager.active?.stopAutoRefresh();
         }
     });
 
     // Disposables
+    // Tab switch handler — parse connection header and set active cache
+    context.subscriptions.push(
+        vscode.window.onDidChangeActiveTextEditor(async (editor) => {
+            if (!editor || editor.document.languageId !== 'sql') { return; }
+            const firstLine = editor.document.lineAt(0).text;
+            const header = parseConnectionHeader(firstLine);
+            if (!header) { return; }
+
+            const cache = schemaCacheManager.getOrCreate(header.profileName, header.database, connectionManager);
+            schemaCacheManager.active = cache;
+
+            if (!cache.isLoaded) {
+                const profile = connectionManager.getSavedProfiles().find(p => p.name === header.profileName);
+                if (profile) {
+                    if (connectionManager.currentProfile?.name !== header.profileName) {
+                        await connectionManager.connect(profile);
+                    }
+                    await connectionManager.softSwitchDatabase(header.database);
+                    await cache.loadObjectNames();
+                }
+            }
+        })
+    );
+
     context.subscriptions.push({
         dispose: () => {
             connectionManager.dispose();
-            schemaCache.dispose();
+            schemaCacheManager.dispose();
             queryRunner.dispose();
             treeProvider.dispose();
         }
@@ -1507,5 +1546,5 @@ function getProjectPathForNode(profile: ConnectionProfile | undefined, node: Dat
 
 export function deactivate() {
     connectionManager?.dispose();
-    schemaCache?.dispose();
+    schemaCacheManager?.dispose();
 }
