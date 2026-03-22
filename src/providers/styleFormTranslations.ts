@@ -97,6 +97,10 @@ export const styleFormTranslations: Record<string, Record<string, string>> = {
         'snippets.selectToPreview': 'Select a snippet to preview',
         'snippets.noSnippets': 'No snippets found. Set a snippet folder first.',
         'snippets.loading': 'Loading snippets...',
+        'snippets.save': 'Save',
+        'snippets.cancel': 'Cancel',
+        'snippets.newSnippet': 'New Snippet',
+        'snippets.editSnippet': 'Edit Snippet',
         // Casing
         'casing.builtInTitle': 'Built-in keywords, functions and types',
         'casing.reservedKeywords': 'Reserved keywords:',
@@ -314,6 +318,10 @@ export const styleFormTranslations: Record<string, Record<string, string>> = {
         'snippets.selectToPreview': '\u00D6nizlemek i\u00E7in bir snippet se\u00E7in',
         'snippets.noSnippets': 'Snippet bulunamadı. \u00D6nce bir snippet klas\u00F6r\u00FC ayarlayın.',
         'snippets.loading': 'Snippet\u2019ler y\u00FCkleniyor...',
+        'snippets.save': 'Kaydet',
+        'snippets.cancel': '\u0130ptal',
+        'snippets.newSnippet': 'Yeni Snippet',
+        'snippets.editSnippet': 'Snippet D\u00FCzenle',
         // Casing
         'casing.builtInTitle': 'Yerleşik anahtar kelimeler, fonksiyonlar ve tipler',
         'casing.reservedKeywords': 'Ayrılmış anahtar kelimeler:',
