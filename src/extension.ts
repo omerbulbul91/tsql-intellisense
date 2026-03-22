@@ -1303,12 +1303,16 @@ export function activate(context: vscode.ExtensionContext) {
                 })();
             } else if (node?.profileName) {
                 // Opened from a Connection node (server level) → ask which DB
-                const currentProfile = connectionManager.currentProfile;
-                let selectedDb = currentProfile?.database || '';
+                let selectedDb = '';
 
                 try {
-                    const dbResult = await connectionManager.executeQuery(
-                        `SELECT name FROM sys.databases WHERE state_desc = 'ONLINE' ORDER BY name`
+                    // Use tree pool to query DB list (works even if ConnectionManager is on another server)
+                    if (!treeQueryService.isConnected(node.profileName)) {
+                        await treeQueryService.connect(node.profileName);
+                    }
+                    const dbResult = await treeQueryService.execute(
+                        `SELECT name FROM sys.databases WHERE state_desc = 'ONLINE' ORDER BY name`,
+                        undefined, node.profileName
                     );
                     const dbNames = dbResult.rows.map(r => r['name'] as string);
                     const items: vscode.QuickPickItem[] = dbNames.map(name => ({
@@ -1327,9 +1331,10 @@ export function activate(context: vscode.ExtensionContext) {
 
                 if (!selectedDb) { return; }
 
-                // Switch DB if needed
-                if (currentProfile && currentProfile.database.toLowerCase() !== selectedDb.toLowerCase()) {
-                    const switchedProfile = { ...currentProfile, database: selectedDb };
+                // Switch ConnectionManager to this server + DB
+                const connProfile = connectionManager.getSavedProfiles().find(p => p.name === node.profileName);
+                if (connProfile && connectionManager.currentProfile?.name !== node.profileName) {
+                    const switchedProfile = { ...connProfile, database: selectedDb };
                     try {
                         await connectionManager.connect(switchedProfile);
                     } catch (err: any) {
