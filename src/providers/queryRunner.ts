@@ -313,8 +313,24 @@ export class QueryRunner implements vscode.WebviewViewProvider {
     }
     tr:hover td { background: var(--vscode-list-hoverBackground); }
     tr.selected td { background: var(--vscode-list-activeSelectionBackground); color: var(--vscode-list-activeSelectionForeground); }
+    td.selected-cell { background: rgba(0, 120, 212, 0.15); }
     td.active-cell { outline: 2px solid var(--vscode-focusBorder); outline-offset: -2px; }
     td.null-val { color: var(--vscode-descriptionForeground); font-style: italic; }
+    th.row-check, td.row-check {
+        width: 28px;
+        min-width: 28px;
+        max-width: 28px;
+        text-align: center;
+        padding: 2px 4px;
+        cursor: pointer;
+        user-select: none;
+    }
+    th.row-check { font-size: 10px; }
+    td.row-check input[type="checkbox"] {
+        cursor: pointer;
+        margin: 0;
+        accent-color: var(--vscode-focusBorder);
+    }
     .messages {
         padding: 6px 8px;
         font-family: var(--vscode-editor-fontFamily, monospace);
@@ -443,48 +459,109 @@ export class QueryRunner implements vscode.WebviewViewProvider {
         vscode.postMessage({ type: 'exportJson', data: JSON.stringify(rs.rows, null, 2) });
     }
 
-    // ── Selection ──────────────────────────────────────────────
-    let selectedRows = new Set();
+    // ── Cell Selection ─────────────────────────────────────────
+    let selectedCells = new Set();
     let activeCell = null;
+    let lastClickedCell = null;
+
+    // ── Row Selection (via checkbox column) ─────────────────
+    let selectedRows = new Set();
+    let lastCheckedRow = null;
 
     document.addEventListener('click', (e) => {
+        // Ignore clicks on checkboxes (handled by toggleRowCheck)
+        if (e.target.closest('.row-check')) { return; }
+
         const cell = e.target.closest('td');
         const row = e.target.closest('tbody tr');
-        if (!row) { selectedRows.clear(); activeCell = null; refreshSelection(); return; }
-
-        // Active cell
-        activeCell = cell;
-
-        // Row selection
-        if (e.ctrlKey) {
-            if (selectedRows.has(row)) { selectedRows.delete(row); } else { selectedRows.add(row); }
-        } else if (e.shiftKey && selectedRows.size > 0) {
-            const allRows = Array.from(row.parentElement.rows);
-            const last = allRows.indexOf(Array.from(selectedRows).pop());
-            const curr = allRows.indexOf(row);
-            const [start, end] = last < curr ? [last, curr] : [curr, last];
-            for (let i = start; i <= end; i++) { selectedRows.add(allRows[i]); }
-        } else {
-            selectedRows.clear();
-            selectedRows.add(row);
+        if (!cell || !row) {
+            selectedCells.clear();
+            activeCell = null;
+            refreshSelection();
+            return;
         }
+
+        // Cell selection
+        if (e.ctrlKey) {
+            if (selectedCells.has(cell)) { selectedCells.delete(cell); } else { selectedCells.add(cell); }
+        } else if (e.shiftKey && lastClickedCell) {
+            // Range select cells between lastClickedCell and current
+            const allCells = Array.from(document.querySelectorAll('[data-tab="' + Math.max(0, currentTab) + '"] tbody td:not(.row-check)'));
+            const lastIdx = allCells.indexOf(lastClickedCell);
+            const currIdx = allCells.indexOf(cell);
+            if (lastIdx >= 0 && currIdx >= 0) {
+                const [start, end] = lastIdx < currIdx ? [lastIdx, currIdx] : [currIdx, lastIdx];
+                for (let i = start; i <= end; i++) { selectedCells.add(allCells[i]); }
+            }
+        } else {
+            selectedCells.clear();
+            selectedCells.add(cell);
+        }
+        activeCell = cell;
+        lastClickedCell = cell;
         refreshSelection();
     });
 
+    function toggleRowCheck(checkbox, event) {
+        const row = checkbox.closest('tr');
+        if (!row) return;
+
+        if (event.shiftKey && lastCheckedRow) {
+            const allRows = Array.from(row.parentElement.rows);
+            const lastIdx = allRows.indexOf(lastCheckedRow);
+            const currIdx = allRows.indexOf(row);
+            const [start, end] = lastIdx < currIdx ? [lastIdx, currIdx] : [currIdx, lastIdx];
+            const checked = checkbox.checked;
+            for (let i = start; i <= end; i++) {
+                const cb = allRows[i].querySelector('.row-check input');
+                if (cb) { cb.checked = checked; }
+                if (checked) { selectedRows.add(allRows[i]); } else { selectedRows.delete(allRows[i]); }
+            }
+        } else {
+            if (checkbox.checked) { selectedRows.add(row); } else { selectedRows.delete(row); }
+        }
+        lastCheckedRow = row;
+        refreshSelection();
+    }
+
+    function toggleAllRows(tabIndex, checked) {
+        const tbody = document.querySelector('[data-tab="' + tabIndex + '"] tbody');
+        if (!tbody) return;
+        selectedRows.clear();
+        Array.from(tbody.rows).forEach(r => {
+            const cb = r.querySelector('.row-check input');
+            if (cb) { cb.checked = checked; }
+            if (checked) { selectedRows.add(r); }
+        });
+        refreshSelection();
+    }
+
     function refreshSelection() {
         document.querySelectorAll('tbody tr').forEach(r => r.classList.toggle('selected', selectedRows.has(r)));
+        document.querySelectorAll('td.selected-cell').forEach(c => c.classList.remove('selected-cell'));
         document.querySelectorAll('td.active-cell').forEach(c => c.classList.remove('active-cell'));
+        selectedCells.forEach(c => c.classList.add('selected-cell'));
         if (activeCell) { activeCell.classList.add('active-cell'); }
     }
 
     function getSelectedData(withHeaders) {
         const rs = resultSets[Math.max(0, currentTab)];
         if (!rs) return '';
+
+        // If cells are selected, copy only those cells
+        if (selectedCells.size > 0 && selectedRows.size === 0) {
+            const vals = Array.from(selectedCells).map(c => c.textContent || '');
+            return vals.join('\\t');
+        }
+
+        // Otherwise use row selection (checkbox) or all rows
         const rows = selectedRows.size > 0 ? Array.from(selectedRows) : Array.from(document.querySelectorAll('[data-tab="' + Math.max(0, currentTab) + '"] tbody tr'));
         const lines = [];
         if (withHeaders) { lines.push(rs.columns.join('\\t')); }
         rows.forEach(row => {
-            lines.push(Array.from(row.cells).map(c => c.textContent || '').join('\\t'));
+            // Skip first cell (checkbox column)
+            const dataCells = Array.from(row.cells).slice(1);
+            lines.push(dataCells.map(c => c.textContent || '').join('\\t'));
         });
         return lines.join('\\n');
     }
@@ -514,8 +591,7 @@ export class QueryRunner implements vscode.WebviewViewProvider {
         if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'C') { e.preventDefault(); doCopy(true); }
         if ((e.ctrlKey || e.metaKey) && e.key === 'a') {
             e.preventDefault();
-            const tbody = document.querySelector('[data-tab="' + Math.max(0, currentTab) + '"] tbody');
-            if (tbody) { selectedRows = new Set(Array.from(tbody.rows)); refreshSelection(); }
+            toggleAllRows(Math.max(0, currentTab), true);
         }
     });
 
@@ -527,10 +603,7 @@ export class QueryRunner implements vscode.WebviewViewProvider {
             { label: 'Copy', shortcut: 'Ctrl+C', action: () => doCopy(false) },
             { label: 'Copy with Headers', shortcut: 'Ctrl+Shift+C', action: () => doCopy(true) },
             { separator: true },
-            { label: 'Select All', shortcut: 'Ctrl+A', action: () => {
-                const tbody = document.querySelector('[data-tab="' + Math.max(0, currentTab) + '"] tbody');
-                if (tbody) { selectedRows = new Set(Array.from(tbody.rows)); refreshSelection(); }
-            }},
+            { label: 'Select All', shortcut: 'Ctrl+A', action: () => toggleAllRows(Math.max(0, currentTab), true) },
             { separator: true },
             { label: 'Script as INSERT', action: () => scriptAsInsert() },
             { label: 'Open in Excel', action: () => openInExcel() },
@@ -569,7 +642,8 @@ export class QueryRunner implements vscode.WebviewViewProvider {
         const rows = selectedRows.size > 0 ? Array.from(selectedRows) : Array.from(document.querySelectorAll('[data-tab="' + Math.max(0, currentTab) + '"] tbody tr'));
         const cols = rs.columns;
         const lines = rows.map(row => {
-            const vals = Array.from(row.cells).map((c, i) => {
+            const dataCells = Array.from(row.cells).slice(1); // skip checkbox column
+            const vals = dataCells.map((c, i) => {
                 const v = c.textContent;
                 if (v === 'NULL') return 'NULL';
                 const num = Number(v);
@@ -696,11 +770,13 @@ export class QueryRunner implements vscode.WebviewViewProvider {
     private buildResultSetTab(rs: QueryResult, index: number): string {
         if (rs.columns.length === 0) { return '<div class="messages">No columns returned</div>'; }
 
-        const headerCells = rs.columns
-            .map((col, i) => `<th onclick="sortTable(${index}, ${i})">${this.escapeHtml(col)} <span class="sort-arrow">⇅</span></th>`)
+        const checkHeader = `<th class="row-check"><input type="checkbox" onclick="toggleAllRows(${index}, this.checked)" title="Select All"></th>`;
+        const headerCells = checkHeader + rs.columns
+            .map((col, i) => `<th onclick="sortTable(${index}, ${i + 1})">${this.escapeHtml(col)} <span class="sort-arrow">⇅</span></th>`)
             .join('');
 
-        const bodyRows = rs.rows.map(row => {
+        const bodyRows = rs.rows.map((row, rowIdx) => {
+            const checkCell = `<td class="row-check"><input type="checkbox" data-row-idx="${rowIdx}" onclick="toggleRowCheck(this, event)"></td>`;
             const cells = rs.columns.map(col => {
                 const val = row[col];
                 if (val === null || val === undefined) {
@@ -708,7 +784,7 @@ export class QueryRunner implements vscode.WebviewViewProvider {
                 }
                 return `<td>${this.escapeHtml(String(val))}</td>`;
             }).join('');
-            return `<tr>${cells}</tr>`;
+            return `<tr>${checkCell}${cells}</tr>`;
         }).join('');
 
         return `<div class="table-container">
