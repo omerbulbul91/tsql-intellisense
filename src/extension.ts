@@ -1510,9 +1510,18 @@ export function activate(context: vscode.ExtensionContext) {
     // When connection changes: update icons, refresh tree
     connectionManager.onConnectionChanged(async (profile) => {
         treeProvider.fullRefresh();
+        codeLensProvider.refresh();
         vscode.commands.executeCommand('setContext', 'tsqlIntellisense.connected', !!profile);
         if (profile) {
             context.globalState.update('lastConnectionName', profile.name);
+            // Update active document's association
+            const editor = vscode.window.activeTextEditor;
+            if (editor && editor.document.languageId === 'sql') {
+                queryRunner.setDocumentDatabase(editor.document.uri, {
+                    profileName: profile.name,
+                    dbName: profile.database,
+                });
+            }
         } else {
             schemaCacheManager.active?.stopAutoRefresh();
         }
