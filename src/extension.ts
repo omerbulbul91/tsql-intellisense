@@ -1183,7 +1183,13 @@ export function activate(context: vscode.ExtensionContext) {
                 codeLensProvider.refresh();
                 // Refresh object names only (fast) — columns load lazily on first alias.col use
                 void (async () => {
-                    await connectionManager.softSwitchDatabase(dbName);
+                    // Ensure ConnectionManager is connected to the right server + database
+                    if (connectionManager.currentProfile?.name !== profileName) {
+                        const p = connectionManager.getSavedProfiles().find(x => x.name === profileName);
+                        if (p) { await connectionManager.connect({ ...p, database: dbName }); }
+                    } else {
+                        await connectionManager.softSwitchDatabase(dbName);
+                    }
                     const dbCache = schemaCacheManager.getOrCreate(profileName, dbName, connectionManager);
                     schemaCacheManager.active = dbCache;
                     await dbCache.loadObjectNames();
@@ -1522,9 +1528,10 @@ export function activate(context: vscode.ExtensionContext) {
                 const profile = connectionManager.getSavedProfiles().find(p => p.name === header.profileName);
                 if (profile) {
                     if (connectionManager.currentProfile?.name !== header.profileName) {
-                        await connectionManager.connect(profile);
+                        await connectionManager.connect({ ...profile, database: header.database });
+                    } else {
+                        await connectionManager.softSwitchDatabase(header.database);
                     }
-                    await connectionManager.softSwitchDatabase(header.database);
                     await cache.loadObjectNames();
                 }
             }
