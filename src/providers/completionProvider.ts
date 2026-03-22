@@ -884,9 +884,23 @@ export class TsqlCompletionProvider implements vscode.CompletionItemProvider {
             items.push(item);
         }
 
+        // System global variables (@@ROWCOUNT, @@IDENTITY, etc.)
+        for (const fnName of FUNCTIONS) {
+            if (!fnName.startsWith('@@')) continue;
+            const item = new vscode.CompletionItem(fnName, vscode.CompletionItemKind.Variable);
+            item.detail = 'System variable';
+            item.sortText = `1_${fnName}`;
+            item.filterText = fnName;
+            item.insertText = fnName;
+            if (replaceRange) {
+                item.range = replaceRange;
+            }
+            items.push(item);
+        }
+
         // All remaining built-in functions from tokenizer (simple parentheses)
         for (const fnName of FUNCTIONS) {
-            if (fnName.startsWith('@@')) continue; // system vars, not callable
+            if (fnName.startsWith('@@')) continue; // already added above as variables
             if (snippetLabels.has(fnName)) continue; // already added as snippet
             const item = new vscode.CompletionItem(fnName, vscode.CompletionItemKind.Function);
             item.detail = 'Built-in function';
