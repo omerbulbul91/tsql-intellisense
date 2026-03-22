@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 
-interface RedgateSnippet {
+export interface RedgateSnippet {
     id?: string;
     prefix: string;
     description?: string;
@@ -11,6 +11,8 @@ interface RedgateSnippet {
 
 export class SnippetProvider implements vscode.CompletionItemProvider {
     private items: vscode.CompletionItem[] = [];
+    private snippets: RedgateSnippet[] = [];
+    private snippetFolder: string = '';
     private outputChannel: vscode.OutputChannel;
 
     constructor(outputChannel: vscode.OutputChannel) {
@@ -20,6 +22,8 @@ export class SnippetProvider implements vscode.CompletionItemProvider {
     async loadSnippets(): Promise<void> {
         const folder = vscode.workspace.getConfiguration('tsql-intellisense').get<string>('snippetFolder', '');
         this.items = [];
+        this.snippets = [];
+        this.snippetFolder = folder;
 
         if (!folder) {
             return;
@@ -46,6 +50,7 @@ export class SnippetProvider implements vscode.CompletionItemProvider {
                     continue;
                 }
 
+                this.snippets.push(snippet);
                 const item = this.createCompletionItem(snippet);
                 this.items.push(item);
             } catch (err: any) {
@@ -97,6 +102,14 @@ export class SnippetProvider implements vscode.CompletionItemProvider {
         item.sortText = `zz_${snippet.prefix}`;
 
         return item;
+    }
+
+    public getSnippets(): RedgateSnippet[] {
+        return this.snippets;
+    }
+
+    public getSnippetFolder(): string {
+        return this.snippetFolder;
     }
 
     provideCompletionItems(
