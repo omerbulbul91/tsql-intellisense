@@ -404,9 +404,9 @@ export function activate(context: vscode.ExtensionContext) {
     // Toggle bottom panel (Ctrl+R — SSMS style: alt paneli aşağı indir / kaldır)
     context.subscriptions.push(
         vscode.commands.registerCommand('tsql-intellisense.toggleResultsPanel', () => {
-            // If focus is in the panel (Query Results), close it and return to editor
+            // If focus is in the panel (Query Results), minimize it
             if (!vscode.window.activeTextEditor) {
-                vscode.commands.executeCommand('workbench.action.focusActiveEditorGroup');
+                vscode.commands.executeCommand('workbench.action.togglePanel');
             } else {
                 // Focus is in editor, open/focus Query Results panel
                 vscode.commands.executeCommand('tsqlResults.focus');
