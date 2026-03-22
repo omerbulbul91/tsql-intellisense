@@ -42,8 +42,8 @@ export class ConnectionManager {
     constructor() {
         this.statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
         this.statusBarItem.command = 'tsql-intellisense.connect';
-        this.updateStatusBar();
-        this.statusBarItem.show();
+        // Status bar hidden — connection info shown in query file header instead
+        this.statusBarItem.hide();
     }
 
     get isConnected(): boolean {
