@@ -1438,6 +1438,89 @@ export function activate(context: vscode.ExtensionContext) {
         );
     }
 
+    // Backup / Restore database scripts
+    context.subscriptions.push(
+        vscode.commands.registerCommand('tsql-intellisense.backupDatabase', async (node?: DatabaseTreeItem) => {
+            const dbName = node?.databaseName ?? connectionManager.currentProfile?.database ?? 'MyDatabase';
+            const profileName = node?.profileName ?? connectionManager.currentProfile?.name ?? '';
+            const profile = connectionManager.getSavedProfiles().find(p => p.name === profileName);
+            const projectPath = getProjectPathForNode(profile, node);
+            const header = buildConnectionHeader(profileName, dbName, projectPath);
+            const script = [
+                `-- Backup Database: ${dbName}`,
+                `BACKUP DATABASE [${dbName}]`,
+                `TO DISK = N'C:\\Backup\\${dbName}_\${YYYY}\${MM}\${DD}.bak'`,
+                `WITH FORMAT,`,
+                `     MEDIANAME = '${dbName}_Backup',`,
+                `     NAME = '${dbName} Full Backup',`,
+                `     COMPRESSION,`,
+                `     STATS = 10;`,
+                `GO`,
+                ``,
+                `-- Backup with COPY_ONLY (does not affect backup chain)`,
+                `-- BACKUP DATABASE [${dbName}]`,
+                `-- TO DISK = N'C:\\Backup\\${dbName}_CopyOnly.bak'`,
+                `-- WITH COPY_ONLY, FORMAT, COMPRESSION, STATS = 10;`,
+                `-- GO`,
+                ``,
+                `-- Backup Transaction Log`,
+                `-- BACKUP LOG [${dbName}]`,
+                `-- TO DISK = N'C:\\Backup\\${dbName}_Log.trn'`,
+                `-- WITH FORMAT, STATS = 10;`,
+                `-- GO`,
+            ].join('\n');
+            const doc = await vscode.workspace.openTextDocument({ content: header + '\n\n' + script, language: 'sql' });
+            await vscode.window.showTextDocument(doc, { preview: false });
+        }),
+        vscode.commands.registerCommand('tsql-intellisense.restoreDatabase', async (node?: DatabaseTreeItem) => {
+            const dbName = node?.databaseName ?? connectionManager.currentProfile?.database ?? 'MyDatabase';
+            const profileName = node?.profileName ?? connectionManager.currentProfile?.name ?? '';
+            const profile = connectionManager.getSavedProfiles().find(p => p.name === profileName);
+            const projectPath = getProjectPathForNode(profile, node);
+            const header = buildConnectionHeader(profileName, dbName, projectPath);
+            const script = [
+                `-- Restore Database: ${dbName}`,
+                `USE [master];`,
+                `GO`,
+                ``,
+                `-- Set database to single user mode (disconnect all users)`,
+                `ALTER DATABASE [${dbName}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE;`,
+                `GO`,
+                ``,
+                `RESTORE DATABASE [${dbName}]`,
+                `FROM DISK = N'C:\\Backup\\${dbName}.bak'`,
+                `WITH REPLACE,`,
+                `     STATS = 10;`,
+                `GO`,
+                ``,
+                `-- Return to multi-user mode`,
+                `ALTER DATABASE [${dbName}] SET MULTI_USER;`,
+                `GO`,
+                ``,
+                `-- Restore with MOVE (change file locations)`,
+                `-- RESTORE DATABASE [${dbName}]`,
+                `-- FROM DISK = N'C:\\Backup\\${dbName}.bak'`,
+                `-- WITH REPLACE,`,
+                `--      MOVE N'${dbName}' TO N'C:\\Data\\${dbName}.mdf',`,
+                `--      MOVE N'${dbName}_log' TO N'C:\\Data\\${dbName}_log.ldf',`,
+                `--      STATS = 10;`,
+                `-- GO`,
+                ``,
+                `-- Restore with NORECOVERY (for log restore chain)`,
+                `-- RESTORE DATABASE [${dbName}]`,
+                `-- FROM DISK = N'C:\\Backup\\${dbName}.bak'`,
+                `-- WITH NORECOVERY, REPLACE, STATS = 10;`,
+                `-- GO`,
+                `-- RESTORE LOG [${dbName}]`,
+                `-- FROM DISK = N'C:\\Backup\\${dbName}_Log.trn'`,
+                `-- WITH RECOVERY;`,
+                `-- GO`,
+            ].join('\n');
+            const doc = await vscode.workspace.openTextDocument({ content: header + '\n\n' + script, language: 'sql' });
+            await vscode.window.showTextDocument(doc, { preview: false });
+        })
+    );
+
     // Script As commands — generate DDL/DML scripts for tree objects
     const scriptActions: [string, ScriptAction][] = [
         ['tsql-intellisense.Script.Create', 'Create'],
