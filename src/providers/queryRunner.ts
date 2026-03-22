@@ -255,11 +255,15 @@ export class QueryRunner implements vscode.WebviewViewProvider {
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body {
+    html, body {
+        height: 100%;
+        overflow: hidden;
         font-family: var(--vscode-font-family, 'Segoe UI', sans-serif);
         font-size: var(--vscode-font-size, 13px);
         color: var(--vscode-foreground);
         background: var(--vscode-editor-background);
+        display: flex;
+        flex-direction: column;
     }
     .toolbar {
         display: flex;
@@ -306,7 +310,7 @@ export class QueryRunner implements vscode.WebviewViewProvider {
     .tab-content.active { display: block; }
     .table-container {
         overflow: auto;
-        height: calc(100vh - 70px);
+        flex: 1;
     }
     table {
         width: 100%;
@@ -703,11 +707,15 @@ export class QueryRunner implements vscode.WebviewViewProvider {
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body {
+    html, body {
+        height: 100%;
+        overflow: hidden;
         font-family: var(--vscode-font-family, 'Segoe UI', sans-serif);
         font-size: var(--vscode-font-size, 13px);
         color: var(--vscode-foreground);
         background: var(--vscode-editor-background);
+        display: flex;
+        flex-direction: column;
     }
     .toolbar {
         display: flex; align-items: center; gap: 8px; padding: 4px 8px;
