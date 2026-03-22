@@ -22,7 +22,10 @@
   "browser": "./dist/extension.web.js",
   "contributes": {
     "submenus": [
-      { "id": "tsql-intellisense.ScriptAs", "label": "Script As" }
+      {
+        "id": "tsql-intellisense.ScriptAs",
+        "label": "Script As"
+      }
     ],
     "commands": [
       {
@@ -101,42 +104,173 @@
         "title": "%command.openStyleSettings%",
         "icon": "$(gear)"
       },
-      { "command": "tsql-intellisense.addConnection", "title": "%command.addConnection%", "icon": "$(add)" },
-      { "command": "tsql-intellisense.editConnection", "title": "%command.editConnection%", "icon": "$(edit)" },
-      { "command": "tsql-intellisense.deleteConnection", "title": "%command.deleteConnection%", "icon": "$(trash)" },
-      { "command": "tsql-intellisense.treeConnect", "title": "%command.treeConnect%", "icon": "$(plug)" },
-      { "command": "tsql-intellisense.selectTop100", "title": "%command.selectTop100%" },
-      { "command": "tsql-intellisense.openInExplorer", "title": "%command.openInExplorer%", "icon": "$(folder-opened)" },
-      { "command": "tsql-intellisense.insertSpParams", "title": "%command.insertSpParams%" },
-      { "command": "tsql-intellisense.newQueryFromTree", "title": "%command.newQueryFromTree%", "icon": "$(new-file)" },
-      { "command": "tsql-intellisense.loadDatabaseSchema", "title": "%command.loadDatabaseSchema%", "icon": "$(sync)" },
-      { "command": "tsql-intellisense.toggleResultsPanel", "title": "%command.toggleResultsPanel%" },
-      { "command": "tsql-intellisense.selectInObjectExplorer", "title": "%command.selectInObjectExplorer%" },
-      { "command": "tsql-intellisense.openProjectFile", "title": "%command.openProjectFile%", "icon": "$(go-to-file)" },
-      { "command": "tsql-intellisense.editTranslations", "title": "%command.editTranslations%", "icon": "$(globe)" },
-      { "command": "tsql-intellisense.Script.Create", "title": "%command.Script.Create%", "category": "T-SQL" },
-      { "command": "tsql-intellisense.Script.Alter", "title": "%command.Script.Alter%" },
-      { "command": "tsql-intellisense.Script.CreateOrAlter", "title": "%command.Script.CreateOrAlter%" },
-      { "command": "tsql-intellisense.Script.Drop", "title": "%command.Script.Drop%" },
-      { "command": "tsql-intellisense.Script.DropAndCreate", "title": "%command.Script.DropAndCreate%" },
-      { "command": "tsql-intellisense.Script.Select", "title": "%command.Script.Select%" },
-      { "command": "tsql-intellisense.Script.Insert", "title": "%command.Script.Insert%" },
-      { "command": "tsql-intellisense.Script.Update", "title": "%command.Script.Update%" },
-      { "command": "tsql-intellisense.Script.Delete", "title": "%command.Script.Delete%" },
-      { "command": "tsql-intellisense.Script.Execute", "title": "%command.Script.Execute%" },
-      { "command": "tsql-intellisense.RefreshDatabases", "title": "%command.RefreshDatabases%", "icon": "$(refresh)" },
-      { "command": "tsql-intellisense.FilterDatabases", "title": "%command.FilterDatabases%", "icon": "$(filter)" },
-      { "command": "tsql-intellisense.NewDatabase", "title": "%command.NewDatabase%", "icon": "$(add)" },
-      { "command": "tsql-intellisense.RefreshDatabase", "title": "%command.RefreshDatabase%", "icon": "$(refresh)" },
-      { "command": "tsql-intellisense.NewSchema", "title": "%command.NewSchema%", "icon": "$(add)" },
-      { "command": "tsql-intellisense.RefreshFolder", "title": "%command.RefreshFolder%", "icon": "$(refresh)" },
-      { "command": "tsql-intellisense.FilterFolder", "title": "%command.FilterFolder%", "icon": "$(filter)" },
-      { "command": "tsql-intellisense.NewTable", "title": "%command.NewTable%", "icon": "$(add)" },
-      { "command": "tsql-intellisense.NewView", "title": "%command.NewView%", "icon": "$(add)" },
-      { "command": "tsql-intellisense.NewScalarFunction", "title": "%command.NewScalarFunction%", "icon": "$(add)" },
-      { "command": "tsql-intellisense.NewTableValuedFunction", "title": "%command.NewTableValuedFunction%", "icon": "$(add)" },
-      { "command": "tsql-intellisense.NewProcedure", "title": "%command.NewProcedure%", "icon": "$(add)" },
-      { "command": "tsql-intellisense.NewTrigger", "title": "%command.NewTrigger%", "icon": "$(add)" }
+      {
+        "command": "tsql-intellisense.addConnection",
+        "title": "%command.addConnection%",
+        "icon": "$(add)"
+      },
+      {
+        "command": "tsql-intellisense.editConnection",
+        "title": "%command.editConnection%",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "tsql-intellisense.deleteConnection",
+        "title": "%command.deleteConnection%",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "tsql-intellisense.treeConnect",
+        "title": "%command.treeConnect%",
+        "icon": "$(plug)"
+      },
+      {
+        "command": "tsql-intellisense.selectTop100",
+        "title": "%command.selectTop100%"
+      },
+      {
+        "command": "tsql-intellisense.openInExplorer",
+        "title": "%command.openInExplorer%",
+        "icon": "$(folder-opened)"
+      },
+      {
+        "command": "tsql-intellisense.insertSpParams",
+        "title": "%command.insertSpParams%"
+      },
+      {
+        "command": "tsql-intellisense.newQueryFromTree",
+        "title": "%command.newQueryFromTree%",
+        "icon": "$(new-file)"
+      },
+      {
+        "command": "tsql-intellisense.loadDatabaseSchema",
+        "title": "%command.loadDatabaseSchema%",
+        "icon": "$(sync)"
+      },
+      {
+        "command": "tsql-intellisense.toggleResultsPanel",
+        "title": "%command.toggleResultsPanel%"
+      },
+      {
+        "command": "tsql-intellisense.selectInObjectExplorer",
+        "title": "%command.selectInObjectExplorer%"
+      },
+      {
+        "command": "tsql-intellisense.openProjectFile",
+        "title": "%command.openProjectFile%",
+        "icon": "$(go-to-file)"
+      },
+      {
+        "command": "tsql-intellisense.editTranslations",
+        "title": "%command.editTranslations%",
+        "icon": "$(globe)"
+      },
+      {
+        "command": "tsql-intellisense.Script.Create",
+        "title": "%command.Script.Create%",
+        "category": "T-SQL"
+      },
+      {
+        "command": "tsql-intellisense.Script.Alter",
+        "title": "%command.Script.Alter%"
+      },
+      {
+        "command": "tsql-intellisense.Script.CreateOrAlter",
+        "title": "%command.Script.CreateOrAlter%"
+      },
+      {
+        "command": "tsql-intellisense.Script.Drop",
+        "title": "%command.Script.Drop%"
+      },
+      {
+        "command": "tsql-intellisense.Script.DropAndCreate",
+        "title": "%command.Script.DropAndCreate%"
+      },
+      {
+        "command": "tsql-intellisense.Script.Select",
+        "title": "%command.Script.Select%"
+      },
+      {
+        "command": "tsql-intellisense.Script.Insert",
+        "title": "%command.Script.Insert%"
+      },
+      {
+        "command": "tsql-intellisense.Script.Update",
+        "title": "%command.Script.Update%"
+      },
+      {
+        "command": "tsql-intellisense.Script.Delete",
+        "title": "%command.Script.Delete%"
+      },
+      {
+        "command": "tsql-intellisense.Script.Execute",
+        "title": "%command.Script.Execute%"
+      },
+      {
+        "command": "tsql-intellisense.RefreshDatabases",
+        "title": "%command.RefreshDatabases%",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "tsql-intellisense.FilterDatabases",
+        "title": "%command.FilterDatabases%",
+        "icon": "$(filter)"
+      },
+      {
+        "command": "tsql-intellisense.NewDatabase",
+        "title": "%command.NewDatabase%",
+        "icon": "$(add)"
+      },
+      {
+        "command": "tsql-intellisense.RefreshDatabase",
+        "title": "%command.RefreshDatabase%",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "tsql-intellisense.NewSchema",
+        "title": "%command.NewSchema%",
+        "icon": "$(add)"
+      },
+      {
+        "command": "tsql-intellisense.RefreshFolder",
+        "title": "%command.RefreshFolder%",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "tsql-intellisense.FilterFolder",
+        "title": "%command.FilterFolder%",
+        "icon": "$(filter)"
+      },
+      {
+        "command": "tsql-intellisense.NewTable",
+        "title": "%command.NewTable%",
+        "icon": "$(add)"
+      },
+      {
+        "command": "tsql-intellisense.NewView",
+        "title": "%command.NewView%",
+        "icon": "$(add)"
+      },
+      {
+        "command": "tsql-intellisense.NewScalarFunction",
+        "title": "%command.NewScalarFunction%",
+        "icon": "$(add)"
+      },
+      {
+        "command": "tsql-intellisense.NewTableValuedFunction",
+        "title": "%command.NewTableValuedFunction%",
+        "icon": "$(add)"
+      },
+      {
+        "command": "tsql-intellisense.NewProcedure",
+        "title": "%command.NewProcedure%",
+        "icon": "$(add)"
+      },
+      {
+        "command": "tsql-intellisense.NewTrigger",
+        "title": "%command.NewTrigger%",
+        "icon": "$(add)"
+      }
     ],
     "menus": {
       "editor/context": [
@@ -169,57 +303,203 @@
         }
       ],
       "view/title": [
-        { "command": "tsql-intellisense.addConnection", "when": "view == tsqlConnections", "group": "navigation" },
-        { "command": "tsql-intellisense.refreshSchema", "when": "view == tsqlConnections", "group": "navigation" },
-        { "command": "tsql-intellisense.openStyleSettings", "when": "view == tsqlConnections", "group": "navigation" }
+        {
+          "command": "tsql-intellisense.addConnection",
+          "when": "view == tsqlConnections",
+          "group": "navigation"
+        },
+        {
+          "command": "tsql-intellisense.refreshSchema",
+          "when": "view == tsqlConnections",
+          "group": "navigation"
+        },
+        {
+          "command": "tsql-intellisense.openStyleSettings",
+          "when": "view == tsqlConnections",
+          "group": "navigation"
+        }
       ],
       "view/item/context": [
-        { "command": "tsql-intellisense.editConnection", "when": "viewItem =~ /^Connection/", "group": "inline" },
-        { "command": "tsql-intellisense.treeConnect", "when": "viewItem == ConnectionDisconnected" },
-        { "command": "tsql-intellisense.disconnect", "when": "viewItem == ConnectionConnected" },
-        { "command": "tsql-intellisense.editConnection", "when": "viewItem =~ /^Connection/" },
-        { "command": "tsql-intellisense.deleteConnection", "when": "viewItem =~ /^Connection/" },
-
-        { "command": "tsql-intellisense.RefreshDatabases", "when": "viewItem == ServerFolderDatabases", "group": "inline@1" },
-        { "command": "tsql-intellisense.FilterDatabases", "when": "viewItem == ServerFolderDatabases", "group": "inline@2" },
-        { "command": "tsql-intellisense.NewDatabase", "when": "viewItem == ServerFolderDatabases", "group": "inline@3" },
-
-        { "command": "tsql-intellisense.RefreshDatabase", "when": "viewItem == Database", "group": "inline@1" },
-        { "command": "tsql-intellisense.NewSchema", "when": "viewItem == Database", "group": "inline@2" },
-        { "command": "tsql-intellisense.newQueryFromTree", "when": "viewItem == Database || viewItem == Schema", "group": "inline" },
-        { "command": "tsql-intellisense.newQueryFromTree", "when": "viewItem == Database || viewItem == Schema" },
-        { "command": "tsql-intellisense.loadDatabaseSchema", "when": "viewItem == Database" },
-
-        { "command": "tsql-intellisense.RefreshFolder", "when": "viewItem =~ /^SchemaFolder/ || viewItem =~ /^FuncFolder/", "group": "inline@1" },
-        { "command": "tsql-intellisense.FilterFolder", "when": "viewItem =~ /^SchemaFolder/ || viewItem =~ /^FuncFolder/", "group": "inline@2" },
-        { "command": "tsql-intellisense.NewTable", "when": "viewItem == SchemaFolderTables", "group": "inline@3" },
-        { "command": "tsql-intellisense.NewView", "when": "viewItem == SchemaFolderViews", "group": "inline@3" },
-        { "command": "tsql-intellisense.NewProcedure", "when": "viewItem == SchemaFolderProcedures", "group": "inline@3" },
-        { "command": "tsql-intellisense.NewTrigger", "when": "viewItem == SchemaFolderTriggers", "group": "inline@3" },
-        { "command": "tsql-intellisense.NewScalarFunction", "when": "viewItem == FuncFolderSC", "group": "inline@3" },
-        { "command": "tsql-intellisense.NewTableValuedFunction", "when": "viewItem == FuncFolderTV", "group": "inline@3" },
-
-        { "command": "tsql-intellisense.selectTop100", "when": "viewItem == Table || viewItem == View" },
-        { "command": "tsql-intellisense.copyTableScript", "when": "viewItem == Table" },
-        { "command": "tsql-intellisense.openTableScript", "when": "viewItem == Table || viewItem == View || viewItem == Function" },
-        { "command": "tsql-intellisense.alterProc", "when": "viewItem == Procedure" },
-        { "command": "tsql-intellisense.insertSpParams", "when": "viewItem == Procedure" },
-        { "submenu": "tsql-intellisense.ScriptAs", "when": "viewItem == Table || viewItem == View || viewItem == Procedure || viewItem == Function || viewItem == Trigger", "group": "2_script" },
-
-        { "command": "tsql-intellisense.openInExplorer", "when": "viewItem == ProjectFolder" },
-        { "command": "tsql-intellisense.openProjectFile", "when": "viewItem == Table || viewItem == View || viewItem == Procedure || viewItem == Function" }
+        {
+          "command": "tsql-intellisense.editConnection",
+          "when": "viewItem =~ /^Connection/",
+          "group": "inline"
+        },
+        {
+          "command": "tsql-intellisense.treeConnect",
+          "when": "viewItem == ConnectionDisconnected"
+        },
+        {
+          "command": "tsql-intellisense.disconnect",
+          "when": "viewItem == ConnectionConnected"
+        },
+        {
+          "command": "tsql-intellisense.editConnection",
+          "when": "viewItem =~ /^Connection/"
+        },
+        {
+          "command": "tsql-intellisense.deleteConnection",
+          "when": "viewItem =~ /^Connection/"
+        },
+        {
+          "command": "tsql-intellisense.RefreshDatabases",
+          "when": "viewItem == ServerFolderDatabases",
+          "group": "inline@1"
+        },
+        {
+          "command": "tsql-intellisense.FilterDatabases",
+          "when": "viewItem == ServerFolderDatabases",
+          "group": "inline@2"
+        },
+        {
+          "command": "tsql-intellisense.NewDatabase",
+          "when": "viewItem == ServerFolderDatabases",
+          "group": "inline@3"
+        },
+        {
+          "command": "tsql-intellisense.RefreshDatabase",
+          "when": "viewItem == Database",
+          "group": "inline@1"
+        },
+        {
+          "command": "tsql-intellisense.NewSchema",
+          "when": "viewItem == Database",
+          "group": "inline@2"
+        },
+        {
+          "command": "tsql-intellisense.newQueryFromTree",
+          "when": "viewItem == Database || viewItem == Schema",
+          "group": "inline"
+        },
+        {
+          "command": "tsql-intellisense.newQueryFromTree",
+          "when": "viewItem == Database || viewItem == Schema"
+        },
+        {
+          "command": "tsql-intellisense.loadDatabaseSchema",
+          "when": "viewItem == Database"
+        },
+        {
+          "command": "tsql-intellisense.RefreshFolder",
+          "when": "viewItem =~ /^SchemaFolder/ || viewItem =~ /^FuncFolder/",
+          "group": "inline@1"
+        },
+        {
+          "command": "tsql-intellisense.FilterFolder",
+          "when": "viewItem =~ /^SchemaFolder/ || viewItem =~ /^FuncFolder/",
+          "group": "inline@2"
+        },
+        {
+          "command": "tsql-intellisense.NewTable",
+          "when": "viewItem == SchemaFolderTables",
+          "group": "inline@3"
+        },
+        {
+          "command": "tsql-intellisense.NewView",
+          "when": "viewItem == SchemaFolderViews",
+          "group": "inline@3"
+        },
+        {
+          "command": "tsql-intellisense.NewProcedure",
+          "when": "viewItem == SchemaFolderProcedures",
+          "group": "inline@3"
+        },
+        {
+          "command": "tsql-intellisense.NewTrigger",
+          "when": "viewItem == SchemaFolderTriggers",
+          "group": "inline@3"
+        },
+        {
+          "command": "tsql-intellisense.NewScalarFunction",
+          "when": "viewItem == FuncFolderSC",
+          "group": "inline@3"
+        },
+        {
+          "command": "tsql-intellisense.NewTableValuedFunction",
+          "when": "viewItem == FuncFolderTV",
+          "group": "inline@3"
+        },
+        {
+          "command": "tsql-intellisense.selectTop100",
+          "when": "viewItem == Table || viewItem == View"
+        },
+        {
+          "command": "tsql-intellisense.copyTableScript",
+          "when": "viewItem == Table"
+        },
+        {
+          "command": "tsql-intellisense.openTableScript",
+          "when": "viewItem == Table || viewItem == View || viewItem == Function"
+        },
+        {
+          "command": "tsql-intellisense.alterProc",
+          "when": "viewItem == Procedure"
+        },
+        {
+          "command": "tsql-intellisense.insertSpParams",
+          "when": "viewItem == Procedure"
+        },
+        {
+          "submenu": "tsql-intellisense.ScriptAs",
+          "when": "viewItem == Table || viewItem == View || viewItem == Procedure || viewItem == Function || viewItem == Trigger",
+          "group": "2_script"
+        },
+        {
+          "command": "tsql-intellisense.openInExplorer",
+          "when": "viewItem == ProjectFolder"
+        },
+        {
+          "command": "tsql-intellisense.openProjectFile",
+          "when": "viewItem == Table || viewItem == View || viewItem == Procedure || viewItem == Function"
+        }
       ],
       "tsql-intellisense.ScriptAs": [
-        { "command": "tsql-intellisense.Script.Create", "group": "1_create@1" },
-        { "command": "tsql-intellisense.Script.Alter", "group": "1_create@2" },
-        { "command": "tsql-intellisense.Script.CreateOrAlter", "when": "viewItem == View || viewItem == Procedure || viewItem == Function || viewItem == Trigger", "group": "1_create@3" },
-        { "command": "tsql-intellisense.Script.Drop", "group": "2_drop@1" },
-        { "command": "tsql-intellisense.Script.DropAndCreate", "group": "2_drop@2" },
-        { "command": "tsql-intellisense.Script.Select", "when": "viewItem == Table || viewItem == View", "group": "3_dml@1" },
-        { "command": "tsql-intellisense.Script.Insert", "when": "viewItem == Table || viewItem == View", "group": "3_dml@2" },
-        { "command": "tsql-intellisense.Script.Update", "when": "viewItem == Table || viewItem == View", "group": "3_dml@3" },
-        { "command": "tsql-intellisense.Script.Delete", "when": "viewItem == Table || viewItem == View", "group": "3_dml@4" },
-        { "command": "tsql-intellisense.Script.Execute", "when": "viewItem == Procedure || viewItem == Function", "group": "4_exec@1" }
+        {
+          "command": "tsql-intellisense.Script.Create",
+          "group": "1_create@1"
+        },
+        {
+          "command": "tsql-intellisense.Script.Alter",
+          "group": "1_create@2"
+        },
+        {
+          "command": "tsql-intellisense.Script.CreateOrAlter",
+          "when": "viewItem == View || viewItem == Procedure || viewItem == Function || viewItem == Trigger",
+          "group": "1_create@3"
+        },
+        {
+          "command": "tsql-intellisense.Script.Drop",
+          "group": "2_drop@1"
+        },
+        {
+          "command": "tsql-intellisense.Script.DropAndCreate",
+          "group": "2_drop@2"
+        },
+        {
+          "command": "tsql-intellisense.Script.Select",
+          "when": "viewItem == Table || viewItem == View",
+          "group": "3_dml@1"
+        },
+        {
+          "command": "tsql-intellisense.Script.Insert",
+          "when": "viewItem == Table || viewItem == View",
+          "group": "3_dml@2"
+        },
+        {
+          "command": "tsql-intellisense.Script.Update",
+          "when": "viewItem == Table || viewItem == View",
+          "group": "3_dml@3"
+        },
+        {
+          "command": "tsql-intellisense.Script.Delete",
+          "when": "viewItem == Table || viewItem == View",
+          "group": "3_dml@4"
+        },
+        {
+          "command": "tsql-intellisense.Script.Execute",
+          "when": "viewItem == Procedure || viewItem == Function",
+          "group": "4_exec@1"
+        }
       ]
     },
     "keybindings": [
@@ -318,315 +598,359 @@
     ],
     "configuration": [
       {
-      "title": "%config.title%",
-      "properties": {
-        "tsql-intellisense.connections": {
-          "type": "array",
-          "default": [],
-          "markdownDescription": "%config.connectionsMarkdown%",
-          "items": {
-            "type": "object",
-            "properties": {
-              "name": {
-                "type": "string",
-                "description": "%config.connections.name%"
+        "title": "%config.title%",
+        "properties": {
+          "tsql-intellisense.connections": {
+            "type": "array",
+            "default": [],
+            "markdownDescription": "%config.connectionsMarkdown%",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "description": "%config.connections.name%"
+                },
+                "server": {
+                  "type": "string",
+                  "description": "%config.connections.server%"
+                },
+                "database": {
+                  "type": "string",
+                  "description": "%config.connections.database%"
+                },
+                "user": {
+                  "type": "string",
+                  "description": "%config.connections.user%"
+                },
+                "password": {
+                  "type": "string",
+                  "description": "%config.connections.password%"
+                },
+                "port": {
+                  "type": "number",
+                  "default": 1433,
+                  "description": "%config.connections.port%"
+                },
+                "trustServerCertificate": {
+                  "type": "boolean",
+                  "default": true
+                },
+                "projectPath": {
+                  "type": "string",
+                  "description": "%config.connections.projectPath%"
+                },
+                "databaseProjects": {
+                  "type": "object",
+                  "description": "%config.connections.databaseProjects%",
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                }
               },
-              "server": {
-                "type": "string",
-                "description": "%config.connections.server%"
-              },
-              "database": {
-                "type": "string",
-                "description": "%config.connections.database%"
-              },
-              "user": {
-                "type": "string",
-                "description": "%config.connections.user%"
-              },
-              "password": {
-                "type": "string",
-                "description": "%config.connections.password%"
-              },
-              "port": {
-                "type": "number",
-                "default": 1433,
-                "description": "%config.connections.port%"
-              },
-              "trustServerCertificate": {
-                "type": "boolean",
-                "default": true
-              },
-              "projectPath": {
-                "type": "string",
-                "description": "%config.connections.projectPath%"
-              },
-              "databaseProjects": {
-                "type": "object",
-                "description": "%config.connections.databaseProjects%",
-                "additionalProperties": { "type": "string" }
-              }
-            },
-            "required": [
-              "name",
-              "server",
-              "database"
-            ]
+              "required": [
+                "name",
+                "server",
+                "database"
+              ]
+            }
+          },
+          "tsql-intellisense.autoRefreshMinutes": {
+            "type": "number",
+            "default": 30,
+            "description": "%config.autoRefreshMinutes%"
+          },
+          "tsql-intellisense.openOptionsPanel": {
+            "type": "null",
+            "markdownDescription": "%config.openOptionsPanel%"
           }
-        },
-        "tsql-intellisense.autoRefreshMinutes": {
-          "type": "number",
-          "default": 30,
-          "description": "%config.autoRefreshMinutes%"
-        },
-        "tsql-intellisense.openOptionsPanel": {
-          "type": "null",
-          "markdownDescription": "%config.openOptionsPanel%"
         }
-      }
       },
       {
-      "title": "%config.group.suggestions%",
-      "properties": {
-        "tsql-intellisense.insertionKeys": {
-          "type": "object",
-          "default": { "space": true, "dot": false, "parentheses": false, "comma": false, "bracket": false, "semicolon": false },
-          "description": "%config.insertionKeys%"
-        },
-        "tsql-intellisense.joinMatchingNames": {
-          "type": "boolean",
-          "default": true,
-          "description": "%config.joinMatchingNames%"
-        },
-        "tsql-intellisense.joinSwapColumnOrder": {
-          "type": "boolean",
-          "default": false,
-          "description": "%config.joinSwapColumnOrder%"
-        },
-        "tsql-intellisense.snippetFolder": {
-          "type": "string",
-          "default": "",
-          "markdownDescription": "%config.snippetFolderMarkdown%"
-        }
-      }
-      },
-      {
-      "title": "%config.group.insertedCode%",
-      "properties": {
-        "tsql-intellisense.qualifyWithOwner": {
-          "type": "boolean",
-          "default": true,
-          "description": "%config.qualifyWithOwner%"
-        },
-        "tsql-intellisense.aliases.assignAliases": {
-          "type": "boolean",
-          "default": true,
-          "description": "%config.assignAliases%"
-        },
-        "tsql-intellisense.aliases.includeAS": {
-          "type": "boolean",
-          "default": false,
-          "description": "%config.includeAS%"
-        },
-        "tsql-intellisense.aliases.capitaliseAliases": {
-          "type": "boolean",
-          "default": false,
-          "description": "%config.capitaliseAliases%"
-        },
-        "tsql-intellisense.aliases.prefixesToIgnore": {
-          "type": "array",
-          "items": { "type": "string" },
-          "default": [],
-          "description": "%config.prefixesToIgnore%"
-        }
-      }
-      },
-      {
-      "title": "%config.group.format%",
-      "properties": {
-        "tsql-intellisense.styleFile": {
-          "type": "string",
-          "default": "",
-          "description": "%config.styleFile%"
-        },
-        "tsql-intellisense.maxLineLength": {
-          "type": "number",
-          "default": 120,
-          "description": "%config.maxLineLength%"
-        },
-        "tsql-intellisense.styleOverrides": {
-          "type": "object",
-          "default": null,
-          "description": "%config.styleOverrides%"
-        },
-        "tsql-intellisense.whitespace.spacesOrTabs": {
-          "type": "string",
-          "enum": ["spaces", "tabs"],
-          "default": "spaces",
-          "description": "%config.ws.spacesOrTabs%"
-        },
-        "tsql-intellisense.whitespace.numberOfSpacesInTabs": {
-          "type": "number",
-          "default": 4,
-          "minimum": 1,
-          "maximum": 8,
-          "description": "%config.ws.numberOfSpaces%"
-        },
-        "tsql-intellisense.whitespace.wrapLinesLongerThan": {
-          "type": "number",
-          "default": 120,
-          "minimum": 0,
-          "maximum": 500,
-          "description": "%config.ws.wrapLines%"
-        },
-        "tsql-intellisense.whitespace.emptyLinesBetweenStatements": {
-          "type": "number",
-          "default": 1,
-          "enum": [0, 1, 2],
-          "description": "%config.ws.emptyLinesBetween%"
-        },
-        "tsql-intellisense.whitespace.emptyLinesAfterBatchSeparator": {
-          "type": "number",
-          "default": 1,
-          "enum": [0, 1, 2],
-          "description": "%config.ws.emptyLinesAfterBatch%"
-        },
-        "tsql-intellisense.whitespace.preserveExistingEmptyLinesBetweenStatements": {
-          "type": "boolean",
-          "default": false,
-          "description": "%config.ws.preserveEmptyBetween%"
-        },
-        "tsql-intellisense.whitespace.preserveExistingEmptyLinesWithinStatements": {
-          "type": "boolean",
-          "default": false,
-          "description": "%config.ws.preserveEmptyWithin%"
-        },
-        "tsql-intellisense.whitespace.alignGroupsOfSingleLineComments": {
-          "type": "boolean",
-          "default": true,
-          "description": "%config.ws.alignSingleLineComments%"
-        },
-        "tsql-intellisense.whitespace.alignMultilineCommentsMatchingCommonPatterns": {
-          "type": "boolean",
-          "default": true,
-          "description": "%config.ws.alignMultilineComments%"
-        },
-        "tsql-intellisense.controlFlow.placeBeginOnNewLine": {
-          "type": "boolean",
-          "default": false,
-          "description": "%config.cf.placeBeginOnNewLine%"
-        },
-        "tsql-intellisense.controlFlow.indentBeginEndKeywords": {
-          "type": "boolean",
-          "default": false,
-          "description": "%config.cf.indentBeginEnd%"
-        },
-        "tsql-intellisense.controlFlow.indentContentsOfStatements": {
-          "type": "boolean",
-          "default": true,
-          "description": "%config.cf.indentContents%"
-        },
-        "tsql-intellisense.controlFlow.collapseShortStatements": {
-          "type": "boolean",
-          "default": false,
-          "description": "%config.cf.collapseShort%"
-        },
-        "tsql-intellisense.controlFlow.collapseShortStatementsShorterThan": {
-          "type": "number",
-          "default": 78,
-          "description": "%config.cf.collapseShortLen%"
-        },
-        "tsql-intellisense.variables.declareAlignDataTypesAndValues": {
-          "type": "boolean",
-          "default": false,
-          "description": "%config.var.alignDataTypes%"
-        },
-        "tsql-intellisense.variables.declareAddSpaceBetweenTypeAndPrecision": {
-          "type": "boolean",
-          "default": false,
-          "description": "%config.var.addSpaceBetween%"
-        },
-        "tsql-intellisense.variables.setPlaceAssignedValueOnNewLine": {
-          "type": "boolean",
-          "default": false,
-          "description": "%config.var.setPlaceValueOnNewLine%"
-        },
-        "tsql-intellisense.variables.setPlaceEqualsSignOnNewLine": {
-          "type": "boolean",
-          "default": true,
-          "description": "%config.var.setPlaceEqualsOnNewLine%"
-        },
-        "tsql-intellisense.dataDml.clauseAlignment": {
-          "type": "string",
-          "enum": ["toStatement", "toKeyword"],
-          "default": "toStatement",
-          "description": "%config.dml.clauseAlignment%"
-        },
-        "tsql-intellisense.dataDml.collapseShortDmlStatements": {
-          "type": "boolean",
-          "default": true,
-          "description": "%config.dml.collapseShort%"
-        },
-        "tsql-intellisense.dataDml.collapseShortDmlShorterThan": {
-          "type": "number",
-          "default": 120,
-          "description": "%config.dml.collapseShortLen%"
-        },
-        "tsql-intellisense.schemaDdl.alignDataTypesAndConstraints": {
-          "type": "boolean",
-          "default": true,
-          "description": "%config.ddl.alignDataTypes%"
-        },
-        "tsql-intellisense.schemaDdl.placeFirstProcedureParameterOnNewLine": {
-          "type": "string",
-          "enum": ["never", "always", "ifMultiple"],
-          "default": "always",
-          "description": "%config.ddl.placeFirstParam%"
-        },
-        "tsql-intellisense.schemaDdl.collapseShortDdlStatements": {
-          "type": "boolean",
-          "default": true,
-          "description": "%config.ddl.collapseShort%"
-        },
-        "tsql-intellisense.schemaDdl.collapseShortDdlShorterThan": {
-          "type": "number",
-          "default": 120,
-          "description": "%config.ddl.collapseShortLen%"
-        }
-      }
-      },
-      {
-      "title": "%config.group.queries%",
-      "properties": {
-        "tsql-intellisense.resultDisplayMode": {
-          "type": "string",
-          "enum": ["tabs", "stacked"],
-          "default": "stacked",
-          "description": "%config.resultDisplayMode%"
-        },
-        "tsql-intellisense.queryShortcuts": {
-          "type": "array",
-          "description": "%config.queryShortcuts%",
-          "default": [
-            { "key": "Alt+F1", "query": "EXEC sp_help '@WORD'" },
-            { "key": "Ctrl+1", "query": "EXEC sp_who" },
-            { "key": "Ctrl+2", "query": "EXEC sp_lock" },
-            { "key": "Ctrl+3", "query": "SELECT TOP 100 * FROM @WORD" }
-          ],
-          "items": {
+        "title": "%config.group.suggestions%",
+        "properties": {
+          "tsql-intellisense.insertionKeys": {
             "type": "object",
-            "properties": {
-              "key": {
-                "type": "string",
-                "description": "%config.queryShortcuts.key%"
+            "default": {
+              "space": true,
+              "dot": false,
+              "parentheses": false,
+              "comma": false,
+              "bracket": false,
+              "semicolon": false
+            },
+            "description": "%config.insertionKeys%"
+          },
+          "tsql-intellisense.joinMatchingNames": {
+            "type": "boolean",
+            "default": true,
+            "description": "%config.joinMatchingNames%"
+          },
+          "tsql-intellisense.joinSwapColumnOrder": {
+            "type": "boolean",
+            "default": false,
+            "description": "%config.joinSwapColumnOrder%"
+          },
+          "tsql-intellisense.snippetFolder": {
+            "type": "string",
+            "default": "",
+            "markdownDescription": "%config.snippetFolderMarkdown%"
+          }
+        }
+      },
+      {
+        "title": "%config.group.insertedCode%",
+        "properties": {
+          "tsql-intellisense.qualifyWithOwner": {
+            "type": "boolean",
+            "default": true,
+            "description": "%config.qualifyWithOwner%"
+          },
+          "tsql-intellisense.aliases.assignAliases": {
+            "type": "boolean",
+            "default": true,
+            "description": "%config.assignAliases%"
+          },
+          "tsql-intellisense.aliases.includeAS": {
+            "type": "boolean",
+            "default": false,
+            "description": "%config.includeAS%"
+          },
+          "tsql-intellisense.aliases.capitaliseAliases": {
+            "type": "boolean",
+            "default": false,
+            "description": "%config.capitaliseAliases%"
+          },
+          "tsql-intellisense.aliases.prefixesToIgnore": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [],
+            "description": "%config.prefixesToIgnore%"
+          }
+        }
+      },
+      {
+        "title": "%config.group.format%",
+        "properties": {
+          "tsql-intellisense.styleFile": {
+            "type": "string",
+            "default": "",
+            "description": "%config.styleFile%"
+          },
+          "tsql-intellisense.maxLineLength": {
+            "type": "number",
+            "default": 120,
+            "description": "%config.maxLineLength%"
+          },
+          "tsql-intellisense.styleOverrides": {
+            "type": "object",
+            "default": null,
+            "description": "%config.styleOverrides%"
+          },
+          "tsql-intellisense.whitespace.spacesOrTabs": {
+            "type": "string",
+            "enum": [
+              "spaces",
+              "tabs"
+            ],
+            "default": "spaces",
+            "description": "%config.ws.spacesOrTabs%"
+          },
+          "tsql-intellisense.whitespace.numberOfSpacesInTabs": {
+            "type": "number",
+            "default": 4,
+            "minimum": 1,
+            "maximum": 8,
+            "description": "%config.ws.numberOfSpaces%"
+          },
+          "tsql-intellisense.whitespace.wrapLinesLongerThan": {
+            "type": "number",
+            "default": 120,
+            "minimum": 0,
+            "maximum": 500,
+            "description": "%config.ws.wrapLines%"
+          },
+          "tsql-intellisense.whitespace.emptyLinesBetweenStatements": {
+            "type": "number",
+            "default": 1,
+            "enum": [
+              0,
+              1,
+              2
+            ],
+            "description": "%config.ws.emptyLinesBetween%"
+          },
+          "tsql-intellisense.whitespace.emptyLinesAfterBatchSeparator": {
+            "type": "number",
+            "default": 1,
+            "enum": [
+              0,
+              1,
+              2
+            ],
+            "description": "%config.ws.emptyLinesAfterBatch%"
+          },
+          "tsql-intellisense.whitespace.preserveExistingEmptyLinesBetweenStatements": {
+            "type": "boolean",
+            "default": false,
+            "description": "%config.ws.preserveEmptyBetween%"
+          },
+          "tsql-intellisense.whitespace.preserveExistingEmptyLinesWithinStatements": {
+            "type": "boolean",
+            "default": false,
+            "description": "%config.ws.preserveEmptyWithin%"
+          },
+          "tsql-intellisense.whitespace.alignGroupsOfSingleLineComments": {
+            "type": "boolean",
+            "default": true,
+            "description": "%config.ws.alignSingleLineComments%"
+          },
+          "tsql-intellisense.whitespace.alignMultilineCommentsMatchingCommonPatterns": {
+            "type": "boolean",
+            "default": true,
+            "description": "%config.ws.alignMultilineComments%"
+          },
+          "tsql-intellisense.controlFlow.placeBeginOnNewLine": {
+            "type": "boolean",
+            "default": false,
+            "description": "%config.cf.placeBeginOnNewLine%"
+          },
+          "tsql-intellisense.controlFlow.indentBeginEndKeywords": {
+            "type": "boolean",
+            "default": false,
+            "description": "%config.cf.indentBeginEnd%"
+          },
+          "tsql-intellisense.controlFlow.indentContentsOfStatements": {
+            "type": "boolean",
+            "default": true,
+            "description": "%config.cf.indentContents%"
+          },
+          "tsql-intellisense.controlFlow.collapseShortStatements": {
+            "type": "boolean",
+            "default": false,
+            "description": "%config.cf.collapseShort%"
+          },
+          "tsql-intellisense.controlFlow.collapseShortStatementsShorterThan": {
+            "type": "number",
+            "default": 78,
+            "description": "%config.cf.collapseShortLen%"
+          },
+          "tsql-intellisense.variables.declareAlignDataTypesAndValues": {
+            "type": "boolean",
+            "default": false,
+            "description": "%config.var.alignDataTypes%"
+          },
+          "tsql-intellisense.variables.declareAddSpaceBetweenTypeAndPrecision": {
+            "type": "boolean",
+            "default": false,
+            "description": "%config.var.addSpaceBetween%"
+          },
+          "tsql-intellisense.variables.setPlaceAssignedValueOnNewLine": {
+            "type": "boolean",
+            "default": false,
+            "description": "%config.var.setPlaceValueOnNewLine%"
+          },
+          "tsql-intellisense.variables.setPlaceEqualsSignOnNewLine": {
+            "type": "boolean",
+            "default": true,
+            "description": "%config.var.setPlaceEqualsOnNewLine%"
+          },
+          "tsql-intellisense.dataDml.clauseAlignment": {
+            "type": "string",
+            "enum": [
+              "toStatement",
+              "toKeyword"
+            ],
+            "default": "toStatement",
+            "description": "%config.dml.clauseAlignment%"
+          },
+          "tsql-intellisense.dataDml.collapseShortDmlStatements": {
+            "type": "boolean",
+            "default": true,
+            "description": "%config.dml.collapseShort%"
+          },
+          "tsql-intellisense.dataDml.collapseShortDmlShorterThan": {
+            "type": "number",
+            "default": 120,
+            "description": "%config.dml.collapseShortLen%"
+          },
+          "tsql-intellisense.schemaDdl.alignDataTypesAndConstraints": {
+            "type": "boolean",
+            "default": true,
+            "description": "%config.ddl.alignDataTypes%"
+          },
+          "tsql-intellisense.schemaDdl.placeFirstProcedureParameterOnNewLine": {
+            "type": "string",
+            "enum": [
+              "never",
+              "always",
+              "ifMultiple"
+            ],
+            "default": "always",
+            "description": "%config.ddl.placeFirstParam%"
+          },
+          "tsql-intellisense.schemaDdl.collapseShortDdlStatements": {
+            "type": "boolean",
+            "default": true,
+            "description": "%config.ddl.collapseShort%"
+          },
+          "tsql-intellisense.schemaDdl.collapseShortDdlShorterThan": {
+            "type": "number",
+            "default": 120,
+            "description": "%config.ddl.collapseShortLen%"
+          }
+        }
+      },
+      {
+        "title": "%config.group.queries%",
+        "properties": {
+          "tsql-intellisense.resultDisplayMode": {
+            "type": "string",
+            "enum": [
+              "tabs",
+              "stacked"
+            ],
+            "default": "stacked",
+            "description": "%config.resultDisplayMode%"
+          },
+          "tsql-intellisense.queryShortcuts": {
+            "type": "array",
+            "description": "%config.queryShortcuts%",
+            "default": [
+              {
+                "key": "Alt+F1",
+                "query": "EXEC sp_help '@WORD'"
               },
-              "query": {
-                "type": "string",
-                "description": "%config.queryShortcuts.query%"
+              {
+                "key": "Ctrl+1",
+                "query": "EXEC sp_who"
+              },
+              {
+                "key": "Ctrl+2",
+                "query": "EXEC sp_lock"
+              },
+              {
+                "key": "Ctrl+3",
+                "query": "SELECT TOP 100 * FROM @WORD"
+              }
+            ],
+            "items": {
+              "type": "object",
+              "properties": {
+                "key": {
+                  "type": "string",
+                  "description": "%config.queryShortcuts.key%"
+                },
+                "query": {
+                  "type": "string",
+                  "description": "%config.queryShortcuts.query%"
+                }
               }
             }
           }
         }
-      }
       }
     ]
   },
@@ -638,12 +962,13 @@
     "package": "vsce package"
   },
   "dependencies": {
+    "mssql": "^12.2.1",
     "tedious": "^18.6.1"
   },
   "devDependencies": {
-    "@types/vscode": "^1.85.0",
     "@types/node": "^20.0.0",
-    "typescript": "^5.3.0",
-    "esbuild": "^0.24.0"
+    "@types/vscode": "^1.85.0",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.3.0"
   }
 }

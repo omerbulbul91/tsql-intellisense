@@ -38,6 +38,13 @@ export class ConnectionTreeProvider implements vscode.TreeDataProvider<DatabaseT
         return element;
     }
 
+    /** Ensure the profile's connection pool is open before querying */
+    private async ensureConnection(element: DatabaseTreeItem): Promise<void> {
+        if (element.profileName && !this.treeQueryService.isConnected(element.profileName)) {
+            await this.treeQueryService.connect(element.profileName);
+        }
+    }
+
     public async getChildren(element?: DatabaseTreeItem): Promise<(DatabaseTreeItem | ErrorItem)[]> {
         if (!element) {
             return this.getConnectionNodes();
@@ -45,25 +52,30 @@ export class ConnectionTreeProvider implements vscode.TreeDataProvider<DatabaseT
         try {
             switch (element.nodeType) {
                 case NodeType.Connection:
-                    if (this.treeQueryService.currentProfileName !== element.profileName) {
-                        await this.treeQueryService.connect(element.profileName!);
-                        element.contextValue = "ConnectionConnected";
-                    }
+                    await this.ensureConnection(element);
+                    element.contextValue = "ConnectionConnected";
                     return this.getServerFolders(element);
                 case NodeType.ServerFolder:
+                    await this.ensureConnection(element);
                     return this.getServerFolderChildren(element);
                 case NodeType.Database:
+                    await this.ensureConnection(element);
                     return this.getDatabaseChildren(element);
                 case NodeType.Schema:
+                    await this.ensureConnection(element);
                     return this.getSchemaFolders(element);
                 case NodeType.Folder:
+                    await this.ensureConnection(element);
                     return this.getFolderChildren(element);
                 case NodeType.Table:
+                    await this.ensureConnection(element);
                     return this.getTableChildren(element);
                 case NodeType.View:
+                    await this.ensureConnection(element);
                     return this.getViewChildren(element);
                 case NodeType.Procedure:
                 case NodeType.Function:
+                    await this.ensureConnection(element);
                     return this.getRoutineChildren(element);
                 default:
                     return [];
@@ -202,7 +214,8 @@ export class ConnectionTreeProvider implements vscode.TreeDataProvider<DatabaseT
 
         // Logins
         const loginResults = await this.treeQueryService.execute(
-            "SELECT [name], [type_desc], [is_disabled] FROM sys.server_principals WHERE [type] IN ('S','U','G') ORDER BY [name]"
+            "SELECT [name], [type_desc], [is_disabled] FROM sys.server_principals WHERE [type] IN ('S','U','G') ORDER BY [name]",
+            undefined, profileName
         );
         const loginFolder = new DatabaseTreeItem(
             "Logins",
@@ -217,7 +230,8 @@ export class ConnectionTreeProvider implements vscode.TreeDataProvider<DatabaseT
 
         // Server Roles
         const roleResults = await this.treeQueryService.execute(
-            "SELECT [name] FROM sys.server_principals WHERE [type] = 'R' ORDER BY [name]"
+            "SELECT [name] FROM sys.server_principals WHERE [type] = 'R' ORDER BY [name]",
+            undefined, profileName
         );
         const roleFolder = new DatabaseTreeItem(
             "Server Roles",
@@ -232,7 +246,8 @@ export class ConnectionTreeProvider implements vscode.TreeDataProvider<DatabaseT
 
         // Credentials
         const credResults = await this.treeQueryService.execute(
-            "SELECT [name] FROM sys.credentials ORDER BY [name]"
+            "SELECT [name] FROM sys.credentials ORDER BY [name]",
+            undefined, profileName
         );
         const credFolder = new DatabaseTreeItem(
             "Credentials",
@@ -247,7 +262,8 @@ export class ConnectionTreeProvider implements vscode.TreeDataProvider<DatabaseT
 
         // Audits
         const auditResults = await this.treeQueryService.execute(
-            "SELECT [name] FROM sys.server_audits ORDER BY [name]"
+            "SELECT [name] FROM sys.server_audits ORDER BY [name]",
+            undefined, profileName
         );
         const auditFolder = new DatabaseTreeItem(
             "Audits",
@@ -262,7 +278,8 @@ export class ConnectionTreeProvider implements vscode.TreeDataProvider<DatabaseT
 
         // Server Audit Specifications
         const auditSpecResults = await this.treeQueryService.execute(
-            "SELECT [name] FROM sys.server_audit_specifications ORDER BY [name]"
+            "SELECT [name] FROM sys.server_audit_specifications ORDER BY [name]",
+            undefined, profileName
         );
         const auditSpecFolder = new DatabaseTreeItem(
             "Server Audit Specifications",
@@ -285,7 +302,8 @@ export class ConnectionTreeProvider implements vscode.TreeDataProvider<DatabaseT
 
         // Endpoints
         const endpointResults = await this.treeQueryService.execute(
-            "SELECT [name] FROM sys.endpoints ORDER BY [name]"
+            "SELECT [name] FROM sys.endpoints ORDER BY [name]",
+            undefined, profileName
         );
         const endpointFolder = new DatabaseTreeItem(
             "Endpoints",
@@ -300,7 +318,8 @@ export class ConnectionTreeProvider implements vscode.TreeDataProvider<DatabaseT
 
         // Linked Servers
         const linkedResults = await this.treeQueryService.execute(
-            "SELECT [name] FROM sys.servers WHERE is_linked = 1 ORDER BY [name]"
+            "SELECT [name] FROM sys.servers WHERE is_linked = 1 ORDER BY [name]",
+            undefined, profileName
         );
         const linkedFolder = new DatabaseTreeItem(
             "Linked Servers",
@@ -315,7 +334,8 @@ export class ConnectionTreeProvider implements vscode.TreeDataProvider<DatabaseT
 
         // Server Triggers
         const triggerResults = await this.treeQueryService.execute(
-            "SELECT [name] FROM sys.server_triggers ORDER BY [name]"
+            "SELECT [name] FROM sys.server_triggers ORDER BY [name]",
+            undefined, profileName
         );
         const triggerFolder = new DatabaseTreeItem(
             "Triggers",
@@ -366,7 +386,7 @@ export class ConnectionTreeProvider implements vscode.TreeDataProvider<DatabaseT
                 return [];
         }
 
-        const results = await this.treeQueryService.execute(sql);
+        const results = await this.treeQueryService.execute(sql, undefined, profileName);
         const nodes = results.rows.map((row) => {
             const label = contextValue === "SecurityLogins" && row.is_disabled
                 ? `${row.name} (disabled)`
@@ -388,7 +408,8 @@ export class ConnectionTreeProvider implements vscode.TreeDataProvider<DatabaseT
         const connectionId = parent.connectionId;
         const profileName = parent.profileName;
         const results = await this.treeQueryService.execute(
-            "SELECT [name], [state], [state_desc] FROM sys.databases ORDER BY [name]"
+            "SELECT [name], [state], [state_desc] FROM sys.databases ORDER BY [name]",
+            undefined, profileName
         );
         let rows = results.rows;
         if (this.databaseFilter) {
@@ -473,7 +494,7 @@ export class ConnectionTreeProvider implements vscode.TreeDataProvider<DatabaseT
             GROUP BY s.[name]
             ORDER BY s.[name]
         `;
-        const results = await this.treeQueryService.execute(sql, databaseName);
+        const results = await this.treeQueryService.execute(sql, databaseName, profileName);
         const nodes = results.rows.map((row) => {
             const node = new DatabaseTreeItem(
                 row.SchemaName,
@@ -511,7 +532,7 @@ export class ConnectionTreeProvider implements vscode.TreeDataProvider<DatabaseT
                  INNER JOIN sys.schemas s ON o.schema_id = s.schema_id
                  WHERE s.[name] = '${escapeSql(schemaName)}' AND t.parent_class = 1) AS TriggerCount
         `;
-        const results = await this.treeQueryService.execute(countSql, databaseName);
+        const results = await this.treeQueryService.execute(countSql, databaseName, profileName);
         const counts = results.rows[0];
         const folders: DatabaseTreeItem[] = [];
 
@@ -600,7 +621,7 @@ export class ConnectionTreeProvider implements vscode.TreeDataProvider<DatabaseT
             WHERE t.[TABLE_SCHEMA] = '${escapeSql(schemaName)}' AND t.[TABLE_TYPE] = 'BASE TABLE'
             ORDER BY t.[TABLE_NAME]
         `;
-        const results = await this.treeQueryService.execute(sql, databaseName);
+        const results = await this.treeQueryService.execute(sql, databaseName, profileName);
         const nodes = this.applyFolderFilter(results.rows, "TABLE_NAME", parent).map((row) => {
             const node = new DatabaseTreeItem(
                 row.TABLE_NAME,
@@ -628,7 +649,7 @@ export class ConnectionTreeProvider implements vscode.TreeDataProvider<DatabaseT
             WHERE [TABLE_SCHEMA] = '${escapeSql(schemaName)}' AND [TABLE_TYPE] = 'VIEW'
             ORDER BY [TABLE_NAME]
         `;
-        const results = await this.treeQueryService.execute(sql, databaseName);
+        const results = await this.treeQueryService.execute(sql, databaseName, profileName);
         const nodes = this.applyFolderFilter(results.rows, "TABLE_NAME", parent).map((row) =>
             new DatabaseTreeItem(
                 row.TABLE_NAME,
@@ -667,7 +688,7 @@ export class ConnectionTreeProvider implements vscode.TreeDataProvider<DatabaseT
                  INNER JOIN sys.schemas s ON o.schema_id = s.schema_id
                  WHERE s.[name] = '${escapeSql(schemaName)}' AND o.[type] IN ('FN','IF','TF') AND o.is_ms_shipped = 1) AS SystemCount
         `;
-        const results = await this.treeQueryService.execute(countSql, databaseName);
+        const results = await this.treeQueryService.execute(countSql, databaseName, profileName);
         const c = results.rows[0];
         const folders: DatabaseTreeItem[] = [];
 
@@ -721,7 +742,7 @@ export class ConnectionTreeProvider implements vscode.TreeDataProvider<DatabaseT
             WHERE s.[name] = '${escapeSql(schemaName)}' AND ${typeFilter}
             ORDER BY o.[name]
         `;
-        const results = await this.treeQueryService.execute(sql, databaseName);
+        const results = await this.treeQueryService.execute(sql, databaseName, profileName);
         const nodes = this.applyFolderFilter(results.rows, "ROUTINE_NAME", parent).map((row) =>
             new DatabaseTreeItem(
                 row.ROUTINE_NAME,
@@ -747,7 +768,7 @@ export class ConnectionTreeProvider implements vscode.TreeDataProvider<DatabaseT
             WHERE [ROUTINE_SCHEMA] = '${escapeSql(schemaName)}' AND [ROUTINE_TYPE] = 'PROCEDURE'
             ORDER BY [ROUTINE_NAME]
         `;
-        const results = await this.treeQueryService.execute(sql, databaseName);
+        const results = await this.treeQueryService.execute(sql, databaseName, profileName);
         const nodes = this.applyFolderFilter(results.rows, "ROUTINE_NAME", parent).map((row) =>
             new DatabaseTreeItem(
                 row.ROUTINE_NAME,
@@ -776,7 +797,7 @@ export class ConnectionTreeProvider implements vscode.TreeDataProvider<DatabaseT
             WHERE s.[name] = '${escapeSql(schemaName)}' AND t.parent_class = 1
             ORDER BY t.[name]
         `;
-        const results = await this.treeQueryService.execute(sql, databaseName);
+        const results = await this.treeQueryService.execute(sql, databaseName, profileName);
         const nodes = this.applyFolderFilter(results.rows, "TriggerName", parent).map((row) =>
             new DatabaseTreeItem(
                 row.TriggerName,
@@ -833,7 +854,7 @@ export class ConnectionTreeProvider implements vscode.TreeDataProvider<DatabaseT
                  INNER JOIN sys.schemas s ON o.schema_id = s.schema_id
                  WHERE s.[name] = '${escapeSql(schemaName)}' AND o.[name] = '${escapeSql(tableName)}') AS StatCount
         `;
-        const results = await this.treeQueryService.execute(countSql, databaseName);
+        const results = await this.treeQueryService.execute(countSql, databaseName, profileName);
         const c = results.rows[0];
         const folders: DatabaseTreeItem[] = [];
 
@@ -882,7 +903,7 @@ export class ConnectionTreeProvider implements vscode.TreeDataProvider<DatabaseT
                  INNER JOIN sys.schemas s ON o.schema_id = s.schema_id
                  WHERE s.[name] = '${escapeSql(schemaName)}' AND o.[name] = '${escapeSql(viewName)}') AS StatCount
         `;
-        const results = await this.treeQueryService.execute(countSql, databaseName);
+        const results = await this.treeQueryService.execute(countSql, databaseName, profileName);
         const c = results.rows[0];
         const folders: DatabaseTreeItem[] = [];
 
@@ -929,7 +950,7 @@ export class ConnectionTreeProvider implements vscode.TreeDataProvider<DatabaseT
             WHERE c.[TABLE_SCHEMA] = '${escapeSql(schemaName)}' AND c.[TABLE_NAME] = '${escapeSql(tableName)}'
             ORDER BY c.[ORDINAL_POSITION]
         `;
-        const results = await this.treeQueryService.execute(sql, databaseName);
+        const results = await this.treeQueryService.execute(sql, databaseName, profileName);
         const nodes = results.rows.map((row) => {
             const dataType = row.CHARACTER_MAXIMUM_LENGTH
                 ? `${row.DATA_TYPE}(${row.CHARACTER_MAXIMUM_LENGTH})`
@@ -976,7 +997,7 @@ export class ConnectionTreeProvider implements vscode.TreeDataProvider<DatabaseT
                 AND i.[name] IS NOT NULL
             ORDER BY i.[name]
         `;
-        const results = await this.treeQueryService.execute(sql, databaseName);
+        const results = await this.treeQueryService.execute(sql, databaseName, profileName);
         const nodes = results.rows.map((row) => {
             const suffix = row.IsPrimaryKey ? " (PRIMARY)" : row.IsUnique ? " (UNIQUE)" : "";
             const metadata: IndexMetadata = {
@@ -1019,7 +1040,7 @@ export class ConnectionTreeProvider implements vscode.TreeDataProvider<DatabaseT
             WHERE s.[name] = '${escapeSql(schemaName)}' AND o.[name] = '${escapeSql(tableName)}'
             ORDER BY KeyName
         `;
-        const results = await this.treeQueryService.execute(sql, databaseName);
+        const results = await this.treeQueryService.execute(sql, databaseName, profileName);
         const nodes = results.rows.map((row) => {
             const typeLabel = row.KeyType === "PRIMARY_KEY_CONSTRAINT" ? "PK"
                 : row.KeyType === "UNIQUE_CONSTRAINT" ? "UQ" : "FK";
@@ -1052,7 +1073,7 @@ export class ConnectionTreeProvider implements vscode.TreeDataProvider<DatabaseT
             WHERE s.[name] = '${escapeSql(schemaName)}' AND o.[name] = '${escapeSql(tableName)}'
             ORDER BY ConstraintName
         `;
-        const results = await this.treeQueryService.execute(sql, databaseName);
+        const results = await this.treeQueryService.execute(sql, databaseName, profileName);
         const nodes = results.rows.map((row) => {
             const typeLabel = row.ConstraintType === "CHECK" ? "CK" : "DF";
             const node = new DatabaseTreeItem(
@@ -1080,7 +1101,7 @@ export class ConnectionTreeProvider implements vscode.TreeDataProvider<DatabaseT
             WHERE s.[name] = '${escapeSql(schemaName)}' AND o.[name] = '${escapeSql(objectName)}'
             ORDER BY st.[name]
         `;
-        const results = await this.treeQueryService.execute(sql, databaseName);
+        const results = await this.treeQueryService.execute(sql, databaseName, profileName);
         const nodes = results.rows.map((row) => {
             const node = new DatabaseTreeItem(
                 row.StatName,
@@ -1108,7 +1129,7 @@ export class ConnectionTreeProvider implements vscode.TreeDataProvider<DatabaseT
             WHERE [SPECIFIC_SCHEMA] = '${escapeSql(schemaName)}' AND [SPECIFIC_NAME] = '${escapeSql(routineName)}'
                 AND [PARAMETER_MODE] IS NOT NULL
         `;
-        const results = await this.treeQueryService.execute(sql, databaseName);
+        const results = await this.treeQueryService.execute(sql, databaseName, profileName);
         const paramCount = results.rows[0]?.ParamCount || 0;
 
         const paramFolder = new DatabaseTreeItem(
@@ -1128,7 +1149,7 @@ export class ConnectionTreeProvider implements vscode.TreeDataProvider<DatabaseT
                     AND [PARAMETER_MODE] IS NULL AND [IS_RESULT] = 'YES'
             `;
             try {
-                const retResults = await this.treeQueryService.execute(retSql, databaseName);
+                const retResults = await this.treeQueryService.execute(retSql, databaseName, profileName);
                 if (retResults.rows.length > 0) {
                     const retNode = new DatabaseTreeItem(
                         `Returns ${retResults.rows[0].DATA_TYPE}`,
@@ -1161,7 +1182,7 @@ export class ConnectionTreeProvider implements vscode.TreeDataProvider<DatabaseT
                 AND [PARAMETER_MODE] IS NOT NULL
             ORDER BY [ORDINAL_POSITION]
         `;
-        const results = await this.treeQueryService.execute(sql, databaseName);
+        const results = await this.treeQueryService.execute(sql, databaseName, profileName);
         const nodes = results.rows.map((row) => {
             const dataType = row.CHARACTER_MAXIMUM_LENGTH
                 ? `${row.DATA_TYPE}(${row.CHARACTER_MAXIMUM_LENGTH})`
