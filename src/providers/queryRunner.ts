@@ -313,6 +313,7 @@ export class QueryRunner implements vscode.WebviewViewProvider {
     }
     tr:hover td { background: var(--vscode-list-hoverBackground); }
     tr.selected td { background: var(--vscode-list-activeSelectionBackground); color: var(--vscode-list-activeSelectionForeground); }
+    td.active-cell { outline: 2px solid var(--vscode-focusBorder); outline-offset: -2px; }
     td.null-val { color: var(--vscode-descriptionForeground); font-style: italic; }
     .messages {
         padding: 6px 8px;
@@ -444,10 +445,17 @@ export class QueryRunner implements vscode.WebviewViewProvider {
 
     // ── Selection ──────────────────────────────────────────────
     let selectedRows = new Set();
+    let activeCell = null;
 
     document.addEventListener('click', (e) => {
+        const cell = e.target.closest('td');
         const row = e.target.closest('tbody tr');
-        if (!row) { selectedRows.clear(); refreshSelection(); return; }
+        if (!row) { selectedRows.clear(); activeCell = null; refreshSelection(); return; }
+
+        // Active cell
+        activeCell = cell;
+
+        // Row selection
         if (e.ctrlKey) {
             if (selectedRows.has(row)) { selectedRows.delete(row); } else { selectedRows.add(row); }
         } else if (e.shiftKey && selectedRows.size > 0) {
@@ -465,6 +473,8 @@ export class QueryRunner implements vscode.WebviewViewProvider {
 
     function refreshSelection() {
         document.querySelectorAll('tbody tr').forEach(r => r.classList.toggle('selected', selectedRows.has(r)));
+        document.querySelectorAll('td.active-cell').forEach(c => c.classList.remove('active-cell'));
+        if (activeCell) { activeCell.classList.add('active-cell'); }
     }
 
     function getSelectedData(withHeaders) {
