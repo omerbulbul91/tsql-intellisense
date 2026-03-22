@@ -1,13 +1,14 @@
 import * as vscode from 'vscode';
 import { StyleLoader } from '../formatter/styleLoader';
 import { CasingMode } from '../formatter/casingRule';
+import { styleFormTranslations } from './styleFormTranslations';
 
 export class StyleFormProvider {
     private static currentPanel: vscode.WebviewPanel | undefined;
 
     static show(
         context: vscode.ExtensionContext,
-        styleLoader: StyleLoader
+        styleLoader: StyleLoader,
     ): void {
         const column = vscode.window.activeTextEditor?.viewColumn || vscode.ViewColumn.One;
 
@@ -41,14 +42,28 @@ export class StyleFormProvider {
         const snippetFolder = config.get<string>('snippetFolder', '');
         // Read connections to show count
         const connections = config.get<any[]>('connections', []);
+        const lang = context.globalState.get<string>('tsql.uiLang', 'en');
+        const customTranslations = context.globalState.get<Record<string, Record<string, string>>>('tsql.customTranslations', {});
+        const fmtConfig = {
+            whitespace: styleLoader.getWhitespaceOptions(),
+            controlFlow: styleLoader.getControlFlowOptions(),
+            variables: styleLoader.getVariablesOptions(),
+            dataDml: styleLoader.getDataDmlOptions(),
+            schemaDdl: styleLoader.getSchemaDdlOptions(),
+        };
 
-        panel.webview.html = StyleFormProvider.getHtml(casingOpts, layoutOpts, aliasOpts, insertionKeys, styleName, styleFile, snippetFolder, connections.length);
+        panel.webview.html = StyleFormProvider.getHtml(casingOpts, layoutOpts, aliasOpts, insertionKeys, styleName, styleFile, snippetFolder, connections.length, lang, customTranslations, fmtConfig);
 
         panel.webview.onDidReceiveMessage(async (msg) => {
             switch (msg.cmd) {
                 case 'save': {
                     const config = vscode.workspace.getConfiguration('tsql-intellisense');
-                    const overrides = { ...msg.casing, lists: msg.lists, caseExpressions: msg.caseExpressions };
+                    const overrides: any = { ...msg.casing, lists: msg.lists, caseExpressions: msg.caseExpressions };
+                    if (msg.whitespace) overrides.whitespace = msg.whitespace;
+                    if (msg.controlFlow) overrides.controlFlow = msg.controlFlow;
+                    if (msg.variables) overrides.variables = msg.variables;
+                    if (msg.dataDml) overrides.dataDml = msg.dataDml;
+                    if (msg.schemaDdl) overrides.schemaDdl = msg.schemaDdl;
                     await config.update('styleOverrides', overrides, vscode.ConfigurationTarget.Global);
                     if (msg.maxLineLength !== undefined) {
                         await config.update('maxLineLength', msg.maxLineLength, vscode.ConfigurationTarget.Global);
@@ -83,7 +98,8 @@ export class StyleFormProvider {
                         await config.update('insertionKeys', msg.insertionKeys, vscode.ConfigurationTarget.Global);
                     }
                     panel.webview.postMessage({ cmd: 'saved' });
-                    vscode.window.showInformationMessage(`Stil ayarları kaydedildi`);
+                    const uiLang = context.globalState.get<string>('tsql.uiLang', 'en');
+                    vscode.window.showInformationMessage(uiLang === 'tr' ? 'Stil ayarları kaydedildi' : 'Style settings saved');
                     break;
                 }
                 case 'loadFile': {
@@ -168,6 +184,27 @@ export class StyleFormProvider {
                     }
                     break;
                 }
+                case 'setLang': {
+                    await context.globalState.update('tsql.uiLang', msg.lang);
+                    break;
+                }
+                case 'openTranslationEditor': {
+                    const { TranslationEditor } = await import('./translationEditor');
+                    TranslationEditor.show(context);
+                    break;
+                }
+                case 'saveCustomLang': {
+                    const all = context.globalState.get<Record<string, Record<string, string>>>('tsql.customTranslations', {});
+                    all[msg.langCode] = msg.translations;
+                    await context.globalState.update('tsql.customTranslations', all);
+                    const uiLang = context.globalState.get<string>('tsql.uiLang', 'en');
+                    vscode.window.showInformationMessage(
+                        uiLang === 'tr'
+                            ? `"${msg.langCode}" dili kaydedildi (${Object.keys(msg.translations).length} çeviri).`
+                            : `Language "${msg.langCode}" saved (${Object.keys(msg.translations).length} translations).`
+                    );
+                    break;
+                }
                 case 'exportConnections': {
                     const conns = vscode.workspace.getConfiguration('tsql-intellisense').get<any[]>('connections', []);
                     const uri = await vscode.window.showSaveDialog({
@@ -228,10 +265,43 @@ export class StyleFormProvider {
         styleName: string,
         styleFile: string,
         snippetFolder: string,
-        connectionCount: number
+        connectionCount: number,
+        lang: string,
+        customTranslations: Record<string, Record<string, string>>,
+        fmtConfig: { whitespace: any; controlFlow: any; variables: any; dataDml: any; schemaDdl: any }
     ): string {
+        // Merge built-in + custom translations for the webview
+        const allTranslations: Record<string, Record<string, string>> = { ...styleFormTranslations };
+        for (const [code, dict] of Object.entries(customTranslations)) {
+            if (!allTranslations[code]) { allTranslations[code] = dict; }
+            else { allTranslations[code] = { ...allTranslations[code], ...dict }; }
+        }
+        const allLangCodes = Object.keys(allTranslations);
+        const builtInLangs = Object.keys(styleFormTranslations);
+        const langFlags: Record<string, string> = {
+            en: '\uD83C\uDDEC\uD83C\uDDE7', tr: '\uD83C\uDDF9\uD83C\uDDF7', de: '\uD83C\uDDE9\uD83C\uDDEA', fr: '\uD83C\uDDEB\uD83C\uDDF7',
+            es: '\uD83C\uDDEA\uD83C\uDDF8', it: '\uD83C\uDDEE\uD83C\uDDF9', pt: '\uD83C\uDDF5\uD83C\uDDF9', ru: '\uD83C\uDDF7\uD83C\uDDFA',
+            ja: '\uD83C\uDDEF\uD83C\uDDF5', ko: '\uD83C\uDDF0\uD83C\uDDF7', zh: '\uD83C\uDDE8\uD83C\uDDF3', ar: '\uD83C\uDDF8\uD83C\uDDE6',
+            nl: '\uD83C\uDDF3\uD83C\uDDF1', pl: '\uD83C\uDDF5\uD83C\uDDF1', sv: '\uD83C\uDDF8\uD83C\uDDEA', da: '\uD83C\uDDE9\uD83C\uDDF0',
+            fi: '\uD83C\uDDEB\uD83C\uDDEE', no: '\uD83C\uDDF3\uD83C\uDDF4', cs: '\uD83C\uDDE8\uD83C\uDDFF', hu: '\uD83C\uDDED\uD83C\uDDFA',
+            ro: '\uD83C\uDDF7\uD83C\uDDF4', bg: '\uD83C\uDDE7\uD83C\uDDEC', uk: '\uD83C\uDDFA\uD83C\uDDE6', az: '\uD83C\uDDE6\uD83C\uDDFF',
+        };
+        const langNames: Record<string, string> = {
+            en: 'English', tr: 'T\u00FCrk\u00E7e', de: 'Deutsch', fr: 'Fran\u00E7ais',
+            es: 'Espa\u00F1ol', it: 'Italiano', pt: 'Portugu\u00EAs', ru: '\u0420\u0443\u0441\u0441\u043A\u0438\u0439',
+            ja: '\u65E5\u672C\u8A9E', ko: '\uD55C\uAD6D\uC5B4', zh: '\u4E2D\u6587', ar: '\u0627\u0644\u0639\u0631\u0628\u064A\u0629',
+            nl: 'Nederlands', pl: 'Polski', sv: 'Svenska', da: 'Dansk',
+            fi: 'Suomi', no: 'Norsk', cs: '\u010Ce\u0161tina', hu: 'Magyar',
+            ro: 'Rom\u00E2n\u0103', bg: '\u0411\u044A\u043B\u0433\u0430\u0440\u0441\u043A\u0438', uk: '\u0423\u043A\u0440\u0430\u0457\u043D\u0441\u044C\u043A\u0430', az: 'Az\u0259rbaycanca',
+        };
+        const langOptionsHtml = allLangCodes.map(c => {
+            const flag = langFlags[c] || '\uD83C\uDFF3\uFE0F';
+            const name = langNames[c] || c;
+            const suffix = builtInLangs.includes(c) ? '' : ' *';
+            return `<option value="${c}" ${c === lang ? 'selected' : ''}>${flag} ${name}${suffix}</option>`;
+        }).join('');
         return /*html*/`<!DOCTYPE html>
-<html lang="en">
+<html lang="${lang}">
 <head>
     <meta charset="UTF-8">
     <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline';">
@@ -260,11 +330,6 @@ export class StyleFormProvider {
             font-size: 18px;
             font-weight: 600;
         }
-        .header .style-name {
-            font-size: 13px;
-            color: var(--vscode-descriptionForeground);
-            margin-left: auto;
-        }
 
         /* Main layout */
         .main {
@@ -273,26 +338,91 @@ export class StyleFormProvider {
             overflow: hidden;
         }
 
-        /* Sidebar */
+        /* Sidebar — VS Code Settings style */
         .sidebar {
-            width: 180px;
+            width: 200px;
+            min-width: 200px;
             border-right: 1px solid var(--vscode-panel-border);
-            padding: 12px 0;
+            padding: 8px 0;
             overflow-y: auto;
+            font-size: 13px;
         }
         .sidebar .section-title {
-            font-size: 11px;
+            font-size: 13px;
             font-weight: 600;
-            text-transform: uppercase;
-            color: var(--vscode-descriptionForeground);
-            padding: 8px 16px 4px;
-            letter-spacing: 0.5px;
+            color: var(--vscode-foreground);
+            padding: 4px 8px 4px 8px;
+            cursor: pointer;
+            user-select: none;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .sidebar .section-title::before {
+            content: '\\276F';
+            font-size: 13px;
+            font-weight: 400;
+            transition: transform 0.15s ease;
+            display: inline-block;
+            color: var(--vscode-foreground);
+            width: 16px;
+            text-align: center;
+            flex-shrink: 0;
+        }
+        .sidebar .section-title.expanded::before {
+            transform: rotate(90deg);
+        }
+        .sidebar .section-title:hover {
+            background: var(--vscode-list-hoverBackground);
+        }
+        .sidebar .section-group {
+            overflow: hidden;
+            max-height: 0;
+            transition: max-height 0.2s ease-out;
+        }
+        .sidebar .section-group.expanded {
+            max-height: 600px;
+        }
+        .sidebar .sub-title {
+            font-size: 13px;
+            font-weight: 400;
+            color: var(--vscode-foreground);
+            padding: 4px 8px 4px 36px;
+            cursor: pointer;
+            user-select: none;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .sidebar .sub-title::before {
+            content: '\\276F';
+            font-size: 13px;
+            font-weight: 400;
+            transition: transform 0.15s ease;
+            display: inline-block;
+            width: 16px;
+            text-align: center;
+            flex-shrink: 0;
+        }
+        .sidebar .sub-title.expanded::before {
+            transform: rotate(90deg);
+        }
+        .sidebar .sub-title:hover {
+            background: var(--vscode-list-hoverBackground);
+        }
+        .sidebar .sub-group {
+            overflow: hidden;
+            max-height: 0;
+            transition: max-height 0.15s ease-out;
+        }
+        .sidebar .sub-group.expanded {
+            max-height: 400px;
         }
         .sidebar .menu-item {
-            padding: 6px 16px;
+            padding: 3px 8px 3px 28px;
             cursor: pointer;
             font-size: 13px;
-            border-left: 3px solid transparent;
+            border-left: 2px solid transparent;
         }
         .sidebar .menu-item:hover {
             background: var(--vscode-list-hoverBackground);
@@ -307,11 +437,8 @@ export class StyleFormProvider {
             cursor: default;
         }
         .sidebar .menu-item.sub {
-            padding-left: 28px;
-            font-size: 12px;
-        }
-        .sidebar .style-subs {
-            overflow: hidden;
+            padding-left: 56px;
+            font-size: 13px;
         }
 
         /* Content */
@@ -323,32 +450,37 @@ export class StyleFormProvider {
         }
         .content-body {
             flex: 1;
-            padding: 24px 32px;
+            padding: 20px 24px;
             overflow-y: auto;
         }
         .content-body h2 {
-            font-size: 16px;
+            font-size: 20px;
             font-weight: 600;
-            margin-bottom: 20px;
+            margin-bottom: 16px;
+            padding-bottom: 0;
         }
         .content-body h3 {
             font-size: 13px;
             font-weight: 600;
-            margin: 20px 0 12px;
+            margin: 24px 0 8px;
+            padding-bottom: 6px;
+            border-bottom: 1px solid var(--vscode-panel-border);
+            color: var(--vscode-foreground);
         }
 
-        /* Form */
+        /* Form — VS Code Settings style */
         .form-row {
             display: flex;
             align-items: center;
-            margin-bottom: 12px;
-            gap: 16px;
+            margin-bottom: 10px;
+            gap: 12px;
         }
         .form-row label {
-            width: 180px;
+            min-width: 140px;
             font-size: 13px;
-            text-align: right;
+            text-align: left;
             flex-shrink: 0;
+            color: var(--vscode-foreground);
         }
         .form-row select {
             width: 220px;
@@ -383,7 +515,7 @@ export class StyleFormProvider {
             display: flex;
             align-items: center;
             gap: 8px;
-            margin: 12px 0 12px 196px;
+            margin: 8px 0;
         }
         .checkbox-row input[type="checkbox"] {
             accent-color: var(--vscode-focusBorder);
@@ -512,59 +644,74 @@ export class StyleFormProvider {
 </head>
 <body>
     <div style="padding:6px 24px; font-size:12px; color:var(--vscode-descriptionForeground); background:var(--vscode-editorWidget-background); border-bottom:1px solid var(--vscode-panel-border);">
-        T-SQL IntelliSense is a code auto-completion and formatting tool for writing SQL queries.
+        <span data-i18n="topBanner">T-SQL IntelliSense is a code auto-completion and formatting tool for writing SQL queries.</span>
     </div>
 
     <div class="header">
         <h1>SQL Prompt Options</h1>
-        <span class="style-name" id="styleName">${StyleFormProvider.escapeHtml(styleName)}</span>
+        <select id="langSelect" onchange="setLang(this.value)" style="padding:3px 8px; font-size:12px; background:var(--vscode-input-background); color:var(--vscode-input-foreground); border:1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius:3px; cursor:pointer; margin-left:auto;">
+            ${langOptionsHtml}
+        </select>
     </div>
 
     <div class="main">
         <div class="sidebar">
-            <div class="section-title">Suggestions</div>
-            <div class="menu-item" onclick="showSection('behavior')">Behavior</div>
-            <div class="menu-item" onclick="showSection('joinConditions')">Join conditions</div>
-            <div class="menu-item" onclick="showSection('snippets')">Snippets</div>
-
-            <div class="section-title">Inserted code</div>
-            <div class="menu-item" onclick="showSection('objectsStatements')">Objects & statements</div>
-            <div class="menu-item" onclick="showSection('qualification')">Qualification</div>
-            <div class="menu-item" onclick="showSection('aliases')">Aliases</div>
-            <div class="menu-item" onclick="showSection('specialChars')">Special characters</div>
-
-            <div class="section-title">Format</div>
-            <div class="menu-item" onclick="toggleStyleSubs()" style="font-weight:600;">Styles</div>
-            <div class="style-subs">
-                <div class="menu-item sub active" onclick="showSection('casing')">Casing</div>
-                <div class="menu-item sub" onclick="showSection('lists')">Lists</div>
-                <div class="menu-item sub disabled">Whitespace</div>
-                <div class="menu-item sub disabled">Parentheses</div>
+            <div class="section-title expanded" onclick="toggleGroup(this)" data-i18n="nav.suggestions">Suggestions</div>
+            <div class="section-group expanded">
+                <div class="menu-item" onclick="showSection('behavior')" data-i18n="nav.behavior">Behavior</div>
+                <div class="menu-item" onclick="showSection('joinConditions')" data-i18n="nav.joinConditions">Join conditions</div>
+                <div class="menu-item" onclick="showSection('snippets')" data-i18n="nav.snippets">Snippets</div>
             </div>
 
-            <div class="section-title" style="margin-top:8px">Statements</div>
-            <div class="menu-item disabled">Data (DML)</div>
-            <div class="menu-item disabled">Schema (DDL)</div>
-            <div class="menu-item disabled">Control flow</div>
-            <div class="menu-item disabled">CTE</div>
-            <div class="menu-item disabled">Variables</div>
+            <div class="section-title expanded" onclick="toggleGroup(this)" data-i18n="nav.insertedCode">Inserted code</div>
+            <div class="section-group expanded">
+                <div class="menu-item" onclick="showSection('objectsStatements')" data-i18n="nav.objectsStatements">Objects & statements</div>
+                <div class="menu-item" onclick="showSection('qualification')" data-i18n="nav.qualification">Qualification</div>
+                <div class="menu-item" onclick="showSection('aliases')" data-i18n="nav.aliases">Aliases</div>
+                <div class="menu-item" onclick="showSection('specialChars')" data-i18n="nav.specialChars">Special characters</div>
+            </div>
 
-            <div class="section-title">Clauses</div>
-            <div class="menu-item disabled">JOIN</div>
-            <div class="menu-item disabled">INSERT</div>
+            <div class="section-title expanded" onclick="toggleGroup(this); showSection('styles');" data-i18n="nav.format">Format</div>
+            <div class="section-group expanded">
+                <div class="menu-item active" onclick="showSection('styles')" data-i18n="nav.styles">Styles</div>
+                <div class="menu-item" onclick="showSection('whitespace')" data-i18n="nav.whitespace">Whitespace</div>
+                <div class="menu-item" onclick="showSection('casing')" data-i18n="nav.casing">Casing</div>
+                <div class="menu-item" onclick="showSection('lists')" data-i18n="nav.lists">Lists</div>
 
-            <div class="section-title">Expressions</div>
-            <div class="menu-item disabled">Function calls</div>
-            <div class="menu-item" onclick="showSection('caseExpr')">CASE</div>
-            <div class="menu-item disabled">IN</div>
-            <div class="menu-item disabled">Operators</div>
+                <div class="sub-title expanded" onclick="toggleSubGroup(this)" data-i18n="nav.statements">Statements</div>
+                <div class="sub-group expanded">
+                    <div class="menu-item sub" onclick="showSection('dataDml')" data-i18n="nav.dataDml">Data (DML)</div>
+                    <div class="menu-item sub" onclick="showSection('schemaDdl')" data-i18n="nav.schemaDdl">Schema (DDL)</div>
+                    <div class="menu-item sub" onclick="showSection('controlFlow')" data-i18n="nav.controlFlow">Control flow</div>
+                    <div class="menu-item sub disabled">CTE</div>
+                    <div class="menu-item sub" onclick="showSection('variables')" data-i18n="nav.variables">Variables</div>
+                </div>
 
-            <div class="section-title">Queries</div>
-            <div class="menu-item" onclick="showSection('history')">History</div>
+                <div class="sub-title" onclick="toggleSubGroup(this)" data-i18n="nav.clauses">Clauses</div>
+                <div class="sub-group">
+                    <div class="menu-item sub disabled">JOIN</div>
+                    <div class="menu-item sub disabled">INSERT</div>
+                </div>
 
-            <div class="section-title">Settings</div>
-            <div class="menu-item" onclick="showSection('paths')">Paths</div>
-            <div class="menu-item" onclick="showSection('connections')">Connections</div>
+                <div class="sub-title expanded" onclick="toggleSubGroup(this)" data-i18n="nav.expressions">Expressions</div>
+                <div class="sub-group expanded">
+                    <div class="menu-item sub disabled" data-i18n="nav.functionCalls">Function calls</div>
+                    <div class="menu-item sub" onclick="showSection('caseExpr')">CASE</div>
+                    <div class="menu-item sub disabled">IN</div>
+                    <div class="menu-item sub disabled" data-i18n="nav.operators">Operators</div>
+                </div>
+            </div>
+
+            <div class="section-title expanded" onclick="toggleGroup(this)" data-i18n="nav.queries">Queries</div>
+            <div class="section-group expanded">
+                <div class="menu-item" onclick="showSection('history')" data-i18n="nav.history">History</div>
+            </div>
+
+            <div class="section-title expanded" onclick="toggleGroup(this)" data-i18n="nav.settings">Settings</div>
+            <div class="section-group expanded">
+                <div class="menu-item" onclick="showSection('connections')" data-i18n="nav.connections">Connections</div>
+                <div class="menu-item" onclick="showSection('language')" data-i18n="nav.language">Language</div>
+            </div>
         </div>
 
         <div class="content">
@@ -572,31 +719,31 @@ export class StyleFormProvider {
                 <!-- Casing Section -->
                 <!-- Behavior Section -->
                 <div id="section-behavior" style="display:none">
-                    <h2>Suggestions &gt; Behavior</h2>
+                    <h2 data-i18n="behavior.title">Suggestions &gt; Behavior</h2>
 
-                    <h3>Suggestions box and other popups</h3>
+                    <h3 data-i18n="behavior.suggestionsBox">Suggestions box and other popups</h3>
                     <div class="checkbox-row" style="margin-left:0">
                         <input type="checkbox" id="showCodeSuggestions" checked>
-                        <label for="showCodeSuggestions">Show code suggestions</label>
+                        <label for="showCodeSuggestions" data-i18n="behavior.showCodeSuggestions">Show code suggestions</label>
                     </div>
 
                     <div class="checkbox-row" style="margin-left:24px">
                         <input type="checkbox" id="showObjectDefinitions" checked>
-                        <label for="showObjectDefinitions">Show object definitions</label>
+                        <label for="showObjectDefinitions" data-i18n="behavior.showObjectDefinitions">Show object definitions</label>
                     </div>
 
                     <div class="checkbox-row" style="margin-left:24px">
                         <input type="checkbox" id="showTooltipsObjects" checked>
-                        <label for="showTooltipsObjects">Show tooltips for: Objects</label>
+                        <label for="showTooltipsObjects" data-i18n="behavior.showTooltipsObjects">Show tooltips for: Objects</label>
                     </div>
 
                     <div class="checkbox-row" style="margin-left:24px">
                         <input type="checkbox" id="showTooltipsParameters" checked>
-                        <label for="showTooltipsParameters">Show tooltips for: Parameters</label>
+                        <label for="showTooltipsParameters" data-i18n="behavior.showTooltipsParameters">Show tooltips for: Parameters</label>
                     </div>
 
-                    <h3>Insertion keys</h3>
-                    <p style="font-size:13px; color:var(--vscode-descriptionForeground); margin-bottom:8px;">
+                    <h3 data-i18n="behavior.insertionKeys">Insertion keys</h3>
+                    <p style="font-size:13px; color:var(--vscode-descriptionForeground); margin-bottom:8px;" data-i18n="behavior.insertionKeysDesc">
                         Insert selected suggestions into your code when any of the following keys are pressed:
                     </p>
                     <div style="display:flex; flex-wrap:wrap; gap:4px 16px; margin-bottom:16px;">
@@ -610,115 +757,115 @@ export class StyleFormProvider {
                         <div class="checkbox-row" style="margin:0"><input type="checkbox" id="ik_semicolon" ${insertionKeys.semicolon ? 'checked' : ''}><label for="ik_semicolon">Semicolon</label></div>
                     </div>
 
-                    <h3>Types of suggestions</h3>
+                    <h3 data-i18n="behavior.typesOfSuggestions">Types of suggestions</h3>
                     <div class="checkbox-row" style="margin-left:0">
                         <input type="checkbox" id="listColumnsAfterSelect">
-                        <label for="listColumnsAfterSelect">List all database columns after a SELECT statement</label>
+                        <label for="listColumnsAfterSelect" data-i18n="behavior.listColumnsAfterSelect">List all database columns after a SELECT statement</label>
                     </div>
 
                     <div class="checkbox-row" style="margin-left:0">
                         <input type="checkbox" id="listSystemObjects">
-                        <label for="listSystemObjects">List system objects</label>
+                        <label for="listSystemObjects" data-i18n="behavior.listSystemObjects">List system objects</label>
                     </div>
 
-                    <h3>VS Code integration</h3>
+                    <h3 data-i18n="behavior.vscodeIntegration">VS Code integration</h3>
                     <div class="checkbox-row" style="margin-left:0">
                         <input type="checkbox" id="disableWordSuggestions">
-                        <label for="disableWordSuggestions">Disable VS Code word-based suggestions for SQL files</label>
+                        <label for="disableWordSuggestions" data-i18n="behavior.disableWordSuggestions">Disable VS Code word-based suggestions for SQL files</label>
                     </div>
-                    <p style="font-size:12px; color:var(--vscode-descriptionForeground); margin-left:24px;">
+                    <p style="font-size:12px; color:var(--vscode-descriptionForeground); margin-left:24px;" data-i18n="behavior.disableWordSuggestionsDesc">
                         Prevents duplicate suggestions from VS Code's built-in word completion in SQL files.
                     </p>
                 </div>
 
                 <!-- Join Conditions Section -->
                 <div id="section-joinConditions" style="display:none">
-                    <h2>Suggestions &gt; Join conditions</h2>
-                    <p style="font-size:13px; color:var(--vscode-descriptionForeground); margin-bottom:16px;">
+                    <h2 data-i18n="join.title">Suggestions &gt; Join conditions</h2>
+                    <p style="font-size:13px; color:var(--vscode-descriptionForeground); margin-bottom:16px;" data-i18n="join.desc">
                         By default, SQL Prompt suggests joins based on foreign key relationships.
                     </p>
 
-                    <p style="font-size:13px; margin-bottom:8px;">Also suggest join conditions based on:</p>
+                    <p style="font-size:13px; margin-bottom:8px;" data-i18n="join.alsoSuggest">Also suggest join conditions based on:</p>
 
                     <div class="checkbox-row" style="margin-left:0">
                         <input type="checkbox" id="joinMatchingNames" checked>
-                        <label for="joinMatchingNames">Columns with matching names (not case-sensitive)</label>
+                        <label for="joinMatchingNames" data-i18n="join.matchingNames">Columns with matching names (not case-sensitive)</label>
                     </div>
 
                     <div class="checkbox-row" style="margin-left:0">
                         <input type="checkbox" id="joinMatchingTypes">
-                        <label for="joinMatchingTypes">Columns with matching data types</label>
+                        <label for="joinMatchingTypes" data-i18n="join.matchingTypes">Columns with matching data types</label>
                     </div>
 
                     <div class="checkbox-row" style="margin-left:0">
                         <input type="checkbox" id="joinMultiColumnFK">
-                        <label for="joinMultiColumnFK">Individual columns in multiple-column foreign keys</label>
+                        <label for="joinMultiColumnFK" data-i18n="join.multiColumnFK">Individual columns in multiple-column foreign keys</label>
                     </div>
 
-                    <h3>Column order</h3>
+                    <h3 data-i18n="join.columnOrder">Column order</h3>
                     <div class="checkbox-row" style="margin-left:0">
                         <input type="checkbox" id="swapJoinColumnOrder">
-                        <label for="swapJoinColumnOrder">Swap order of columns in join clauses</label>
+                        <label for="swapJoinColumnOrder" data-i18n="join.swapOrder">Swap order of columns in join clauses</label>
                     </div>
                 </div>
 
                 <!-- Objects & Statements Section -->
                 <div id="section-objectsStatements" style="display:none">
-                    <h2>Inserted code &gt; Objects &amp; statements</h2>
-                    <p style="font-size:13px; color:var(--vscode-descriptionForeground); margin-bottom:16px;">
+                    <h2 data-i18n="objects.title">Inserted code &gt; Objects &amp; statements</h2>
+                    <p style="font-size:13px; color:var(--vscode-descriptionForeground); margin-bottom:16px;" data-i18n="objects.desc">
                         SQL Prompt can automatically complete the syntax of some statements.
                     </p>
 
-                    <h3>ALTER statements</h3>
+                    <h3 data-i18n="objects.alterStatements">ALTER statements</h3>
                     <div class="checkbox-row" style="margin-left:0">
                         <input type="checkbox" id="insertFullAlter" checked>
-                        <label for="insertFullAlter">Insert full ALTER statement</label>
+                        <label for="insertFullAlter" data-i18n="objects.insertFullAlter">Insert full ALTER statement</label>
                     </div>
 
-                    <h3>INSERT statements</h3>
+                    <h3 data-i18n="objects.insertStatements">INSERT statements</h3>
                     <div class="checkbox-row" style="margin-left:0">
                         <input type="checkbox" id="insertFullInsert" checked>
-                        <label for="insertFullInsert">Insert full INSERT statement</label>
+                        <label for="insertFullInsert" data-i18n="objects.insertFullInsert">Insert full INSERT statement</label>
                     </div>
                     <div class="checkbox-row" style="margin-left:24px">
                         <input type="checkbox" id="includeValuesClause" checked>
-                        <label for="includeValuesClause">Include VALUES clause</label>
+                        <label for="includeValuesClause" data-i18n="objects.includeValues">Include VALUES clause</label>
                     </div>
                     <div class="checkbox-row" style="margin-left:48px">
                         <input type="checkbox" id="showColumnNames" checked>
-                        <label for="showColumnNames">Show column names</label>
+                        <label for="showColumnNames" data-i18n="objects.showColumnNames">Show column names</label>
                     </div>
                     <div class="checkbox-row" style="margin-left:48px">
                         <input type="checkbox" id="showColumnDataTypes" checked>
-                        <label for="showColumnDataTypes">Show column data types</label>
+                        <label for="showColumnDataTypes" data-i18n="objects.showColumnDataTypes">Show column data types</label>
                     </div>
                     <div class="checkbox-row" style="margin-left:48px">
                         <input type="checkbox" id="insertDefaultValue" checked>
-                        <label for="insertDefaultValue">Insert default value for each column</label>
+                        <label for="insertDefaultValue" data-i18n="objects.insertDefaultValue">Insert default value for each column</label>
                     </div>
 
-                    <h3>EXEC statements</h3>
+                    <h3 data-i18n="objects.execStatements">EXEC statements</h3>
                     <div class="checkbox-row" style="margin-left:0">
                         <input type="checkbox" id="insertParameters" checked>
-                        <label for="insertParameters">Insert parameters for functions and stored procedures</label>
+                        <label for="insertParameters" data-i18n="objects.insertParameters">Insert parameters for functions and stored procedures</label>
                     </div>
                     <div class="checkbox-row" style="margin-left:24px">
                         <input type="checkbox" id="insertDeclareOutput" checked>
-                        <label for="insertDeclareOutput">Insert DECLARE statement for OUTPUT parameters</label>
+                        <label for="insertDeclareOutput" data-i18n="objects.insertDeclareOutput">Insert DECLARE statement for OUTPUT parameters</label>
                     </div>
                     <div class="checkbox-row" style="margin-left:24px">
                         <input type="checkbox" id="insertDefaultParamValue" checked>
-                        <label for="insertDefaultParamValue">Insert default value for each parameter</label>
+                        <label for="insertDefaultParamValue" data-i18n="objects.insertDefaultParamValue">Insert default value for each parameter</label>
                     </div>
                     <div class="checkbox-row" style="margin-left:24px">
                         <input type="checkbox" id="showParameterDataTypes" checked>
-                        <label for="showParameterDataTypes">Show parameter data types</label>
+                        <label for="showParameterDataTypes" data-i18n="objects.showParameterDataTypes">Show parameter data types</label>
                     </div>
 
-                    <h3>OUTPUT clauses</h3>
+                    <h3 data-i18n="objects.outputClauses">OUTPUT clauses</h3>
                     <div class="checkbox-row" style="margin-left:0">
                         <input type="checkbox" id="insertOutputInto">
-                        <label for="insertOutputInto">Insert column list for INTO clause</label>
+                        <label for="insertOutputInto" data-i18n="objects.insertOutputInto">Insert column list for INTO clause</label>
                     </div>
                 </div>
 
@@ -728,12 +875,12 @@ export class StyleFormProvider {
 
                     <div class="checkbox-row" style="margin-left:0">
                         <input type="checkbox" id="casePlaceExprOnNewLine">
-                        <label for="casePlaceExprOnNewLine">Place expressions on new line</label>
+                        <label for="casePlaceExprOnNewLine" data-i18n="case.placeExprOnNewLine">Place expressions on new line</label>
                     </div>
 
                     <h3>WHEN</h3>
                     <div class="form-row">
-                        <label>Place first WHEN on new line:</label>
+                        <label data-i18n="case.placeFirstWhen">Place first WHEN on new line:</label>
                         <select id="caseFirstWhenNewLine" style="width:160px; padding:5px 8px; font-size:13px; font-family:var(--vscode-font-family); background:var(--vscode-input-background); color:var(--vscode-input-foreground); border:1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius:2px;">
                             <option value="never" selected>Never</option>
                             <option value="always">Always</option>
@@ -742,7 +889,7 @@ export class StyleFormProvider {
                     </div>
 
                     <div class="form-row">
-                        <label>WHEN alignment:</label>
+                        <label data-i18n="case.whenAlignment">WHEN alignment:</label>
                         <select id="caseWhenAlignment" style="width:160px; padding:5px 8px; font-size:13px; font-family:var(--vscode-font-family); background:var(--vscode-input-background); color:var(--vscode-input-foreground); border:1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius:2px;">
                             <option value="toFirstItem" selected>To first item</option>
                             <option value="toCase">To CASE</option>
@@ -750,14 +897,14 @@ export class StyleFormProvider {
                         </select>
                     </div>
 
-                    <h3>THEN expressions</h3>
+                    <h3 data-i18n="case.thenExpressions">THEN expressions</h3>
                     <div class="checkbox-row" style="margin-left:0">
                         <input type="checkbox" id="casePlaceThenOnNewLine">
-                        <label for="casePlaceThenOnNewLine">Place THEN on new line</label>
+                        <label for="casePlaceThenOnNewLine" data-i18n="case.placeThenOnNewLine">Place THEN on new line</label>
                     </div>
 
                     <div class="form-row">
-                        <label>Expression alignment:</label>
+                        <label data-i18n="case.exprAlignment">Expression alignment:</label>
                         <select id="caseThenAlignment" style="width:160px; padding:5px 8px; font-size:13px; font-family:var(--vscode-font-family); background:var(--vscode-input-background); color:var(--vscode-input-foreground); border:1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius:2px;">
                             <option value="indentedFromWhen" selected>Indented from WHEN</option>
                             <option value="toCase">To CASE</option>
@@ -768,40 +915,40 @@ export class StyleFormProvider {
                     <h3>ELSE</h3>
                     <div class="checkbox-row" style="margin-left:0">
                         <input type="checkbox" id="casePlaceElseOnNewLine" checked>
-                        <label for="casePlaceElseOnNewLine">Place ELSE on new line</label>
+                        <label for="casePlaceElseOnNewLine" data-i18n="case.placeElseOnNewLine">Place ELSE on new line</label>
                     </div>
 
                     <div class="checkbox-row" style="margin-left:0">
                         <input type="checkbox" id="caseAlignElseToWhen" checked>
-                        <label for="caseAlignElseToWhen">Align ELSE to WHEN</label>
+                        <label for="caseAlignElseToWhen" data-i18n="case.alignElseToWhen">Align ELSE to WHEN</label>
                     </div>
                 </div>
 
                 <!-- Qualification Section -->
                 <div id="section-qualification" style="display:none">
-                    <h2>Inserted code &gt; Qualification</h2>
+                    <h2 data-i18n="qual.title">Inserted code &gt; Qualification</h2>
 
                     <div class="checkbox-row" style="margin-left:0">
                         <input type="checkbox" id="qualifyWithOwner" checked>
-                        <label for="qualifyWithOwner">Qualify object names with owner name</label>
+                        <label for="qualifyWithOwner" data-i18n="qual.qualifyWithOwner">Qualify object names with owner name</label>
                         <span style="font-size:12px; color:var(--vscode-descriptionForeground); margin-left:12px;">e.g. dbo.Address</span>
                     </div>
 
                     <div class="checkbox-row" style="margin-left:0">
                         <input type="checkbox" id="qualifyWithAlias" checked>
-                        <label for="qualifyWithAlias">Qualify column names with aliases</label>
+                        <label for="qualifyWithAlias" data-i18n="qual.qualifyWithAlias">Qualify column names with aliases</label>
                         <span style="font-size:12px; color:var(--vscode-descriptionForeground); margin-left:12px;">e.g. a.AddressLine1</span>
                     </div>
 
                     <div class="checkbox-row" style="margin-left:0">
                         <input type="checkbox" id="qualifyWithTableName">
-                        <label for="qualifyWithTableName">Qualify column names with table name</label>
+                        <label for="qualifyWithTableName" data-i18n="qual.qualifyWithTableName">Qualify column names with table name</label>
                         <span style="font-size:12px; color:var(--vscode-descriptionForeground); margin-left:12px;">e.g. Address.AddressLine1</span>
                     </div>
 
                     <div class="info-bar" style="margin-top:16px">
                         <span class="icon">ℹ</span>
-                        <div>Note: In some situations, inserted object names will always be qualified, regardless of these settings:
+                        <div data-i18n-html="qual.note">Note: In some situations, inserted object names will always be qualified, regardless of these settings:
                             <ul style="margin:8px 0 0 16px; font-size:12px;">
                                 <li>When inserting an object in a non-default schema</li>
                                 <li>When column names would be ambiguous without also specifying the table</li>
@@ -813,13 +960,13 @@ export class StyleFormProvider {
 
                 <!-- Snippets Section -->
                 <div id="section-snippets" style="display:none">
-                    <h2>Snippets</h2>
-                    <p style="font-size:13px; color:var(--vscode-descriptionForeground); margin-bottom:12px;">
+                    <h2 data-i18n="nav.snippets">Snippets</h2>
+                    <p style="font-size:13px; color:var(--vscode-descriptionForeground); margin-bottom:12px;" data-i18n="snippets.desc">
                         You can use snippets to insert frequently used chunks of code into your query.
                     </p>
 
                     <div class="form-row">
-                        <label>Snippet folder:</label>
+                        <label data-i18n="snippets.folder">Snippet folder:</label>
                         <div style="display:flex; gap:8px; align-items:center; flex:1;">
                             <input type="text" id="snippetFolderSnippets" value="${StyleFormProvider.escapeHtml(snippetFolder)}" readonly
                                 style="flex:1; padding:5px 8px; font-size:13px; font-family:var(--vscode-font-family); background:var(--vscode-input-background); color:var(--vscode-input-foreground); border:1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius:2px; outline:none;" />
@@ -829,7 +976,7 @@ export class StyleFormProvider {
 
                     <div class="snippet-list-container">
                         <table class="snippet-table">
-                            <thead><tr><th>Snippet</th><th>Description</th></tr></thead>
+                            <thead><tr><th>Snippet</th><th data-i18n="snippets.description">Description</th></tr></thead>
                             <tbody id="snippetListBody">
                                 <tr><td colspan="2" style="color:var(--vscode-descriptionForeground); text-align:center; padding:16px;">Loading snippets...</td></tr>
                             </tbody>
@@ -839,17 +986,283 @@ export class StyleFormProvider {
                     <div style="margin-top:4px; font-size:11px; color:var(--vscode-descriptionForeground);" id="snippetCountLabel"></div>
 
                     <h3>Code</h3>
-                    <div class="snippet-code" id="snippetCodePreview" style="color:var(--vscode-descriptionForeground);">Select a snippet to preview</div>
+                    <div class="snippet-code" id="snippetCodePreview" style="color:var(--vscode-descriptionForeground);" data-i18n="snippets.selectToPreview">Select a snippet to preview</div>
+                </div>
+
+                <!-- Whitespace Section -->
+                <div id="section-whitespace" style="display:none">
+                    <h2 data-i18n="ws.title">Whitespace</h2>
+
+                    <h3 data-i18n="ws.tabBehavior">Tab behavior</h3>
+                    <div class="form-row">
+                        <label data-i18n="ws.spacesOrTabs">Spaces or tabs:</label>
+                        <select id="ws_spacesOrTabs" style="width:160px; padding:5px 8px; font-size:13px; font-family:var(--vscode-font-family); background:var(--vscode-input-background); color:var(--vscode-input-foreground); border:1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius:2px;">
+                            <option value="spaces" ${fmtConfig.whitespace.spacesOrTabs === 'spaces' ? 'selected' : ''}>Only spaces</option>
+                            <option value="tabs" ${fmtConfig.whitespace.spacesOrTabs === 'tabs' ? 'selected' : ''}>Tabs</option>
+                        </select>
+                    </div>
+                    <div class="form-row">
+                        <label data-i18n="ws.numberOfSpaces">Number of spaces in tabs:</label>
+                        <input type="number" id="ws_numberOfSpaces" value="${fmtConfig.whitespace.numberOfSpacesInTabs}" min="1" max="8"
+                            style="width:60px; padding:5px 8px; font-size:13px; font-family:var(--vscode-font-family); background:var(--vscode-input-background); color:var(--vscode-input-foreground); border:1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius:2px;" />
+                    </div>
+
+                    <h3 data-i18n="ws.wrapping">Wrapping</h3>
+                    <div class="form-row">
+                        <label data-i18n="ws.wrapLines">Wrap lines longer than:</label>
+                        <input type="number" id="ws_wrapLines" value="${fmtConfig.whitespace.wrapLinesLongerThan}" min="0" max="500"
+                            style="width:80px; padding:5px 8px; font-size:13px; font-family:var(--vscode-font-family); background:var(--vscode-input-background); color:var(--vscode-input-foreground); border:1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius:2px;" />
+                        <span style="font-size:12px; color:var(--vscode-descriptionForeground)" data-i18n="ws.characters">characters</span>
+                    </div>
+
+                    <h3 data-i18n="ws.newLines">New lines</h3>
+                    <div class="checkbox-row" style="margin-left:0">
+                        <input type="checkbox" id="ws_preserveEmptyBetween" ${fmtConfig.whitespace.preserveExistingEmptyLinesBetweenStatements ? 'checked' : ''}>
+                        <label for="ws_preserveEmptyBetween" data-i18n="ws.preserveEmptyBetween">Preserve existing empty lines between statements</label>
+                    </div>
+                    <div class="form-row" style="margin-left:24px">
+                        <label data-i18n="ws.emptyLinesBetween">Empty lines between statements:</label>
+                        <select id="ws_emptyLinesBetween" style="width:60px; padding:5px 8px; font-size:13px; font-family:var(--vscode-font-family); background:var(--vscode-input-background); color:var(--vscode-input-foreground); border:1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius:2px;">
+                            <option value="0" ${fmtConfig.whitespace.emptyLinesBetweenStatements === 0 ? 'selected' : ''}>0</option>
+                            <option value="1" ${fmtConfig.whitespace.emptyLinesBetweenStatements === 1 ? 'selected' : ''}>1</option>
+                            <option value="2" ${fmtConfig.whitespace.emptyLinesBetweenStatements === 2 ? 'selected' : ''}>2</option>
+                        </select>
+                    </div>
+                    <div class="form-row" style="margin-left:24px">
+                        <label data-i18n="ws.emptyLinesAfterBatch">Empty lines after batch separator:</label>
+                        <select id="ws_emptyLinesAfterBatch" style="width:60px; padding:5px 8px; font-size:13px; font-family:var(--vscode-font-family); background:var(--vscode-input-background); color:var(--vscode-input-foreground); border:1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius:2px;">
+                            <option value="0" ${fmtConfig.whitespace.emptyLinesAfterBatchSeparator === 0 ? 'selected' : ''}>0</option>
+                            <option value="1" ${fmtConfig.whitespace.emptyLinesAfterBatchSeparator === 1 ? 'selected' : ''}>1</option>
+                            <option value="2" ${fmtConfig.whitespace.emptyLinesAfterBatchSeparator === 2 ? 'selected' : ''}>2</option>
+                        </select>
+                    </div>
+                    <div class="checkbox-row" style="margin-left:0">
+                        <input type="checkbox" id="ws_preserveEmptyWithin" ${fmtConfig.whitespace.preserveExistingEmptyLinesWithinStatements ? 'checked' : ''}>
+                        <label for="ws_preserveEmptyWithin" data-i18n="ws.preserveEmptyWithin">Preserve existing empty lines within statements</label>
+                    </div>
+                    <div class="checkbox-row" style="margin-left:0">
+                        <input type="checkbox" id="ws_alignSingleLineComments" ${fmtConfig.whitespace.alignGroupsOfSingleLineComments ? 'checked' : ''}>
+                        <label for="ws_alignSingleLineComments" data-i18n="ws.alignSingleLineComments">Align groups of single-line comments</label>
+                    </div>
+                    <div class="checkbox-row" style="margin-left:0">
+                        <input type="checkbox" id="ws_alignMultilineComments" ${fmtConfig.whitespace.alignMultilineCommentsMatchingCommonPatterns ? 'checked' : ''}>
+                        <label for="ws_alignMultilineComments" data-i18n="ws.alignMultilineComments">Align multiline comments matching common patterns</label>
+                    </div>
+                </div>
+
+                <!-- Data DML Section -->
+                <div id="section-dataDml" style="display:none">
+                    <h2 data-i18n="nav.dataDml">Data (DML)</h2>
+                    <p style="font-size:12px; color:var(--vscode-descriptionForeground); margin-bottom:12px;" data-i18n="dml.desc">These options apply to SELECT, INSERT, UPDATE and DELETE statements</p>
+
+                    <h3 data-i18n="dml.clauses">Clauses</h3>
+                    <div class="form-row">
+                        <label data-i18n="dml.clauseAlignment">Clause alignment:</label>
+                        <select id="dml_clauseAlignment" style="width:160px; padding:5px 8px; font-size:13px; font-family:var(--vscode-font-family); background:var(--vscode-input-background); color:var(--vscode-input-foreground); border:1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius:2px;">
+                            <option value="toStatement" ${fmtConfig.dataDml.clauseAlignment === 'toStatement' ? 'selected' : ''}>To statement</option>
+                            <option value="toKeyword" ${fmtConfig.dataDml.clauseAlignment === 'toKeyword' ? 'selected' : ''}>To keyword</option>
+                        </select>
+                    </div>
+                    <div class="form-row">
+                        <label data-i18n="dml.clauseIndentation">Clause indentation:</label>
+                        <select id="dml_clauseIndentation" style="width:60px; padding:5px 8px; font-size:13px; font-family:var(--vscode-font-family); background:var(--vscode-input-background); color:var(--vscode-input-foreground); border:1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius:2px;">
+                            <option value="0" ${fmtConfig.dataDml.clauseIndentation === 0 ? 'selected' : ''}>0</option>
+                            <option value="1" ${fmtConfig.dataDml.clauseIndentation === 1 ? 'selected' : ''}>1</option>
+                            <option value="2" ${fmtConfig.dataDml.clauseIndentation === 2 ? 'selected' : ''}>2</option>
+                        </select>
+                    </div>
+
+                    <h3 data-i18n="dml.listItems">List items</h3>
+                    <div class="form-row">
+                        <label data-i18n="dml.placeFromOnNewLine">Place FROM table on new line:</label>
+                        <select id="dml_placeFromOnNewLine" style="width:100px; padding:5px 8px; font-size:13px; font-family:var(--vscode-font-family); background:var(--vscode-input-background); color:var(--vscode-input-foreground); border:1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius:2px;">
+                            <option value="never" ${fmtConfig.dataDml.placeFromTableOnNewLine === 'never' ? 'selected' : ''}>Never</option>
+                            <option value="always" ${fmtConfig.dataDml.placeFromTableOnNewLine === 'always' ? 'selected' : ''}>Always</option>
+                            <option value="ifLong" ${fmtConfig.dataDml.placeFromTableOnNewLine === 'ifLong' ? 'selected' : ''}>If long</option>
+                        </select>
+                    </div>
+                    <div class="form-row">
+                        <label data-i18n="dml.placeWhereOnNewLine">Place WHERE condition on new line:</label>
+                        <select id="dml_placeWhereOnNewLine" style="width:100px; padding:5px 8px; font-size:13px; font-family:var(--vscode-font-family); background:var(--vscode-input-background); color:var(--vscode-input-foreground); border:1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius:2px;">
+                            <option value="never" ${fmtConfig.dataDml.placeWhereConditionOnNewLine === 'never' ? 'selected' : ''}>Never</option>
+                            <option value="always" ${fmtConfig.dataDml.placeWhereConditionOnNewLine === 'always' ? 'selected' : ''}>Always</option>
+                            <option value="ifLong" ${fmtConfig.dataDml.placeWhereConditionOnNewLine === 'ifLong' ? 'selected' : ''}>If long</option>
+                        </select>
+                    </div>
+                    <div class="form-row">
+                        <label data-i18n="dml.placeGroupByOnNewLine">Place GROUP BY / ORDER BY expression on new line:</label>
+                        <select id="dml_placeGroupByOnNewLine" style="width:100px; padding:5px 8px; font-size:13px; font-family:var(--vscode-font-family); background:var(--vscode-input-background); color:var(--vscode-input-foreground); border:1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius:2px;">
+                            <option value="never" ${fmtConfig.dataDml.placeGroupByOrderByExpressionOnNewLine === 'never' ? 'selected' : ''}>Never</option>
+                            <option value="always" ${fmtConfig.dataDml.placeGroupByOrderByExpressionOnNewLine === 'always' ? 'selected' : ''}>Always</option>
+                            <option value="ifLong" ${fmtConfig.dataDml.placeGroupByOrderByExpressionOnNewLine === 'ifLong' ? 'selected' : ''}>If long</option>
+                        </select>
+                    </div>
+                    <div class="checkbox-row" style="margin-left:0">
+                        <input type="checkbox" id="dml_placeInsertTableOnNewLine" ${fmtConfig.dataDml.placeInsertTableOnNewLine ? 'checked' : ''}>
+                        <label for="dml_placeInsertTableOnNewLine" data-i18n="dml.placeInsertTableOnNewLine">Place INSERT table on new line</label>
+                    </div>
+
+                    <h3 data-i18n="dml.distinctTop">DISTINCT / TOP clause</h3>
+                    <div class="checkbox-row" style="margin-left:0">
+                        <input type="checkbox" id="dml_placeDistinctTopOnNewLine" ${fmtConfig.dataDml.placeDistinctTopOnNewLine ? 'checked' : ''}>
+                        <label for="dml_placeDistinctTopOnNewLine" data-i18n="dml.placeDistinctTopOnNewLine">Place DISTINCT / TOP clause on new line</label>
+                    </div>
+                    <div class="checkbox-row" style="margin-left:0">
+                        <input type="checkbox" id="dml_addNewLineAfterDistinctTop" ${fmtConfig.dataDml.addNewLineAfterDistinctTop ? 'checked' : ''}>
+                        <label for="dml_addNewLineAfterDistinctTop" data-i18n="dml.addNewLineAfterDistinctTop">Add new line after DISTINCT / TOP clause</label>
+                    </div>
+
+                    <h3 data-i18n="dml.shortDml">Short DML statements</h3>
+                    <div class="checkbox-row" style="margin-left:0">
+                        <input type="checkbox" id="dml_collapseShort" ${fmtConfig.dataDml.collapseShortDmlStatements ? 'checked' : ''}>
+                        <label for="dml_collapseShort" data-i18n="dml.collapseShort">Collapse statements shorter than</label>
+                        <input type="number" id="dml_collapseShortLen" value="${fmtConfig.dataDml.collapseShortDmlShorterThan}" min="0" max="500"
+                            style="width:60px; margin:0 6px; padding:5px 8px; font-size:13px; font-family:var(--vscode-font-family); background:var(--vscode-input-background); color:var(--vscode-input-foreground); border:1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius:2px;" />
+                        <span style="font-size:12px; color:var(--vscode-descriptionForeground)" data-i18n="ws.characters">characters</span>
+                    </div>
+
+                    <h3 data-i18n="dml.subqueries">Subqueries</h3>
+                    <div class="checkbox-row" style="margin-left:0">
+                        <input type="checkbox" id="dml_collapseSubqueries" checked>
+                        <label for="dml_collapseSubqueries" data-i18n="dml.collapseSubqueries">Collapse subqueries shorter than</label>
+                        <input type="number" id="dml_collapseSubqueriesLen" value="${fmtConfig.dataDml.collapseSubqueriesShorterThan}" min="0" max="500"
+                            style="width:60px; margin:0 6px; padding:5px 8px; font-size:13px; font-family:var(--vscode-font-family); background:var(--vscode-input-background); color:var(--vscode-input-foreground); border:1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius:2px;" />
+                        <span style="font-size:12px; color:var(--vscode-descriptionForeground)" data-i18n="ws.characters">characters</span>
+                    </div>
+                </div>
+
+                <!-- Schema DDL Section -->
+                <div id="section-schemaDdl" style="display:none">
+                    <h2 data-i18n="nav.schemaDdl">Schema (DDL)</h2>
+                    <p style="font-size:12px; color:var(--vscode-descriptionForeground); margin-bottom:12px;" data-i18n="ddl.desc">These options apply to CREATE and ALTER statements</p>
+
+                    <h3 data-i18n="ddl.dataTypes">Data types and constraints</h3>
+                    <div class="checkbox-row" style="margin-left:0">
+                        <input type="checkbox" id="ddl_alignDataTypes" ${fmtConfig.schemaDdl.alignDataTypesAndConstraints ? 'checked' : ''}>
+                        <label for="ddl_alignDataTypes" data-i18n="ddl.alignDataTypes">Align data types and constraints</label>
+                    </div>
+                    <div class="checkbox-row" style="margin-left:0">
+                        <input type="checkbox" id="ddl_placeConstraintsOnNewLines" ${fmtConfig.schemaDdl.placeConstraintsOnNewLines ? 'checked' : ''}>
+                        <label for="ddl_placeConstraintsOnNewLines" data-i18n="ddl.placeConstraintsOnNewLines">Place constraints on new lines</label>
+                    </div>
+                    <div class="form-row" style="margin-left:24px">
+                        <label data-i18n="ddl.placeConstraintCols">Place constraint columns on new lines:</label>
+                        <select id="ddl_placeConstraintCols" style="width:200px; padding:5px 8px; font-size:13px; font-family:var(--vscode-font-family); background:var(--vscode-input-background); color:var(--vscode-input-foreground); border:1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius:2px;">
+                            <option value="never" ${fmtConfig.schemaDdl.placeConstraintColumnsOnNewLines === 'never' ? 'selected' : ''}>Never</option>
+                            <option value="always" ${fmtConfig.schemaDdl.placeConstraintColumnsOnNewLines === 'always' ? 'selected' : ''}>Always</option>
+                            <option value="ifLongerOrMultiple" ${fmtConfig.schemaDdl.placeConstraintColumnsOnNewLines === 'ifLongerOrMultiple' ? 'selected' : ''}>If longer or multiple columns</option>
+                        </select>
+                    </div>
+
+                    <h3 data-i18n="ddl.procedures">Procedures</h3>
+                    <div class="form-row">
+                        <label data-i18n="ddl.placeFirstParam">Place first procedure parameter on new line:</label>
+                        <select id="ddl_placeFirstParam" style="width:120px; padding:5px 8px; font-size:13px; font-family:var(--vscode-font-family); background:var(--vscode-input-background); color:var(--vscode-input-foreground); border:1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius:2px;">
+                            <option value="never" ${fmtConfig.schemaDdl.placeFirstProcedureParameterOnNewLine === 'never' ? 'selected' : ''}>Never</option>
+                            <option value="always" ${fmtConfig.schemaDdl.placeFirstProcedureParameterOnNewLine === 'always' ? 'selected' : ''}>Always</option>
+                            <option value="ifMultiple" ${fmtConfig.schemaDdl.placeFirstProcedureParameterOnNewLine === 'ifMultiple' ? 'selected' : ''}>If multiple</option>
+                        </select>
+                    </div>
+
+                    <h3 data-i18n="ddl.shortDdl">Short DDL statements</h3>
+                    <div class="checkbox-row" style="margin-left:0">
+                        <input type="checkbox" id="ddl_collapseShort" ${fmtConfig.schemaDdl.collapseShortDdlStatements ? 'checked' : ''}>
+                        <label for="ddl_collapseShort" data-i18n="ddl.collapseShort">Collapse statements shorter than</label>
+                        <input type="number" id="ddl_collapseShortLen" value="${fmtConfig.schemaDdl.collapseShortDdlShorterThan}" min="0" max="500"
+                            style="width:60px; margin:0 6px; padding:5px 8px; font-size:13px; font-family:var(--vscode-font-family); background:var(--vscode-input-background); color:var(--vscode-input-foreground); border:1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius:2px;" />
+                        <span style="font-size:12px; color:var(--vscode-descriptionForeground)" data-i18n="ws.characters">characters</span>
+                    </div>
+                </div>
+
+                <!-- Control Flow Section -->
+                <div id="section-controlFlow" style="display:none">
+                    <h2 data-i18n="nav.controlFlow">Control flow</h2>
+                    <p style="font-size:12px; color:var(--vscode-descriptionForeground); margin-bottom:12px;" data-i18n="cf.desc">These options apply to BEGIN...END, IF...ELSE and TRY...CATCH blocks</p>
+
+                    <h3>BEGIN...END</h3>
+                    <div class="checkbox-row" style="margin-left:0">
+                        <input type="checkbox" id="cf_placeBeginOnNewLine" ${fmtConfig.controlFlow.placeBeginOnNewLine ? 'checked' : ''}>
+                        <label for="cf_placeBeginOnNewLine" data-i18n="cf.placeBeginOnNewLine">Place BEGIN keyword on new line</label>
+                    </div>
+                    <div class="checkbox-row" style="margin-left:24px">
+                        <input type="checkbox" id="cf_indentBeginEnd" ${fmtConfig.controlFlow.indentBeginEndKeywords ? 'checked' : ''}>
+                        <label for="cf_indentBeginEnd" data-i18n="cf.indentBeginEnd">Indent BEGIN END keywords</label>
+                    </div>
+
+                    <h3 data-i18n="cf.controlFlowStatements">Control flow statements</h3>
+                    <div class="checkbox-row" style="margin-left:0">
+                        <input type="checkbox" id="cf_indentContents" ${fmtConfig.controlFlow.indentContentsOfStatements ? 'checked' : ''}>
+                        <label for="cf_indentContents" data-i18n="cf.indentContents">Indent contents of statements</label>
+                    </div>
+
+                    <h3 data-i18n="cf.shortControlFlow">Short control flow statements</h3>
+                    <div class="checkbox-row" style="margin-left:0">
+                        <input type="checkbox" id="cf_collapseShort" ${fmtConfig.controlFlow.collapseShortStatements ? 'checked' : ''}>
+                        <label for="cf_collapseShort" data-i18n="cf.collapseShort">Collapse statements shorter than</label>
+                        <input type="number" id="cf_collapseShortLen" value="${fmtConfig.controlFlow.collapseShortStatementsShorterThan}" min="0" max="500"
+                            style="width:60px; margin:0 6px; padding:5px 8px; font-size:13px; font-family:var(--vscode-font-family); background:var(--vscode-input-background); color:var(--vscode-input-foreground); border:1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius:2px;" />
+                        <span style="font-size:12px; color:var(--vscode-descriptionForeground)" data-i18n="ws.characters">characters</span>
+                    </div>
+                </div>
+
+                <!-- Variables Section -->
+                <div id="section-variables" style="display:none">
+                    <h2 data-i18n="nav.variables">Variables</h2>
+
+                    <h3>DECLARE</h3>
+                    <div class="checkbox-row" style="margin-left:0">
+                        <input type="checkbox" id="var_alignDataTypes" ${fmtConfig.variables.declareAlignDataTypesAndValues ? 'checked' : ''}>
+                        <label for="var_alignDataTypes" data-i18n="var.alignDataTypes">Align data types and values</label>
+                    </div>
+                    <div class="checkbox-row" style="margin-left:0">
+                        <input type="checkbox" id="var_addSpaceBetween" ${fmtConfig.variables.declareAddSpaceBetweenTypeAndPrecision ? 'checked' : ''}>
+                        <label for="var_addSpaceBetween" data-i18n="var.addSpaceBetween">Add a space between data type and precision</label>
+                    </div>
+
+                    <h3>SET</h3>
+                    <div class="checkbox-row" style="margin-left:0">
+                        <input type="checkbox" id="var_setPlaceValueOnNewLine" ${fmtConfig.variables.setPlaceAssignedValueOnNewLine ? 'checked' : ''}>
+                        <label for="var_setPlaceValueOnNewLine" data-i18n="var.setPlaceValueOnNewLine">Place assigned value on new line if longer than wrap column</label>
+                    </div>
+                    <div class="checkbox-row" style="margin-left:24px">
+                        <input type="checkbox" id="var_setPlaceEqualsOnNewLine" ${fmtConfig.variables.setPlaceEqualsSignOnNewLine ? 'checked' : ''}>
+                        <label for="var_setPlaceEqualsOnNewLine" data-i18n="var.setPlaceEqualsOnNewLine">Place equals sign on new line</label>
+                    </div>
+                </div>
+
+                <!-- Styles Section -->
+                <div id="section-styles">
+                    <h2 data-i18n="nav.styles">Styles</h2>
+
+                    <div class="form-row">
+                        <label data-i18n="styles.styleFile">Style file:</label>
+                        <div style="display:flex; gap:8px; align-items:center; flex:1;">
+                            <input type="text" id="styleFilePath" value="${StyleFormProvider.escapeHtml(styleFile)}" readonly
+                                style="flex:1; padding:5px 8px; font-size:13px; font-family:var(--vscode-font-family); background:var(--vscode-input-background); color:var(--vscode-input-foreground); border:1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius:2px; outline:none;" />
+                            <button class="btn btn-secondary" onclick="loadFile()">...</button>
+                        </div>
+                    </div>
+
+                    <div style="display:flex; align-items:center; gap:8px; margin-top:8px;">
+                        <span style="font-size:13px; color:var(--vscode-descriptionForeground);" id="styleName">${StyleFormProvider.escapeHtml(styleName)}</span>
+                        <span style="flex:1"></span>
+                        <button class="btn btn-link" onclick="reset()" style="font-size:12px;" data-i18n="footer.reset">Reset</button>
+                    </div>
+
+                    <div class="info-bar" style="margin-top:16px">
+                        <span class="icon">ℹ</span>
+                        <span data-i18n="styles.note">Load a Redgate SQL Prompt style file (.json) to apply formatting rules. Reset restores defaults.</span>
+                    </div>
                 </div>
 
                 <!-- Casing Section -->
-                <div id="section-casing">
-                    <h2>Casing</h2>
+                <div id="section-casing" style="display:none">
+                    <h2 data-i18n="nav.casing">Casing</h2>
 
-                    <h3>Built-in keywords, functions and types</h3>
+                    <h3 data-i18n="casing.builtInTitle">Built-in keywords, functions and types</h3>
 
                     <div class="form-row">
-                        <label>Reserved keywords:</label>
+                        <label data-i18n="casing.reservedKeywords">Reserved keywords:</label>
                         <select id="reservedKeywords" onchange="updatePreview()">
                             <option value="upperCamelCase" ${options.reservedKeywords === 'upperCamelCase' ? 'selected' : ''}>UpperCamelCase</option>
                             <option value="uppercase" ${options.reservedKeywords === 'uppercase' ? 'selected' : ''}>UPPERCASE</option>
@@ -859,7 +1272,7 @@ export class StyleFormProvider {
                     </div>
 
                     <div class="form-row">
-                        <label>Built-in functions:</label>
+                        <label data-i18n="casing.builtInFunctions">Built-in functions:</label>
                         <select id="builtInFunctions" onchange="updatePreview()">
                             <option value="uppercase" ${options.builtInFunctions === 'uppercase' ? 'selected' : ''}>UPPERCASE</option>
                             <option value="upperCamelCase" ${options.builtInFunctions === 'upperCamelCase' ? 'selected' : ''}>UpperCamelCase</option>
@@ -869,7 +1282,7 @@ export class StyleFormProvider {
                     </div>
 
                     <div class="form-row">
-                        <label>Built-in data types:</label>
+                        <label data-i18n="casing.builtInDataTypes">Built-in data types:</label>
                         <select id="builtInDataTypes" onchange="updatePreview()">
                             <option value="upperCamelCase" ${options.builtInDataTypes === 'upperCamelCase' ? 'selected' : ''}>UpperCamelCase</option>
                             <option value="uppercase" ${options.builtInDataTypes === 'uppercase' ? 'selected' : ''}>UPPERCASE</option>
@@ -880,22 +1293,22 @@ export class StyleFormProvider {
 
                     <div class="info-bar">
                         <span class="icon">ℹ</span>
-                        These options will also format your code when you use Format SQL (Ctrl+K Y).
+                        <span data-i18n="casing.formatNote">These options will also format your code when you use Format SQL (Ctrl+K Y).</span>
                     </div>
 
-                    <h3>User-defined objects</h3>
+                    <h3 data-i18n="casing.userDefinedObjects">User-defined objects</h3>
                     <div class="checkbox-row">
                         <input type="checkbox" id="useObjectDefinitionCase" checked disabled>
-                        <label for="useObjectDefinitionCase">Use object definition case</label>
+                        <label for="useObjectDefinitionCase" data-i18n="casing.useObjectDefinitionCase">Use object definition case</label>
                     </div>
                 </div>
 
                 <!-- Lists Section -->
                 <div id="section-lists" style="display:none">
-                    <h2>Lists</h2>
+                    <h2 data-i18n="nav.lists">Lists</h2>
 
                     <div class="form-row">
-                        <label>Max line length:</label>
+                        <label data-i18n="lists.maxLineLength">Max line length:</label>
                         <input type="number" id="maxLineLength" value="${layout.maxLineLength}" min="0" max="500"
                             style="width:100px; padding:5px 8px; font-size:13px; font-family:var(--vscode-font-family); background:var(--vscode-input-background); color:var(--vscode-input-foreground); border:1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius:2px; outline:none;"
                             onchange="updatePreview()" />
@@ -904,43 +1317,43 @@ export class StyleFormProvider {
 
                     <div class="checkbox-row" style="margin-left:0">
                         <input type="checkbox" id="placeCommasBeforeItems" ${layout.placeCommasBeforeItems ? 'checked' : ''} onchange="updatePreview()">
-                        <label for="placeCommasBeforeItems">Place commas before items</label>
+                        <label for="placeCommasBeforeItems" data-i18n="lists.placeCommasBefore">Place commas before items</label>
                     </div>
 
                     <div class="checkbox-row" style="margin-left:0">
                         <input type="checkbox" id="alignItemsToTabStops" ${layout.alignItemsToTabStops ? 'checked' : ''} onchange="updatePreview()">
-                        <label for="alignItemsToTabStops">Align items to tab stops (clause padding)</label>
+                        <label for="alignItemsToTabStops" data-i18n="lists.alignToTabStops">Align items to tab stops (clause padding)</label>
                     </div>
 
                     <div class="info-bar">
                         <span class="icon">ℹ</span>
-                        These options affect SELECT column list formatting.
+                        <span data-i18n="lists.note">These options affect SELECT column list formatting.</span>
                     </div>
                 </div>
 
                 <!-- Aliases Section -->
                 <div id="section-aliases" style="display:none">
-                    <h2>Aliases</h2>
+                    <h2 data-i18n="nav.aliases">Aliases</h2>
 
                     <div class="checkbox-row" style="margin-left:0">
                         <input type="checkbox" id="assignAliases" ${aliases.assignAliases ? 'checked' : ''}>
-                        <label for="assignAliases">Assign aliases</label>
+                        <label for="assignAliases" data-i18n="aliases.assignAliases">Assign aliases</label>
                     </div>
 
                     <div class="checkbox-row" style="margin-left:24px">
                         <input type="checkbox" id="includeAS" ${aliases.includeAS ? 'checked' : ''}>
-                        <label for="includeAS">Include AS in alias definition</label>
+                        <label for="includeAS" data-i18n="aliases.includeAS">Include AS in alias definition</label>
                     </div>
 
                     <div class="checkbox-row" style="margin-left:24px">
                         <input type="checkbox" id="capitaliseAliases" ${aliases.capitaliseAliases ? 'checked' : ''}>
-                        <label for="capitaliseAliases">Capitalise aliases</label>
+                        <label for="capitaliseAliases" data-i18n="aliases.capitaliseAliases">Capitalise aliases</label>
                     </div>
 
-                    <h3>Prefixes to ignore</h3>
+                    <h3 data-i18n="aliases.prefixesToIgnore">Prefixes to ignore</h3>
                     <div class="info-bar">
                         <span class="icon">ℹ</span>
-                        When generating an alias from a table name, ignore these prefixes.
+                        <span data-i18n="aliases.prefixesNote">When generating an alias from a table name, ignore these prefixes.</span>
                     </div>
 
                     <div style="margin:8px 0; display:flex; gap:8px; align-items:flex-start;">
@@ -953,42 +1366,42 @@ export class StyleFormProvider {
 
                 <!-- Special Characters Section -->
                 <div id="section-specialChars" style="display:none">
-                    <h2>Special characters</h2>
+                    <h2 data-i18n="nav.specialChars">Special characters</h2>
 
-                    <h3>Brackets</h3>
+                    <h3 data-i18n="special.brackets">Brackets</h3>
                     <div class="checkbox-row" style="margin-left:0">
                         <input type="checkbox" id="encloseInBrackets">
-                        <label for="encloseInBrackets">Enclose identifiers within square brackets [ ]</label>
+                        <label for="encloseInBrackets" data-i18n="special.encloseInBrackets">Enclose identifiers within square brackets [ ]</label>
                     </div>
                     <div class="checkbox-row" style="margin-left:0">
                         <input type="checkbox" id="addParentheses" checked>
-                        <label for="addParentheses">Add parentheses ( ) when inserting a function or data type</label>
+                        <label for="addParentheses" data-i18n="special.addParentheses">Add parentheses ( ) when inserting a function or data type</label>
                     </div>
 
-                    <h3>Closing characters</h3>
+                    <h3 data-i18n="special.closingChars">Closing characters</h3>
                     <div class="checkbox-row" style="margin-left:0">
                         <input type="checkbox" id="removeDuplicateClosing" checked>
-                        <label for="removeDuplicateClosing">Remove duplicate closing characters as you type</label>
+                        <label for="removeDuplicateClosing" data-i18n="special.removeDuplicate">Remove duplicate closing characters as you type</label>
                     </div>
 
                     <div class="info-bar">
                         <span class="icon">ℹ</span>
-                        Auto-closing for quotes, parentheses and brackets is handled by VS Code's built-in settings (editor.autoClosingBrackets, editor.autoClosingQuotes).
+                        <span data-i18n="special.note">Auto-closing for quotes, parentheses and brackets is handled by VS Code's built-in settings (editor.autoClosingBrackets, editor.autoClosingQuotes).</span>
                     </div>
                 </div>
 
                 <!-- History Section -->
                 <div id="section-history" style="display:none">
-                    <h2>Queries &gt; History</h2>
+                    <h2 data-i18n="history.title">Queries &gt; History</h2>
 
                     <div class="checkbox-row" style="margin-left:0">
                         <input type="checkbox" id="enableSqlHistory" checked>
-                        <label for="enableSqlHistory">Enable SQL History</label>
+                        <label for="enableSqlHistory" data-i18n="history.enableSqlHistory">Enable SQL History</label>
                     </div>
 
-                    <h3>Query size</h3>
+                    <h3 data-i18n="history.querySize">Query size</h3>
                     <div class="form-row">
-                        <label>Maximum query size:</label>
+                        <label data-i18n="history.maxQuerySize">Maximum query size:</label>
                         <select id="maxQuerySize" style="width:100px; padding:5px 8px; font-size:13px; font-family:var(--vscode-font-family); background:var(--vscode-input-background); color:var(--vscode-input-foreground); border:1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius:2px;">
                             <option value="256">256 KB</option>
                             <option value="512">512 KB</option>
@@ -997,76 +1410,103 @@ export class StyleFormProvider {
                             <option value="5120">5 MB</option>
                         </select>
                     </div>
-                    <p style="font-size:12px; color:var(--vscode-descriptionForeground); margin-left:196px;">
+                    <p style="font-size:12px; color:var(--vscode-descriptionForeground); margin-left:196px;" data-i18n="history.maxQuerySizeNote">
                         Queries larger than the maximum size won't be stored in the history
                     </p>
 
-                    <h3>Open queries</h3>
+                    <h3 data-i18n="history.openQueries">Open queries</h3>
                     <div class="checkbox-row" style="margin-left:0">
                         <input type="checkbox" id="restoreOpenQueries" checked>
-                        <label for="restoreOpenQueries">Restore open queries when VS Code starts</label>
+                        <label for="restoreOpenQueries" data-i18n="history.restoreOpenQueries">Restore open queries when VS Code starts</label>
                     </div>
                     <div class="form-row" style="margin-left:24px">
-                        <label>Maximum number of queries to restore:</label>
+                        <label data-i18n="history.maxQueriesToRestore">Maximum number of queries to restore:</label>
                         <input type="number" id="maxQueriesToRestore" value="20" min="1" max="100"
                             style="width:70px; padding:5px 8px; font-size:13px; font-family:var(--vscode-font-family); background:var(--vscode-input-background); color:var(--vscode-input-foreground); border:1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius:2px;" />
                     </div>
 
-                    <h3>Clear SQL History</h3>
+                    <h3 data-i18n="history.clearHistory">Clear SQL History</h3>
                     <div class="checkbox-row" style="margin-left:0">
                         <input type="checkbox" id="autoRemoveOldQueries" checked>
-                        <label for="autoRemoveOldQueries">Automatically remove queries older than</label>
+                        <label for="autoRemoveOldQueries" data-i18n="history.autoRemoveOldQueries">Automatically remove queries older than</label>
                         <input type="number" id="historyRetentionDays" value="7" min="1" max="365"
                             style="width:60px; margin:0 6px; padding:5px 8px; font-size:13px; font-family:var(--vscode-font-family); background:var(--vscode-input-background); color:var(--vscode-input-foreground); border:1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius:2px;" />
-                        <span style="font-size:13px;">days</span>
-                    </div>
-                </div>
-
-                <!-- Paths Section -->
-                <div id="section-paths" style="display:none">
-                    <h2>Paths</h2>
-
-                    <div class="form-row">
-                        <label>Snippet folder:</label>
-                        <div style="display:flex; gap:8px; align-items:center; flex:1;">
-                            <input type="text" id="snippetFolder" value="${StyleFormProvider.escapeHtml(snippetFolder)}" readonly
-                                style="flex:1; padding:5px 8px; font-size:13px; font-family:var(--vscode-font-family); background:var(--vscode-input-background); color:var(--vscode-input-foreground); border:1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius:2px; outline:none;" />
-                            <button class="btn btn-secondary" onclick="browseSnippetFolder()">Browse...</button>
-                        </div>
-                    </div>
-
-                    <div class="form-row">
-                        <label>Style file:</label>
-                        <div style="display:flex; gap:8px; align-items:center; flex:1;">
-                            <input type="text" id="styleFilePath" value="${StyleFormProvider.escapeHtml(styleFile)}" readonly
-                                style="flex:1; padding:5px 8px; font-size:13px; font-family:var(--vscode-font-family); background:var(--vscode-input-background); color:var(--vscode-input-foreground); border:1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius:2px; outline:none;" />
-                            <button class="btn btn-secondary" onclick="loadFile()">Browse...</button>
-                        </div>
-                    </div>
-
-                    <div class="info-bar">
-                        <span class="icon">ℹ</span>
-                        Snippet folder: Redgate SQL Prompt snippet JSON dosyaları. Style file: Redgate formatlama stili (.json).
+                        <span style="font-size:13px;" data-i18n="history.days">days</span>
                     </div>
                 </div>
 
                 <!-- Connections Section -->
                 <div id="section-connections" style="display:none">
-                    <h2>Connections</h2>
+                    <h2 data-i18n="nav.connections">Connections</h2>
 
                     <div class="info-bar">
                         <span class="icon">ℹ</span>
-                        ${connectionCount} connection profile kayıtlı.
+                        <span id="connectionCountInfo">${connectionCount}</span> <span data-i18n="conn.profilesSaved">connection profiles saved.</span>
                     </div>
 
-                    <h3>Import connections</h3>
-                    <p style="font-size:13px; margin-bottom:12px; color:var(--vscode-descriptionForeground);">
-                        Başka bir makinedeki bağlantı ayarlarını JSON dosyasından içe aktarın.
+                    <h3 data-i18n="conn.importConnections">Import connections</h3>
+                    <p style="font-size:13px; margin-bottom:12px; color:var(--vscode-descriptionForeground);" data-i18n="conn.importDesc">
+                        Import connection settings from a JSON file from another machine.
                     </p>
 
                     <div style="display:flex; gap:8px;">
-                        <button class="btn btn-secondary" onclick="importConnections()">Import from JSON...</button>
-                        <button class="btn btn-secondary" onclick="exportConnections()">Export to JSON...</button>
+                        <button class="btn btn-secondary" onclick="importConnections()" data-i18n="conn.importFromJson">Import from JSON...</button>
+                        <button class="btn btn-secondary" onclick="exportConnections()" data-i18n="conn.exportToJson">Export to JSON...</button>
+                    </div>
+                </div>
+
+                <!-- Language Section -->
+                <div id="section-language" style="display:none">
+                    <h2 data-i18n="nav.language">Language</h2>
+
+                    <div class="form-row">
+                        <label data-i18n="lang.displayLanguage">Display language:</label>
+                        <select id="langSelectInline" onchange="setLang(this.value); document.getElementById('langSelect').value=this.value;" style="padding:5px 8px; font-size:13px; font-family:var(--vscode-font-family); background:var(--vscode-input-background); color:var(--vscode-input-foreground); border:1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius:2px;">
+                            ${langOptionsHtml}
+                        </select>
+                    </div>
+
+                    <div class="info-bar">
+                        <span class="icon">ℹ</span>
+                        <span data-i18n="lang.note">Changes apply immediately. Custom languages can be added via the Translation Editor.</span>
+                    </div>
+
+                    <h3 data-i18n="lang.translationEditor">Translation Editor</h3>
+                    <p style="font-size:13px; color:var(--vscode-descriptionForeground); margin-bottom:12px;" data-i18n="lang.translationEditorDesc">
+                        Create or edit translations for custom languages. Built-in languages (en, tr) are read-only.
+                    </p>
+
+                    <div style="display:flex; gap:8px; align-items:center; margin-bottom:16px;">
+                        <select id="editLangSelect" style="padding:5px 8px; font-size:13px; font-family:var(--vscode-font-family); background:var(--vscode-input-background); color:var(--vscode-input-foreground); border:1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius:2px; width:160px;">
+                            <option value="">— select —</option>
+                            ${langOptionsHtml}
+                        </select>
+                        <input type="text" id="newLangInput" placeholder="new: de, fr, es..." maxlength="5" style="width:120px; padding:5px 8px; font-size:13px; font-family:var(--vscode-font-family); background:var(--vscode-input-background); color:var(--vscode-input-foreground); border:1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius:2px;" />
+                        <button class="btn btn-secondary" onclick="createNewLang()">Create</button>
+                        <button class="btn btn-secondary" onclick="openTranslationEditor()" data-i18n="lang.openFullEditor">Open full editor</button>
+                    </div>
+
+                    <div id="langEditArea" style="display:none;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                            <span id="langEditTitle" style="font-weight:600;"></span>
+                            <div style="display:flex; gap:8px;">
+                                <input type="text" id="langFilterBox" placeholder="Filter..." oninput="filterLangRows()" style="padding:4px 8px; font-size:12px; font-family:var(--vscode-font-family); background:var(--vscode-input-background); color:var(--vscode-input-foreground); border:1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius:2px; width:140px;" />
+                                <button class="btn btn-primary" onclick="saveLangEdits()" id="saveLangBtn">Save</button>
+                            </div>
+                        </div>
+                        <div style="max-height:400px; overflow-y:auto; border:1px solid var(--vscode-panel-border); border-radius:2px;">
+                            <table style="width:100%; border-collapse:collapse;">
+                                <thead>
+                                    <tr>
+                                        <th style="position:sticky; top:0; background:var(--vscode-editorWidget-background); padding:6px 8px; text-align:left; font-size:11px; border-bottom:1px solid var(--vscode-panel-border);">Key</th>
+                                        <th style="position:sticky; top:0; background:var(--vscode-editorWidget-background); padding:6px 8px; text-align:left; font-size:11px; border-bottom:1px solid var(--vscode-panel-border);">English</th>
+                                        <th style="position:sticky; top:0; background:var(--vscode-editorWidget-background); padding:6px 8px; text-align:left; font-size:11px; border-bottom:1px solid var(--vscode-panel-border);" data-i18n="lang.translation">Translation</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="langEditBody"></tbody>
+                            </table>
+                        </div>
+                        <div style="margin-top:4px; font-size:11px; color:var(--vscode-descriptionForeground);" id="langEditProgress"></div>
                     </div>
                 </div>
             </div>
@@ -1078,15 +1518,134 @@ export class StyleFormProvider {
     </div>
 
     <div class="footer">
-        <button class="btn btn-link" onclick="loadFile()">Load from file...</button>
-        <span class="file-info" id="fileInfo">${styleFile ? StyleFormProvider.escapeHtml(styleFile) : 'No file — using defaults'}</span>
         <span class="spacer"></span>
-        <button class="btn btn-primary" onclick="save()">Save</button>
-        <button class="btn btn-secondary" onclick="reset()">Reset</button>
+        <button class="btn btn-primary" onclick="save()" data-i18n="footer.save">Save</button>
+        <button class="btn btn-secondary" onclick="reset()" data-i18n="footer.reset">Reset</button>
     </div>
 
     <script>
         const vscode = acquireVsCodeApi();
+        let currentLang = '${lang}';
+
+        const T = JSON.parse('${JSON.stringify(allTranslations).replace(/\\/g, '\\\\').replace(/'/g, "\\'")}');
+
+        function applyLang(lang) {
+            currentLang = lang;
+            const dict = T[lang] || T.en;
+            document.querySelectorAll('[data-i18n]').forEach(el => {
+                const key = el.getAttribute('data-i18n');
+                if (dict[key] !== undefined) el.textContent = dict[key];
+            });
+            document.querySelectorAll('[data-i18n-html]').forEach(el => {
+                const key = el.getAttribute('data-i18n-html');
+                if (dict[key] !== undefined) el.innerHTML = dict[key];
+            });
+        }
+
+        function setLang(lang) {
+            applyLang(lang);
+            vscode.postMessage({ cmd: 'setLang', lang: lang });
+            // Sync all language dropdowns
+            ['langSelect', 'langSelectInline'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.value = lang;
+            });
+        }
+
+        function openTranslationEditor() {
+            vscode.postMessage({ cmd: 'openTranslationEditor' });
+        }
+
+        // Inline translation editor
+        const enKeys = Object.keys(T.en || {});
+        let editLangCode = '';
+        let editLangData = {};
+        let editIsBuiltIn = false;
+
+        document.getElementById('editLangSelect').addEventListener('change', function() {
+            editLangCode = this.value;
+            if (!editLangCode) { document.getElementById('langEditArea').style.display = 'none'; return; }
+            editLangData = T[editLangCode] ? {...T[editLangCode]} : {};
+            editIsBuiltIn = ${JSON.stringify(builtInLangs)}.includes(editLangCode);
+            renderLangEditTable();
+        });
+
+        function createNewLang() {
+            const code = document.getElementById('newLangInput').value.trim().toLowerCase();
+            if (!code) return;
+            editLangCode = code;
+            editLangData = {};
+            editIsBuiltIn = false;
+            // Add to all dropdowns
+            [document.getElementById('editLangSelect'), document.getElementById('langSelect'), document.getElementById('langSelectInline')].forEach(sel => {
+                if (!sel) return;
+                let found = false;
+                for (const o of sel.options) { if (o.value === code) { found = true; break; } }
+                if (!found) {
+                    const opt = document.createElement('option');
+                    opt.value = code;
+                    opt.textContent = code + ' *';
+                    sel.appendChild(opt);
+                }
+            });
+            document.getElementById('editLangSelect').value = code;
+            document.getElementById('newLangInput').value = '';
+            renderLangEditTable();
+        }
+
+        function renderLangEditTable() {
+            const area = document.getElementById('langEditArea');
+            area.style.display = '';
+            document.getElementById('langEditTitle').textContent = editLangCode.toUpperCase() + (editIsBuiltIn ? ' (read-only)' : '');
+            document.getElementById('saveLangBtn').style.display = editIsBuiltIn ? 'none' : '';
+            const tbody = document.getElementById('langEditBody');
+            let html = '';
+            for (const key of enKeys) {
+                const enVal = (T.en[key] || '').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+                const trVal = (editLangData[key] || '').replace(/"/g,'&quot;');
+                const shortEn = enVal.length > 80 ? enVal.substring(0,80) + '...' : enVal;
+                html += '<tr class="lerow" data-lkey="' + key + '">'
+                    + '<td style="padding:3px 6px; font-size:11px; font-family:monospace; color:var(--vscode-descriptionForeground); white-space:nowrap; border-bottom:1px solid var(--vscode-panel-border);">' + key + '</td>'
+                    + '<td style="padding:3px 6px; font-size:12px; color:var(--vscode-descriptionForeground); border-bottom:1px solid var(--vscode-panel-border);" title="' + enVal.replace(/"/g,'&quot;') + '">' + shortEn + '</td>'
+                    + '<td style="padding:2px 4px; border-bottom:1px solid var(--vscode-panel-border);"><input type="text" value="' + trVal + '" data-lkey="' + key + '" ' + (editIsBuiltIn ? 'disabled' : '') + ' style="width:100%; padding:3px 5px; font-size:12px; font-family:var(--vscode-font-family); background:var(--vscode-input-background); color:var(--vscode-input-foreground); border:1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius:2px; box-sizing:border-box;" /></td>'
+                    + '</tr>';
+            }
+            tbody.innerHTML = html;
+            updateLangEditProgress();
+        }
+
+        function updateLangEditProgress() {
+            const filled = document.querySelectorAll('#langEditBody input[data-lkey]');
+            let count = 0;
+            filled.forEach(el => { if (el.value.trim()) count++; });
+            document.getElementById('langEditProgress').textContent = count + ' / ' + enKeys.length + ' (' + Math.round(count/enKeys.length*100) + '%)';
+        }
+
+        function filterLangRows() {
+            const q = document.getElementById('langFilterBox').value.toLowerCase();
+            document.querySelectorAll('.lerow').forEach(row => {
+                const key = row.getAttribute('data-lkey').toLowerCase();
+                const en = (T.en[row.getAttribute('data-lkey')] || '').toLowerCase();
+                row.style.display = (!q || key.includes(q) || en.includes(q)) ? '' : 'none';
+            });
+        }
+
+        function saveLangEdits() {
+            if (!editLangCode || editIsBuiltIn) return;
+            const translations = {};
+            document.querySelectorAll('#langEditBody input[data-lkey]').forEach(el => {
+                if (el.value.trim()) translations[el.getAttribute('data-lkey')] = el.value.trim();
+            });
+            // Update local T
+            T[editLangCode] = translations;
+            vscode.postMessage({ cmd: 'saveCustomLang', langCode: editLangCode, translations: translations });
+            updateLangEditProgress();
+        }
+
+        // Apply on load if not English
+        if (currentLang !== 'en') {
+            setTimeout(() => applyLang(currentLang), 0);
+        }
 
         const sampleCode = [
             { type: 'kw', text: 'Declare' }, { type: '', text: ' @dateOnly ' }, { type: 'dt', text: 'DateTime' },
@@ -1189,6 +1748,51 @@ export class StyleFormProvider {
                     bracket: document.getElementById('ik_bracket').checked,
                     semicolon: document.getElementById('ik_semicolon').checked,
                 },
+                whitespace: {
+                    spacesOrTabs: document.getElementById('ws_spacesOrTabs').value,
+                    numberOfSpacesInTabs: parseInt(document.getElementById('ws_numberOfSpaces').value) || 4,
+                    wrapLinesLongerThan: parseInt(document.getElementById('ws_wrapLines').value) || 120,
+                    emptyLinesBetweenStatements: parseInt(document.getElementById('ws_emptyLinesBetween').value) || 0,
+                    emptyLinesAfterBatchSeparator: parseInt(document.getElementById('ws_emptyLinesAfterBatch').value) || 1,
+                    preserveExistingEmptyLinesBetweenStatements: document.getElementById('ws_preserveEmptyBetween').checked,
+                    preserveExistingEmptyLinesWithinStatements: document.getElementById('ws_preserveEmptyWithin').checked,
+                    alignGroupsOfSingleLineComments: document.getElementById('ws_alignSingleLineComments').checked,
+                    alignMultilineCommentsMatchingCommonPatterns: document.getElementById('ws_alignMultilineComments').checked,
+                },
+                controlFlow: {
+                    placeBeginOnNewLine: document.getElementById('cf_placeBeginOnNewLine').checked,
+                    indentBeginEndKeywords: document.getElementById('cf_indentBeginEnd').checked,
+                    indentContentsOfStatements: document.getElementById('cf_indentContents').checked,
+                    collapseShortStatements: document.getElementById('cf_collapseShort').checked,
+                    collapseShortStatementsShorterThan: parseInt(document.getElementById('cf_collapseShortLen').value) || 78,
+                },
+                variables: {
+                    declareAlignDataTypesAndValues: document.getElementById('var_alignDataTypes').checked,
+                    declareAddSpaceBetweenTypeAndPrecision: document.getElementById('var_addSpaceBetween').checked,
+                    setPlaceAssignedValueOnNewLine: document.getElementById('var_setPlaceValueOnNewLine').checked,
+                    setPlaceEqualsSignOnNewLine: document.getElementById('var_setPlaceEqualsOnNewLine').checked,
+                },
+                dataDml: {
+                    clauseAlignment: document.getElementById('dml_clauseAlignment').value,
+                    clauseIndentation: parseInt(document.getElementById('dml_clauseIndentation').value) || 0,
+                    placeFromTableOnNewLine: document.getElementById('dml_placeFromOnNewLine').value,
+                    placeWhereConditionOnNewLine: document.getElementById('dml_placeWhereOnNewLine').value,
+                    placeGroupByOrderByExpressionOnNewLine: document.getElementById('dml_placeGroupByOnNewLine').value,
+                    placeInsertTableOnNewLine: document.getElementById('dml_placeInsertTableOnNewLine').checked,
+                    placeDistinctTopOnNewLine: document.getElementById('dml_placeDistinctTopOnNewLine').checked,
+                    addNewLineAfterDistinctTop: document.getElementById('dml_addNewLineAfterDistinctTop').checked,
+                    collapseShortDmlStatements: document.getElementById('dml_collapseShort').checked,
+                    collapseShortDmlShorterThan: parseInt(document.getElementById('dml_collapseShortLen').value) || 120,
+                    collapseSubqueriesShorterThan: parseInt(document.getElementById('dml_collapseSubqueriesLen').value) || 120,
+                },
+                schemaDdl: {
+                    alignDataTypesAndConstraints: document.getElementById('ddl_alignDataTypes').checked,
+                    placeConstraintsOnNewLines: document.getElementById('ddl_placeConstraintsOnNewLines').checked,
+                    placeConstraintColumnsOnNewLines: document.getElementById('ddl_placeConstraintCols').value,
+                    placeFirstProcedureParameterOnNewLine: document.getElementById('ddl_placeFirstParam').value,
+                    collapseShortDdlStatements: document.getElementById('ddl_collapseShort').checked,
+                    collapseShortDdlShorterThan: parseInt(document.getElementById('ddl_collapseShortLen').value) || 120,
+                },
             });
         }
 
@@ -1246,11 +1850,32 @@ export class StyleFormProvider {
         }
 
         function toggleStyleSubs() {
-            const subs = document.querySelector('.style-subs');
-            if (subs.style.display === 'none') {
-                subs.style.display = '';
+            // Legacy — no longer used, kept for safety
+        }
+
+        function toggleGroup(titleEl) {
+            const group = titleEl.nextElementSibling;
+            if (!group || !group.classList.contains('section-group')) return;
+            const isExpanded = group.classList.contains('expanded');
+            if (isExpanded) {
+                group.classList.remove('expanded');
+                titleEl.classList.remove('expanded');
             } else {
-                subs.style.display = 'none';
+                group.classList.add('expanded');
+                titleEl.classList.add('expanded');
+            }
+        }
+
+        function toggleSubGroup(titleEl) {
+            const group = titleEl.nextElementSibling;
+            if (!group || !group.classList.contains('sub-group')) return;
+            const isExpanded = group.classList.contains('expanded');
+            if (isExpanded) {
+                group.classList.remove('expanded');
+                titleEl.classList.remove('expanded');
+            } else {
+                group.classList.add('expanded');
+                titleEl.classList.add('expanded');
             }
         }
 
@@ -1261,7 +1886,8 @@ export class StyleFormProvider {
             } else if (msg.cmd === 'snippetsLoaded') {
                 const tbody = document.getElementById('snippetListBody');
                 if (msg.snippets.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="2" style="color:var(--vscode-descriptionForeground); text-align:center; padding:16px;">No snippets found. Set a snippet folder first.</td></tr>';
+                    const dict = T[currentLang] || T.en;
+                    tbody.innerHTML = '<tr><td colspan="2" style="color:var(--vscode-descriptionForeground); text-align:center; padding:16px;">' + (dict['snippets.noSnippets'] || 'No snippets found. Set a snippet folder first.') + '</td></tr>';
                 } else {
                     tbody.innerHTML = msg.snippets.map((s, i) =>
                         '<tr onclick="selectSnippet(' + i + ')" id="snip-' + i + '"><td>' + escapeHtml(s.prefix) + '</td><td>' + escapeHtml(s.description || '') + '</td></tr>'
@@ -1270,14 +1896,14 @@ export class StyleFormProvider {
                 document.getElementById('snippetCountLabel').textContent = msg.snippets.length + ' snippets';
                 window._snippets = msg.snippets;
             } else if (msg.cmd === 'snippetFolderSet') {
-                document.getElementById('snippetFolder').value = msg.path;
                 document.getElementById('snippetFolderSnippets').value = msg.path;
                 snippetsLoaded = false;
                 vscode.postMessage({ cmd: 'loadSnippets' });
                 snippetsLoaded = true;
             } else if (msg.cmd === 'connectionsUpdated') {
+                const dict3 = T[currentLang] || T.en;
                 document.querySelector('#section-connections .info-bar').innerHTML =
-                    '<span class="icon">ℹ</span> ' + msg.count + ' connection profile kayıtlı.';
+                    '<span class="icon">ℹ</span> ' + msg.count + ' ' + (dict3['conn.profilesSaved'] || 'connection profiles saved.');
             } else if (msg.cmd === 'styleLoaded') {
                 document.getElementById('reservedKeywords').value = msg.casing.reservedKeywords;
                 document.getElementById('builtInFunctions').value = msg.casing.builtInFunctions;
@@ -1288,7 +1914,8 @@ export class StyleFormProvider {
                     document.getElementById('alignItemsToTabStops').checked = msg.layout.alignItemsToTabStops;
                 }
                 document.getElementById('styleName').textContent = msg.styleName;
-                document.getElementById('fileInfo').textContent = msg.styleFile || 'No file — using defaults';
+                const sfp = document.getElementById('styleFilePath');
+                if (sfp) sfp.value = msg.styleFile || '';
                 updatePreview();
             }
         });

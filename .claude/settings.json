@@ -1,0 +1,29 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(wc -l \"/c/Users/ÖmerBülbül/source/repos/OCTO_ATIKSA/dbo/Tables\"/*.sql)",
+      "Bash(npm test:*)",
+      "Read(//c/Users/ÖmerBülbül/OneDrive - RENIUM/Belgeler - Proje/General/GitHub/SQL-DEV/SQL-PROMPT/Snippets//**)",
+      "Bash(node -e \":*)",
+      "Bash(npx vsce:*)",
+      "Bash(npx @vscode/vsce package)",
+      "Bash(npx @vscode/vsce publish)",
+      "Bash(ls \"c:\\\\Users\\\\ÖmerBülbül\\\\source\\\\repos\\\\tsql-intellisense\\\\docs\\\\superpowers\\\\specs\"\" 2>/dev/null || echo \"dir does not exist \")",
+      "Read(//c/Users/ÖmerBülbül/.claude/plugins/cache/superpowers-dev/superpowers/5.0.2/skills/subagent-driven-development/**)",
+      "Bash(npx @vscode/vsce ls)",
+      "Bash(unzip -l tsql-intellisense-0.3.0.vsix)",
+      "Skill(ship)",
+      "Skill(ship:*)",
+      "WebFetch(domain:github.com)",
+      "WebSearch",
+      "WebFetch(domain:code.visualstudio.com)",
+      "Bash(npx ts-node -e \":*)"
+    ],
+    "additionalDirectories": [
+      "c:\\Users\\ÖmerBülbül\\source\\repos\\tsql-intellisense\\docs\\superpowers"
+    ]
+  },
+  "enabledPlugins": {
+    "frontend-design@claude-plugins-official": true
+  }
+}

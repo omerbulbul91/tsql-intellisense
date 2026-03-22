@@ -1,0 +1,50 @@
+{
+    "tsql-intellisense.connections": [
+        {
+            "name": "Local DB",
+            "server": "OMERPC",
+            "port": 1433,
+            "database": "OCTO_ATIKSA_LOCAL",
+            "trustServerCertificate": true,
+            "encrypt": "optional",
+            "databaseProjects": {
+                "OCTO_ATIKSA_LOCAL": "c:\\Users\\ÖmerBülbül\\source\\repos\\OCTO_ATIKSA"
+            },
+            "user": "renium",
+            "password": "hakiliki"
+        },
+        {
+            "name": "RnOctoErp-20.218.161.4,28066",
+            "server": "20.218.161.4,28066",
+            "port": 1433,
+            "database": "",
+            "trustServerCertificate": true,
+            "user": "renium",
+            "password": "??..**t357951"
+        },
+        {
+            "name": "195.175.10.126/OCTO_AKDENIZ",
+            "server": "195.175.10.126",
+            "port": 32225,
+            "database": "OCTO_AKDENIZ",
+            "trustServerCertificate": true,
+            "encrypt": "optional",
+            "databaseProjects": {
+                "OCTO_AKDENIZ": "C:\\Users\\ÖmerBülbül\\source\\repos\\OCTO_AKDENIZ"
+            },
+            "user": "renium",
+            "password": "hakiliki"
+        },
+        {
+            "name": "REN-20.218.161.4,28065",
+            "server": "20.218.161.4",
+            "port": 28065,
+            "database": "",
+            "trustServerCertificate": true,
+            "encrypt": "optional",
+            "user": "renium",
+            "password": "??..**t357951",
+            "databaseProjects": {}
+        }
+    ]
+}

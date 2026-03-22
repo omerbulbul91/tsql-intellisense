@@ -17,6 +17,8 @@ export interface ColumnInfo {
     isNullable: boolean;
     maxLength: number | null;
     ordinalPosition: number;
+    isIdentity?: boolean;
+    hasDefault?: boolean;
 }
 
 export interface ObjectInfo {
@@ -163,7 +165,9 @@ export class SchemaCache {
 
         const safe = dbName.replace(/\]/g, ']]');
         const result = await this.connectionManager.executeQuery(
-            `SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE, CHARACTER_MAXIMUM_LENGTH, ORDINAL_POSITION
+            `SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE, CHARACTER_MAXIMUM_LENGTH, ORDINAL_POSITION,
+                    COLUMNPROPERTY(OBJECT_ID('[${safe}].dbo.' + TABLE_NAME), COLUMN_NAME, 'IsIdentity') AS IS_IDENTITY,
+                    CASE WHEN COLUMN_DEFAULT IS NOT NULL THEN 1 ELSE 0 END AS HAS_DEFAULT
              FROM [${safe}].INFORMATION_SCHEMA.COLUMNS
              WHERE TABLE_NAME = @tableName
              ORDER BY ORDINAL_POSITION`,
@@ -176,6 +180,8 @@ export class SchemaCache {
             isNullable: row['IS_NULLABLE'] === 'YES',
             maxLength: row['CHARACTER_MAXIMUM_LENGTH'] as number | null,
             ordinalPosition: row['ORDINAL_POSITION'] as number,
+            isIdentity: row['IS_IDENTITY'] === 1,
+            hasDefault: row['HAS_DEFAULT'] === 1,
         }));
         this.extraDbColumnsLoaded.add(cacheKey);
         return obj.columns;
@@ -258,6 +264,8 @@ export class SchemaCache {
                 isNullable: row['IS_NULLABLE'] === 'YES',
                 maxLength: row['CHARACTER_MAXIMUM_LENGTH'] as number | null,
                 ordinalPosition: row['ORDINAL_POSITION'] as number,
+                isIdentity: row['IS_IDENTITY'] === 1,
+                hasDefault: row['HAS_DEFAULT'] === 1,
             });
 
             this.columnsLoaded.add(tableName);
@@ -292,6 +300,8 @@ export class SchemaCache {
             isNullable: row['IS_NULLABLE'] === 'YES',
             maxLength: row['CHARACTER_MAXIMUM_LENGTH'] as number | null,
             ordinalPosition: row['ORDINAL_POSITION'] as number,
+            isIdentity: row['IS_IDENTITY'] === 1,
+            hasDefault: row['HAS_DEFAULT'] === 1,
         }));
 
         this.columnsLoaded.add(key);
