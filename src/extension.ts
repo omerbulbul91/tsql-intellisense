@@ -9,6 +9,7 @@ import { TsqlRenameProvider } from './providers/renameProvider';
 import { TsqlDefinitionProvider } from './providers/definitionProvider';
 import { ProjectSync } from './sync/projectSync';
 import { SnippetProvider } from './providers/snippetProvider';
+import { SnippetManagerProvider } from './providers/snippetManagerProvider';
 import { ConnectionTreeProvider } from './providers/connectionTreeProvider';
 import { DatabaseTreeItem, NodeType, FolderType } from './models/DatabaseNode';
 import { TreeQueryService } from './services/TreeQueryService';
@@ -164,6 +165,13 @@ export function activate(context: vscode.ExtensionContext) {
                 await vscode.workspace.getConfiguration('tsql-intellisense').update('snippetFolder', result[0].fsPath, vscode.ConfigurationTarget.Global);
                 vscode.window.showInformationMessage(`Snippet dizini ayarlandı: ${result[0].fsPath}`);
             }
+        })
+    );
+
+    // Open Snippet Manager
+    context.subscriptions.push(
+        vscode.commands.registerCommand('tsql-intellisense.openSnippetManager', () => {
+            SnippetManagerProvider.createOrShow(context.extensionUri, snippetProvider);
         })
     );
 
