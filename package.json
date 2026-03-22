@@ -1042,6 +1042,7 @@
     "package": "vsce package"
   },
   "dependencies": {
+    "monaco-editor": "^0.55.1",
     "mssql": "^12.2.1"
   },
   "devDependencies": {
