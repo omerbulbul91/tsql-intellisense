@@ -115,7 +115,7 @@ export class ConnectionManager {
             },
             connectionTimeout: 30000,
             requestTimeout: 0,
-            pool: { max: 5, min: 0, idleTimeoutMillis: 30000 },
+            pool: { max: 5, min: 1, idleTimeoutMillis: 600000 },
         };
 
         // Handle named instances (server\instance)
