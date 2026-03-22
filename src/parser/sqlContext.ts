@@ -33,6 +33,8 @@ export interface SqlContext {
     joinedTable?: string;
     /** For AFTER_ON: alias of the joined table */
     joinedAlias?: string;
+    /** True when user already typed dbo. prefix (e.g. FROM dbo.Tab) */
+    hasSchemaPrefix?: boolean;
 }
 
 export interface AliasMapping {
@@ -201,6 +203,7 @@ export function detectContext(textBeforeCursor: string, fullStatementText: strin
             return {
                 type: SqlContextType.AFTER_FROM_JOIN,
                 prefix,
+                hasSchemaPrefix: true,
             };
         }
 
@@ -238,12 +241,13 @@ export function detectContext(textBeforeCursor: string, fullStatementText: strin
 
     // 4. Check for FROM / JOIN — typing table name
     const fromJoinMatch = textBeforeCursor.match(
-        /(?:FROM|(?:INNER|LEFT|RIGHT|CROSS|FULL)\s+(?:OUTER\s+)?JOIN|JOIN)\s+(?:dbo\.)?(\w*)$/i
+        /(?:FROM|(?:INNER|LEFT|RIGHT|CROSS|FULL)\s+(?:OUTER\s+)?JOIN|JOIN)\s+(dbo\.)?(\w*)$/i
     );
     if (fromJoinMatch) {
         return {
             type: SqlContextType.AFTER_FROM_JOIN,
-            prefix: fromJoinMatch[1],
+            prefix: fromJoinMatch[2],
+            hasSchemaPrefix: !!fromJoinMatch[1],
         };
     }
 

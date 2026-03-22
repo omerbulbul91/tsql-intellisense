@@ -103,56 +103,97 @@ export function activate(context: vscode.ExtensionContext) {
     let historyLastClickTime = 0;
     let historyLastClickId = '';
     let historyClickTimer: ReturnType<typeof setTimeout> | null = null;
+    let historyPreviewDoc: vscode.TextDocument | null = null;
+
+    /** Find a unique untitled URI: try base name, then (1), (2), ... */
+    function findUniqueUntitledUri(baseName: string): vscode.Uri {
+        const openUris = new Set(vscode.workspace.textDocuments.map(d => d.uri.toString()));
+        const candidate = vscode.Uri.parse(`untitled:${baseName}`);
+        if (!openUris.has(candidate.toString())) { return candidate; }
+        const ext = baseName.includes('.') ? baseName.slice(baseName.lastIndexOf('.')) : '';
+        const stem = baseName.includes('.') ? baseName.slice(0, baseName.lastIndexOf('.')) : baseName;
+        for (let i = 1; i < 100; i++) {
+            const uri = vscode.Uri.parse(`untitled:${stem}(${i})${ext}`);
+            if (!openUris.has(uri.toString())) { return uri; }
+        }
+        return vscode.Uri.parse(`untitled:${stem}(${Date.now()})${ext}`);
+    }
+
+    /** Check if a file path exists on disk */
+    function fileExists(filePath: string): boolean {
+        try { return require('fs').existsSync(filePath); } catch { return false; }
+    }
 
     async function openHistoryFile(entry: QueryHistoryEntry, preview: boolean): Promise<void> {
-        try {
+        let doc: vscode.TextDocument;
+        const isRealFile = fileExists(entry.filePath);
+
+        if (isRealFile) {
             const uri = vscode.Uri.file(entry.filePath);
-            const doc = await vscode.workspace.openTextDocument(uri);
-            await vscode.window.showTextDocument(doc, { preview });
-            queryRunner.setDocumentDatabase(doc.uri, {
-                profileName: entry.connectionName,
-                dbName: entry.databaseName,
-            });
-            const profile = connectionManager.getSavedProfiles().find(p => p.name === entry.connectionName);
-            if (profile) {
-                if (!connectionManager.isConnected || connectionManager.currentProfile?.name !== entry.connectionName) {
-                    await connectionManager.connect({ ...profile, database: entry.databaseName });
-                } else if (connectionManager.currentProfile?.database?.toLowerCase() !== entry.databaseName.toLowerCase()) {
-                    await connectionManager.softSwitchDatabase(entry.databaseName);
-                }
+            doc = await vscode.workspace.openTextDocument(uri);
+        } else if (preview) {
+            // Single click — reuse tracked preview document
+            const isPreviewOpen = historyPreviewDoc && vscode.workspace.textDocuments.some(d => d.uri.toString() === historyPreviewDoc!.uri.toString());
+            if (isPreviewOpen && historyPreviewDoc) {
+                doc = historyPreviewDoc;
+                const edit = new vscode.WorkspaceEdit();
+                const fullRange = new vscode.Range(0, 0, doc.lineCount, 0);
+                edit.replace(doc.uri, fullRange, entry.sql);
+                await vscode.workspace.applyEdit(edit);
+            } else {
+                const previewUri = vscode.Uri.parse(`untitled:HistoryPreview.sql`);
+                doc = await vscode.workspace.openTextDocument(previewUri);
+                const edit = new vscode.WorkspaceEdit();
+                edit.insert(doc.uri, new vscode.Position(0, 0), entry.sql);
+                await vscode.workspace.applyEdit(edit);
+                historyPreviewDoc = doc;
             }
-        } catch {
-            const doc = await vscode.workspace.openTextDocument({ language: 'sql', content: entry.sql });
-            await vscode.window.showTextDocument(doc, { preview });
-            queryRunner.setDocumentDatabase(doc.uri, {
-                profileName: entry.connectionName,
-                dbName: entry.databaseName,
-            });
+        } else {
+            // Double click — open with original file name (.sql ensured), unique if taken
+            const name = entry.fileName.endsWith('.sql') ? entry.fileName : entry.fileName + '.sql';
+            const uri = findUniqueUntitledUri(name);
+            doc = await vscode.workspace.openTextDocument(uri);
+            const edit = new vscode.WorkspaceEdit();
+            edit.insert(doc.uri, new vscode.Position(0, 0), entry.sql);
+            await vscode.workspace.applyEdit(edit);
+        }
+
+        await vscode.window.showTextDocument(doc, { preview });
+        queryRunner.setDocumentDatabase(doc.uri, {
+            profileName: entry.connectionName,
+            dbName: entry.databaseName,
+        });
+        const profile = connectionManager.getSavedProfiles().find(p => p.name === entry.connectionName);
+        if (profile) {
+            if (!connectionManager.isConnected || connectionManager.currentProfile?.name !== entry.connectionName) {
+                await connectionManager.connect({ ...profile, database: entry.databaseName });
+            } else if (connectionManager.currentProfile?.database?.toLowerCase() !== entry.databaseName.toLowerCase()) {
+                await connectionManager.softSwitchDatabase(entry.databaseName);
+            }
         }
     }
 
-    historyView.onDidChangeSelection(e => {
-        const item = e.selection[0] as any;
-        if (!item?.entry) { return; }
-        const entry = item.entry as QueryHistoryEntry;
+    // Click handler: command fires on every click (works for same-item re-clicks too)
+    context.subscriptions.push(
+        vscode.commands.registerCommand('tsql-intellisense.historyItemClicked', (entry: QueryHistoryEntry) => {
+            const now = Date.now();
+            const isDoubleClick = (now - historyLastClickTime < 400) && historyLastClickId === entry.id;
+            historyLastClickTime = now;
+            historyLastClickId = entry.id;
 
-        const now = Date.now();
-        const isDoubleClick = (now - historyLastClickTime < 400) && historyLastClickId === entry.id;
-        historyLastClickTime = now;
-        historyLastClickId = entry.id;
+            if (historyClickTimer) { clearTimeout(historyClickTimer); historyClickTimer = null; }
 
-        if (historyClickTimer) { clearTimeout(historyClickTimer); historyClickTimer = null; }
-
-        if (isDoubleClick) {
-            // Double click → pin (permanent tab)
-            openHistoryFile(entry, false);
-        } else {
-            // Single click → preview (wait to rule out double click)
-            historyClickTimer = setTimeout(() => {
-                openHistoryFile(entry, true);
-            }, 400);
-        }
-    });
+            if (isDoubleClick) {
+                // Double click → open with original file name (pinned)
+                openHistoryFile(entry, false);
+            } else {
+                // Single click → preview (wait to rule out double click)
+                historyClickTimer = setTimeout(() => {
+                    openHistoryFile(entry, true);
+                }, 400);
+            }
+        })
+    );
 
     // Register query results panel in bottom area
     context.subscriptions.push(
@@ -309,7 +350,25 @@ export function activate(context: vscode.ExtensionContext) {
         })
     );
 
-    // New SQL File command (Ctrl+Alt+S)
+    // Helper: create untitled SQL doc with SSMS-style SQLQuery{N}.sql name
+    async function createSqlDocument(content: string = ''): Promise<vscode.TextDocument> {
+        const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+        const lastDate = context.globalState.get<string>('tsql.lastQueryDate', '');
+        const lastNum = lastDate === today ? context.globalState.get<number>('tsql.lastQueryNumber', 0) : 0;
+        const nextNum = lastNum + 1;
+        await context.globalState.update('tsql.lastQueryNumber', nextNum);
+        await context.globalState.update('tsql.lastQueryDate', today);
+        const uri = vscode.Uri.parse(`untitled:SQLQuery${nextNum}.sql`);
+        const doc = await vscode.workspace.openTextDocument(uri);
+        if (content) {
+            const edit = new vscode.WorkspaceEdit();
+            edit.insert(doc.uri, new vscode.Position(0, 0), content);
+            await vscode.workspace.applyEdit(edit);
+        }
+        return doc;
+    }
+
+    // New SQL File command (Ctrl+Alt+S) — SSMS-style SQLQuery{N}.sql naming
     context.subscriptions.push(
         vscode.commands.registerCommand('tsql-intellisense.newSqlFile', async () => {
             // Inherit DB from the currently active SQL file; fall back to current profile
@@ -320,7 +379,7 @@ export function activate(context: vscode.ExtensionContext) {
             const current = connectionManager.currentProfile;
             const dbAssoc = sourceDb ?? (current ? { profileName: current.name, dbName: current.database } : null);
 
-            const doc = await vscode.workspace.openTextDocument({ language: 'sql', content: '' });
+            const doc = await createSqlDocument();
             if (dbAssoc) {
                 queryRunner.setDocumentDatabase(doc.uri, dbAssoc);
             }
@@ -899,13 +958,18 @@ export function activate(context: vscode.ExtensionContext) {
         const editor = vscode.window.activeTextEditor;
         const profile = connectionManager.currentProfile;
         if (!profile || !editor) { return; }
-        const filePath = editor.document.uri.fsPath || editor.document.uri.toString();
+        // Use URI string as key (works for both file and untitled schemes)
+        const uriKey = editor.document.uri.toString();
+        const isUntitled = editor.document.uri.scheme === 'untitled';
+        const filePath = isUntitled ? uriKey : editor.document.uri.fsPath;
         // Skip if SQL content hasn't changed since last history entry
-        if (lastHistorySql.get(filePath) === sql) { return; }
-        lastHistorySql.set(filePath, sql);
+        if (lastHistorySql.get(uriKey) === sql) { return; }
+        lastHistorySql.set(uriKey, sql);
         const docDb = queryRunner.getDocumentDatabase(editor.document.uri);
         const dbName = docDb?.dbName ?? profile.database;
-        const fileName = filePath ? require('path').basename(filePath) : 'Untitled';
+        const fileName = isUntitled
+            ? (editor.document.uri.path || 'Untitled')
+            : require('path').basename(filePath);
         historyProvider.addEntry({
             fileName,
             filePath,
@@ -1394,7 +1458,7 @@ export function activate(context: vscode.ExtensionContext) {
                 const profile = connectionManager.getSavedProfiles().find(p => p.name === profileName);
                 const projectPath = getProjectPathForNode(profile, node);
                 const header = buildConnectionHeader(profileName, dbName, projectPath);
-                const doc = await vscode.workspace.openTextDocument({ language: 'sql', content: header + '\n\n' });
+                const doc = await createSqlDocument(header + '\n\n');
                 // Set association BEFORE showTextDocument so onDidChangeActiveTextEditor doesn't override it
                 queryRunner.setDocumentDatabase(doc.uri, {
                     profileName,
@@ -1464,7 +1528,7 @@ export function activate(context: vscode.ExtensionContext) {
                 const profile = connectionManager.getSavedProfiles().find(p => p.name === node.profileName);
                 const projectPath = profile?.databaseProjects?.[selectedDb] ?? profile?.projectPath ?? null;
                 const header = buildConnectionHeader(node.profileName, selectedDb, projectPath);
-                const doc = await vscode.workspace.openTextDocument({ language: 'sql', content: header + '\n\n' });
+                const doc = await createSqlDocument(header + '\n\n');
                 await vscode.window.showTextDocument(doc);
                 queryRunner.setDocumentDatabase(doc.uri, {
                     profileName: node.profileName,
@@ -1472,7 +1536,7 @@ export function activate(context: vscode.ExtensionContext) {
                 });
             } else {
                 // Command palette — no association, runs against current DB
-                const doc = await vscode.workspace.openTextDocument({ language: 'sql', content: '' });
+                const doc = await createSqlDocument();
                 await vscode.window.showTextDocument(doc);
             }
         })

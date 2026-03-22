@@ -70,7 +70,7 @@ export class TsqlCompletionProvider implements vscode.CompletionItemProvider {
 
         switch (context.type) {
             case SqlContextType.AFTER_FROM_JOIN:
-                return this.completeTableNames(context.prefix, dbName);
+                return this.completeTableNames(context.prefix, dbName, context.hasSchemaPrefix);
 
             case SqlContextType.AFTER_EXEC:
                 return this.completeProcedureNames(context.prefix, dbName);
@@ -557,7 +557,7 @@ export class TsqlCompletionProvider implements vscode.CompletionItemProvider {
         return new vscode.CompletionList(items, true);
     }
 
-    private completeTableNames(prefix?: string, dbName?: string): vscode.CompletionList {
+    private completeTableNames(prefix?: string, dbName?: string, hasSchemaPrefix?: boolean): vscode.CompletionList {
         const items: vscode.CompletionItem[] = [];
         const tablesAndViews = dbName
             ? Array.from(this.schemaCache.getObjectsForDb(dbName).values()).filter(o => o.type === 'TABLE' || o.type === 'VIEW')
@@ -579,7 +579,9 @@ export class TsqlCompletionProvider implements vscode.CompletionItemProvider {
             // Insert table name with schema + alias (without ⚡)
             const config = vscode.workspace.getConfiguration('tsql-intellisense');
             const qualifyWithOwner = config.get<boolean>('qualifyWithOwner', true);
-            const qualifiedName = qualifyWithOwner ? `dbo.${obj.name}` : obj.name;
+            // If user already typed dbo., don't add it again
+            const needsDbo = qualifyWithOwner && !hasSchemaPrefix;
+            const qualifiedName = needsDbo ? `dbo.${obj.name}` : obj.name;
             if (alias) {
                 const includeAs = config.get<boolean>('aliases.includeAS', false);
                 item.insertText = includeAs ? `${qualifiedName} AS ${alias}` : `${qualifiedName} ${alias}`;
