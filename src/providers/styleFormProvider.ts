@@ -184,6 +184,78 @@ export class StyleFormProvider {
                     }
                     break;
                 }
+                case 'createSnippet': {
+                    const fs2 = await import('fs');
+                    const path2 = await import('path');
+                    const folder2 = vscode.workspace.getConfiguration('tsql-intellisense').get<string>('snippetFolder', '');
+                    if (!folder2) {
+                        panel.webview.postMessage({ cmd: 'snippetSaved', success: false, error: 'Snippet klasörü ayarlanmamış.' });
+                        break;
+                    }
+                    const filePath2 = path2.join(folder2, msg.prefix + '.json');
+                    try { await fs2.promises.access(filePath2); panel.webview.postMessage({ cmd: 'snippetSaved', success: false, error: 'Bu prefix zaten mevcut.' }); break; } catch { /* OK */ }
+                    try {
+                        await fs2.promises.writeFile(filePath2, JSON.stringify({ prefix: msg.prefix, description: msg.description || undefined, body: msg.body }, null, 2), 'utf-8');
+                        // Reload snippets
+                        const snippets2: { prefix: string; description: string; body: string }[] = [];
+                        const files2 = await fs2.promises.readdir(folder2);
+                        for (const file of files2.filter(f => f.endsWith('.json')).sort()) {
+                            try { const c = await fs2.promises.readFile(path2.join(folder2, file), 'utf-8'); const sn = JSON.parse(c); snippets2.push({ prefix: sn.prefix || file.replace('.json',''), description: sn.description || '', body: sn.body || '' }); } catch {}
+                        }
+                        panel.webview.postMessage({ cmd: 'snippetsLoaded', snippets: snippets2 });
+                        panel.webview.postMessage({ cmd: 'snippetSaved', success: true });
+                    } catch (err: any) {
+                        panel.webview.postMessage({ cmd: 'snippetSaved', success: false, error: err.message });
+                    }
+                    break;
+                }
+                case 'updateSnippet': {
+                    const fs3 = await import('fs');
+                    const path3 = await import('path');
+                    const folder3 = vscode.workspace.getConfiguration('tsql-intellisense').get<string>('snippetFolder', '');
+                    if (!folder3) { panel.webview.postMessage({ cmd: 'snippetSaved', success: false, error: 'Snippet klasörü ayarlanmamış.' }); break; }
+                    if (msg.originalPrefix !== msg.prefix) {
+                        const np = path3.join(folder3, msg.prefix + '.json');
+                        try { await fs3.promises.access(np); panel.webview.postMessage({ cmd: 'snippetSaved', success: false, error: 'Bu prefix zaten mevcut.' }); break; } catch { /* OK */ }
+                    }
+                    try {
+                        await fs3.promises.unlink(path3.join(folder3, msg.originalPrefix + '.json'));
+                        await fs3.promises.writeFile(path3.join(folder3, msg.prefix + '.json'), JSON.stringify({ prefix: msg.prefix, description: msg.description || undefined, body: msg.body }, null, 2), 'utf-8');
+                        const snippets3: { prefix: string; description: string; body: string }[] = [];
+                        const files3 = await fs3.promises.readdir(folder3);
+                        for (const file of files3.filter(f => f.endsWith('.json')).sort()) {
+                            try { const c = await fs3.promises.readFile(path3.join(folder3, file), 'utf-8'); const sn = JSON.parse(c); snippets3.push({ prefix: sn.prefix || file.replace('.json',''), description: sn.description || '', body: sn.body || '' }); } catch {}
+                        }
+                        panel.webview.postMessage({ cmd: 'snippetsLoaded', snippets: snippets3 });
+                        panel.webview.postMessage({ cmd: 'snippetSaved', success: true });
+                    } catch (err: any) {
+                        panel.webview.postMessage({ cmd: 'snippetSaved', success: false, error: err.message });
+                    }
+                    break;
+                }
+                case 'deleteSnippet': {
+                    const fs4 = await import('fs');
+                    const path4 = await import('path');
+                    const folder4 = vscode.workspace.getConfiguration('tsql-intellisense').get<string>('snippetFolder', '');
+                    if (!folder4) break;
+                    const answer = await vscode.window.showWarningMessage(
+                        "'" + msg.prefix + "' snippet'ini silmek istediğinize emin misiniz?",
+                        { modal: true }, 'Sil');
+                    if (answer !== 'Sil') { panel.webview.postMessage({ cmd: 'snippetDeleted', success: false }); break; }
+                    try {
+                        await fs4.promises.unlink(path4.join(folder4, msg.prefix + '.json'));
+                        const snippets4: { prefix: string; description: string; body: string }[] = [];
+                        const files4 = await fs4.promises.readdir(folder4);
+                        for (const file of files4.filter(f => f.endsWith('.json')).sort()) {
+                            try { const c = await fs4.promises.readFile(path4.join(folder4, file), 'utf-8'); const sn = JSON.parse(c); snippets4.push({ prefix: sn.prefix || file.replace('.json',''), description: sn.description || '', body: sn.body || '' }); } catch {}
+                        }
+                        panel.webview.postMessage({ cmd: 'snippetsLoaded', snippets: snippets4 });
+                        panel.webview.postMessage({ cmd: 'snippetDeleted', success: true });
+                    } catch (err: any) {
+                        panel.webview.postMessage({ cmd: 'snippetDeleted', success: false, error: err.message });
+                    }
+                    break;
+                }
                 case 'setLang': {
                     await context.globalState.update('tsql.uiLang', msg.lang);
                     break;
@@ -594,22 +666,37 @@ export class StyleFormProvider {
         }
 
         /* Snippet list */
+        .snippet-toolbar {
+            display: flex; align-items: center; justify-content: space-between;
+            margin: 8px 0;
+        }
+        .snippet-toolbar-buttons { display: flex; gap: 6px; }
+        .snippet-search {
+            display: flex; align-items: center; background: var(--vscode-input-background);
+            border: 1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius: 3px; padding: 0 8px; width: 200px;
+        }
+        .snippet-search input {
+            flex: 1; background: transparent; border: none; outline: none;
+            color: var(--vscode-input-foreground); font-size: 12px; padding: 4px 0; font-family: inherit;
+        }
+        .snippet-search-icon { color: var(--vscode-descriptionForeground); font-size: 12px; margin-left: 4px; }
         .snippet-table {
             width: 100%;
             border-collapse: collapse;
             font-size: 13px;
-            margin-top: 8px;
         }
         .snippet-table th {
             text-align: left;
             padding: 6px 8px;
             border-bottom: 1px solid var(--vscode-panel-border);
             font-weight: 600;
-            font-size: 12px;
+            font-size: 11px;
             color: var(--vscode-descriptionForeground);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
         }
         .snippet-table td {
-            padding: 4px 8px;
+            padding: 5px 8px;
             border-bottom: 1px solid var(--vscode-panel-border, transparent);
             cursor: pointer;
         }
@@ -621,13 +708,24 @@ export class StyleFormProvider {
             color: var(--vscode-list-activeSelectionForeground);
         }
         .snippet-list-container {
-            max-height: 250px;
+            max-height: 280px;
             overflow-y: auto;
             border: 1px solid var(--vscode-panel-border);
             border-radius: 2px;
         }
-        .snippet-code {
+        .snippet-code-header {
+            display: flex; align-items: center; justify-content: space-between;
             margin-top: 12px;
+        }
+        .snippet-code-header h3 { margin: 0; }
+        .snippet-copy-btn {
+            background: transparent; border: 1px solid var(--vscode-input-border, #555);
+            color: var(--vscode-foreground); width: 26px; height: 26px; border-radius: 3px;
+            cursor: pointer; display: flex; align-items: center; justify-content: center; padding: 0;
+        }
+        .snippet-copy-btn:hover { background: var(--vscode-toolbar-hoverBackground, #3d3d3d); }
+        .snippet-code {
+            margin-top: 6px;
             padding: 12px;
             background: var(--vscode-editor-background);
             border: 1px solid var(--vscode-panel-border);
@@ -636,10 +734,45 @@ export class StyleFormProvider {
             font-size: var(--vscode-editor-fontSize, 13px);
             line-height: 1.5;
             white-space: pre-wrap;
-            min-height: 60px;
-            max-height: 150px;
+            min-height: 80px;
+            max-height: 200px;
             overflow-y: auto;
         }
+        /* SQL Syntax Highlighting */
+        .sql-keyword { color: #569cd6; }
+        .sql-function { color: #dcdcaa; }
+        .sql-string { color: #ce9178; }
+        .sql-number { color: #b5cea8; }
+        .sql-comment { color: #6a9955; }
+        .sql-operator { color: #d4d4d4; }
+        .sql-variable { color: #9cdcfe; }
+        /* Snippet Modal */
+        .snippet-modal-overlay {
+            display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.5); align-items: center; justify-content: center; z-index: 200;
+        }
+        .snippet-modal {
+            background: var(--vscode-editor-background); border: 1px solid var(--vscode-panel-border, #555);
+            border-radius: 6px; padding: 20px; width: 550px; max-width: 90vw; max-height: 80vh;
+            display: flex; flex-direction: column; gap: 10px; box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+        }
+        .snippet-modal h3 { font-size: 15px; font-weight: 600; margin: 0; }
+        .snippet-modal label { font-size: 12px; color: var(--vscode-descriptionForeground); margin-top: 4px; }
+        .snippet-modal input[type="text"] {
+            background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border, #444);
+            border-radius: 3px; padding: 6px 8px; color: var(--vscode-input-foreground);
+            font-size: 13px; width: 100%; font-family: inherit;
+        }
+        .snippet-modal textarea {
+            background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border, #444);
+            border-radius: 3px; padding: 8px; color: var(--vscode-input-foreground);
+            font-family: var(--vscode-editor-fontFamily, monospace);
+            font-size: var(--vscode-editor-fontSize, 13px); line-height: 1.5;
+            min-height: 180px; max-height: 40vh; overflow-y: auto; resize: vertical;
+            width: 100%; white-space: pre-wrap; tab-size: 4;
+        }
+        .snippet-modal-error { color: var(--vscode-errorForeground, #f48771); font-size: 12px; min-height: 16px; }
+        .snippet-modal-buttons { display: flex; gap: 8px; justify-content: flex-end; margin-top: 8px; }
     </style>
 </head>
 <body>
@@ -974,6 +1107,18 @@ export class StyleFormProvider {
                         </div>
                     </div>
 
+                    <div class="snippet-toolbar">
+                        <div class="snippet-toolbar-buttons">
+                            <button class="btn btn-secondary" onclick="openSnippetNewModal()">New...</button>
+                            <button class="btn btn-secondary" onclick="openSnippetEditModal()">Edit...</button>
+                            <button class="btn btn-secondary" onclick="deleteSelectedSnippet()">Delete</button>
+                        </div>
+                        <div class="snippet-search">
+                            <input type="text" id="snippetSearchInput" placeholder="Search..." oninput="filterSnippets()">
+                            <span class="snippet-search-icon">&#128269;</span>
+                        </div>
+                    </div>
+
                     <div class="snippet-list-container">
                         <table class="snippet-table">
                             <thead><tr><th>Snippet</th><th data-i18n="snippets.description">Description</th></tr></thead>
@@ -985,8 +1130,35 @@ export class StyleFormProvider {
 
                     <div style="margin-top:4px; font-size:11px; color:var(--vscode-descriptionForeground);" id="snippetCountLabel"></div>
 
-                    <h3>Code</h3>
+                    <div class="snippet-code-header">
+                        <h3>Code</h3>
+                        <button class="snippet-copy-btn" onclick="copySnippetCode()" title="Kopyala">
+                            <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                                <rect x="5" y="5" width="9" height="9" rx="1" stroke="currentColor" stroke-width="1.5" fill="none"/>
+                                <path d="M11 5V3a1 1 0 0 0-1-1H3a1 1 0 0 0-1 1v7a1 1 0 0 0 1 1h2" stroke="currentColor" stroke-width="1.5" fill="none"/>
+                            </svg>
+                        </button>
+                    </div>
                     <div class="snippet-code" id="snippetCodePreview" style="color:var(--vscode-descriptionForeground);" data-i18n="snippets.selectToPreview">Select a snippet to preview</div>
+                </div>
+
+                <!-- Snippet Modal -->
+                <div class="snippet-modal-overlay" id="snippetModalOverlay">
+                    <div class="snippet-modal">
+                        <h3 id="snippetModalTitle">Yeni Snippet</h3>
+                        <label>Prefix</label>
+                        <input type="text" id="snippetModalPrefix">
+                        <div class="snippet-modal-error" id="snippetPrefixError"></div>
+                        <label>Description</label>
+                        <input type="text" id="snippetModalDesc">
+                        <label>Body</label>
+                        <textarea id="snippetModalBody" spellcheck="false"></textarea>
+                        <div class="snippet-modal-error" id="snippetModalError"></div>
+                        <div class="snippet-modal-buttons">
+                            <button class="btn btn-secondary" onclick="closeSnippetModal()">İptal</button>
+                            <button class="btn" onclick="saveSnippetModal()">Kaydet</button>
+                        </div>
+                    </div>
                 </div>
 
                 <!-- Whitespace Section -->
@@ -1800,20 +1972,147 @@ export class StyleFormProvider {
             vscode.postMessage({ cmd: 'loadFile' });
         }
 
+        let snippetSelectedIndex = -1;
+        let snippetEditMode = false;
+        let snippetOriginalPrefix = '';
+        let snippetFilteredList = [];
+
         function selectSnippet(index) {
+            snippetSelectedIndex = index;
             document.querySelectorAll('.snippet-table tr.selected').forEach(el => el.classList.remove('selected'));
             const row = document.getElementById('snip-' + index);
             if (row) row.classList.add('selected');
-            const s = window._snippets && window._snippets[index];
+            const s = snippetFilteredList[index];
             const preview = document.getElementById('snippetCodePreview');
             if (s && s.body) {
-                preview.textContent = s.body;
+                preview.innerHTML = highlightSql(s.body.replace(/\\\\n/g, '\\n'));
                 preview.style.color = '';
             } else {
                 preview.textContent = 'No code';
                 preview.style.color = 'var(--vscode-descriptionForeground)';
             }
         }
+
+        // SQL syntax highlighting
+        function highlightSql(code) {
+            const keywords = /\\b(SELECT|FROM|WHERE|INSERT|INTO|UPDATE|DELETE|CREATE|ALTER|DROP|TABLE|INDEX|VIEW|PROCEDURE|FUNCTION|TRIGGER|BEGIN|END|IF|ELSE|WHILE|DECLARE|SET|EXEC|EXECUTE|RETURN|PRINT|GO|USE|JOIN|INNER|LEFT|RIGHT|OUTER|CROSS|ON|AND|OR|NOT|IN|EXISTS|BETWEEN|LIKE|IS|NULL|AS|WITH|NOCHECK|CHECK|CONSTRAINT|ALL|ANY|SOME|TOP|DISTINCT|ORDER|BY|GROUP|HAVING|UNION|EXCEPT|INTERSECT|CASE|WHEN|THEN|GRANT|REVOKE|DENY|PRIMARY|KEY|FOREIGN|REFERENCES|DEFAULT|VALUES|OUTPUT|MERGE|USING|MATCHED|TRUNCATE|ADD|COLUMN|NOLOCK|NONCLUSTERED|CLUSTERED|ASC|DESC|OVER|PARTITION|ROW_NUMBER|RANK|DENSE_RANK|IDENTITY|SCOPE_IDENTITY|NEWID|GETDATE|GETUTCDATE|CAST|CONVERT|ISNULL|COALESCE|NULLIF|IIF|TRY_CAST|TRY_CONVERT|FORMAT|CONCAT|STUFF|REPLACE|SUBSTRING|CHARINDEX|LEN|LTRIM|RTRIM|TRIM|UPPER|LOWER|COUNT|SUM|AVG|MIN|MAX|STRING_AGG|LAG|LEAD|FIRST_VALUE|LAST_VALUE|CURSOR|OPEN|CLOSE|FETCH|NEXT|DEALLOCATE|ROLLBACK|COMMIT|TRANSACTION|TRAN|NVARCHAR|VARCHAR|INT|BIGINT|BIT|DATETIME|DATE|TIME|FLOAT|DECIMAL|NUMERIC|CHAR|TEXT|XML|UNIQUEIDENTIFIER|MONEY|SMALLINT|TINYINT|VARBINARY|IMAGE)\\b/gi;
+            let escaped = code.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            // Comments
+            escaped = escaped.replace(/(--[^\\n]*)/g, '<span class="sql-comment">$1</span>');
+            escaped = escaped.replace(/(\\/\\*[\\s\\S]*?\\*\\/)/g, '<span class="sql-comment">$1</span>');
+            // Strings
+            escaped = escaped.replace(/('(?:[^']|'')*')/g, '<span class="sql-string">$1</span>');
+            // Numbers
+            escaped = escaped.replace(/\\b(\\d+\\.?\\d*)\\b/g, '<span class="sql-number">$1</span>');
+            // Variables
+            escaped = escaped.replace(/(\\$[a-zA-Z_][a-zA-Z0-9_]*\\$|@[a-zA-Z_][a-zA-Z0-9_]*)/g, '<span class="sql-variable">$1</span>');
+            // Keywords (last so they don't interfere with strings/comments)
+            escaped = escaped.replace(keywords, function(m) {
+                return '<span class="sql-keyword">' + m + '</span>';
+            });
+            return escaped;
+        }
+
+        function filterSnippets() {
+            const q = document.getElementById('snippetSearchInput').value.toLowerCase();
+            const all = window._snippets || [];
+            snippetFilteredList = q
+                ? all.filter(s => s.prefix.toLowerCase().includes(q) || (s.description || '').toLowerCase().includes(q) || s.body.toLowerCase().includes(q))
+                : [...all];
+            snippetSelectedIndex = -1;
+            renderSnippetList();
+        }
+
+        function renderSnippetList() {
+            const tbody = document.getElementById('snippetListBody');
+            if (snippetFilteredList.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="2" style="color:var(--vscode-descriptionForeground); text-align:center; padding:16px;">No snippets found.</td></tr>';
+            } else {
+                tbody.innerHTML = snippetFilteredList.map((s, i) =>
+                    '<tr onclick="selectSnippet(' + i + ')" ondblclick="openSnippetEditModalAt(' + i + ')" id="snip-' + i + '"' +
+                    (i === snippetSelectedIndex ? ' class="selected"' : '') +
+                    '><td>' + escapeHtml(s.prefix) + '</td><td>' + escapeHtml(s.description || '') + '</td></tr>'
+                ).join('');
+            }
+            const all = window._snippets || [];
+            const total = all.length;
+            const shown = snippetFilteredList.length;
+            document.getElementById('snippetCountLabel').textContent =
+                shown === total ? total + ' snippets' : shown + ' / ' + total + ' snippets';
+        }
+
+        function copySnippetCode() {
+            const code = document.getElementById('snippetCodePreview').textContent;
+            if (code) navigator.clipboard.writeText(code);
+        }
+
+        // Prefix validation
+        const SNIPPET_INVALID_CHARS = /[\\/\\\\:?"<>|*]/;
+        const SNIPPET_RESERVED = /^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/i;
+        function validateSnippetPrefix(prefix) {
+            if (!prefix.trim()) return 'Prefix boş olamaz.';
+            if (SNIPPET_INVALID_CHARS.test(prefix)) return 'Prefix geçersiz karakter içeriyor.';
+            if (prefix.includes('..')) return 'Prefix ".." içeremez.';
+            if (SNIPPET_RESERVED.test(prefix.trim())) return 'Bu isim Windows tarafından ayrılmıştır.';
+            return '';
+        }
+
+        function openSnippetNewModal() {
+            snippetEditMode = false;
+            document.getElementById('snippetModalTitle').textContent = 'Yeni Snippet';
+            document.getElementById('snippetModalPrefix').value = '';
+            document.getElementById('snippetModalDesc').value = '';
+            document.getElementById('snippetModalBody').value = '';
+            document.getElementById('snippetPrefixError').textContent = '';
+            document.getElementById('snippetModalError').textContent = '';
+            document.getElementById('snippetModalOverlay').style.display = 'flex';
+            document.getElementById('snippetModalPrefix').focus();
+        }
+        function openSnippetEditModal() {
+            if (snippetSelectedIndex >= 0) openSnippetEditModalAt(snippetSelectedIndex);
+        }
+        function openSnippetEditModalAt(i) {
+            const s = snippetFilteredList[i];
+            if (!s) return;
+            snippetEditMode = true;
+            snippetOriginalPrefix = s.prefix;
+            document.getElementById('snippetModalTitle').textContent = 'Snippet Düzenle';
+            document.getElementById('snippetModalPrefix').value = s.prefix;
+            document.getElementById('snippetModalDesc').value = s.description || '';
+            document.getElementById('snippetModalBody').value = s.body.replace(/\\\\n/g, '\\n');
+            document.getElementById('snippetPrefixError').textContent = '';
+            document.getElementById('snippetModalError').textContent = '';
+            document.getElementById('snippetModalOverlay').style.display = 'flex';
+        }
+        function closeSnippetModal() {
+            document.getElementById('snippetModalOverlay').style.display = 'none';
+        }
+        function saveSnippetModal() {
+            const prefix = document.getElementById('snippetModalPrefix').value.trim();
+            const desc = document.getElementById('snippetModalDesc').value.trim();
+            const body = document.getElementById('snippetModalBody').value || '';
+            const err = validateSnippetPrefix(prefix);
+            if (err) { document.getElementById('snippetPrefixError').textContent = err; return; }
+            document.getElementById('snippetPrefixError').textContent = '';
+            const bodyStored = body.replace(/\\n/g, '\\\\n');
+            if (snippetEditMode) {
+                vscode.postMessage({ cmd: 'updateSnippet', originalPrefix: snippetOriginalPrefix, prefix, description: desc, body: bodyStored });
+            } else {
+                vscode.postMessage({ cmd: 'createSnippet', prefix, description: desc, body: bodyStored });
+            }
+        }
+        function deleteSelectedSnippet() {
+            const s = snippetFilteredList[snippetSelectedIndex];
+            if (!s) return;
+            vscode.postMessage({ cmd: 'deleteSnippet', prefix: s.prefix });
+        }
+
+        document.addEventListener('keydown', function(e) {
+            if (document.getElementById('snippetModalOverlay').style.display === 'flex') {
+                if (e.key === 'Escape') closeSnippetModal();
+                if (e.ctrlKey && e.key === 's') { e.preventDefault(); saveSnippetModal(); }
+            }
+        });
 
         function browseSnippetFolder() {
             vscode.postMessage({ cmd: 'browseSnippetFolder' });
@@ -1884,17 +2183,18 @@ export class StyleFormProvider {
             if (msg.cmd === 'saved') {
                 // Visual feedback handled by VS Code notification
             } else if (msg.cmd === 'snippetsLoaded') {
-                const tbody = document.getElementById('snippetListBody');
-                if (msg.snippets.length === 0) {
-                    const dict = T[currentLang] || T.en;
-                    tbody.innerHTML = '<tr><td colspan="2" style="color:var(--vscode-descriptionForeground); text-align:center; padding:16px;">' + (dict['snippets.noSnippets'] || 'No snippets found. Set a snippet folder first.') + '</td></tr>';
-                } else {
-                    tbody.innerHTML = msg.snippets.map((s, i) =>
-                        '<tr onclick="selectSnippet(' + i + ')" id="snip-' + i + '"><td>' + escapeHtml(s.prefix) + '</td><td>' + escapeHtml(s.description || '') + '</td></tr>'
-                    ).join('');
-                }
-                document.getElementById('snippetCountLabel').textContent = msg.snippets.length + ' snippets';
-                window._snippets = msg.snippets;
+                window._snippets = (msg.snippets || []).sort(function(a, b) {
+                    return a.prefix.localeCompare(b.prefix, undefined, { sensitivity: 'base' });
+                });
+                snippetSelectedIndex = -1;
+                document.getElementById('snippetCodePreview').textContent = '';
+                document.getElementById('snippetCodePreview').style.color = 'var(--vscode-descriptionForeground)';
+                filterSnippets();
+            } else if (msg.cmd === 'snippetSaved') {
+                if (msg.success) { closeSnippetModal(); }
+                else { document.getElementById('snippetModalError').textContent = msg.error || 'Hata oluştu.'; }
+            } else if (msg.cmd === 'snippetDeleted') {
+                // list refreshed via snippetsLoaded
             } else if (msg.cmd === 'snippetFolderSet') {
                 document.getElementById('snippetFolderSnippets').value = msg.path;
                 snippetsLoaded = false;
