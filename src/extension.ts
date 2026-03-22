@@ -1125,6 +1125,23 @@ export function activate(context: vscode.ExtensionContext) {
 
             queryRunner.setDocumentDatabase(targetUri, { profileName: pickedConn.profileName, dbName: pickedDb.dbName });
             codeLensProvider.refresh();
+
+            // Load SchemaCache for IntelliSense
+            void (async () => {
+                if (connectionManager.currentProfile?.name !== pickedConn.profileName) {
+                    const p = connectionManager.getSavedProfiles().find(x => x.name === pickedConn.profileName);
+                    if (p) { await connectionManager.connect({ ...p, database: pickedDb.dbName }); }
+                } else {
+                    await connectionManager.softSwitchDatabase(pickedDb.dbName);
+                }
+                const cache = schemaCacheManager.getOrCreate(pickedConn.profileName, pickedDb.dbName, connectionManager);
+                schemaCacheManager.active = cache;
+                if (!cache.isLoaded) {
+                    await cache.loadObjectNames();
+                    cache.startAutoRefresh();
+                }
+                vscode.window.showInformationMessage(`T-SQL IntelliSense: Objects loaded (${cache.objectCount}) — ${pickedDb.dbName}`);
+            })();
         })
     );
 
@@ -1187,6 +1204,23 @@ export function activate(context: vscode.ExtensionContext) {
 
             queryRunner.setDocumentDatabase(targetUri, { profileName, dbName: picked.dbName });
             codeLensProvider.refresh();
+
+            // Load SchemaCache for IntelliSense
+            void (async () => {
+                if (connectionManager.currentProfile?.name !== profileName) {
+                    const p = connectionManager.getSavedProfiles().find(x => x.name === profileName);
+                    if (p) { await connectionManager.connect({ ...p, database: picked.dbName }); }
+                } else {
+                    await connectionManager.softSwitchDatabase(picked.dbName);
+                }
+                const cache = schemaCacheManager.getOrCreate(profileName, picked.dbName, connectionManager);
+                schemaCacheManager.active = cache;
+                if (!cache.isLoaded) {
+                    await cache.loadObjectNames();
+                    cache.startAutoRefresh();
+                }
+                vscode.window.showInformationMessage(`T-SQL IntelliSense: Objects loaded (${cache.objectCount}) — ${picked.dbName}`);
+            })();
         })
     );
 
