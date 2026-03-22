@@ -96,6 +96,9 @@ export class TsqlCompletionProvider implements vscode.CompletionItemProvider {
             case SqlContextType.AFTER_GROUP_BY:
                 return await this.completeGroupBy(context, statementText, dbName);
 
+            case SqlContextType.AFTER_INSERT_INTO:
+                return this.completeInsertTable(context.prefix, position, dbName);
+
             case SqlContextType.AFTER_ALTER_CREATE:
                 return this.completeAlterCreateObjects(context.prefix);
 
@@ -961,6 +964,52 @@ export class TsqlCompletionProvider implements vscode.CompletionItemProvider {
         }
 
         return new vscode.CompletionList(items, false);
+    }
+
+    /**
+     * INSERT INTO completion: show table names, on select insert column list + VALUES template.
+     */
+    private completeInsertTable(prefix?: string, position?: vscode.Position, dbName?: string): vscode.CompletionList {
+        const items: vscode.CompletionItem[] = [];
+        const tablesAndViews = dbName
+            ? Array.from(this.schemaCache.getObjectsForDb(dbName).values()).filter(o => o.type === 'TABLE' || o.type === 'VIEW')
+            : this.schemaCache.getTablesAndViews();
+
+        for (const obj of tablesAndViews) {
+            const hasTrigger = this.schemaCache.hasTriggers(obj.name);
+            const label = hasTrigger ? `${obj.name} ⚡` : obj.name;
+            const item = new vscode.CompletionItem(label);
+            item.kind = obj.type === 'TABLE'
+                ? vscode.CompletionItemKind.Class
+                : vscode.CompletionItemKind.Interface;
+            item.detail = `INSERT INTO ${obj.name}`;
+            item.sortText = `0_${obj.name}`;
+            item.filterText = obj.name;
+
+            const config = vscode.workspace.getConfiguration('tsql-intellisense');
+            const qualifyWithOwner = config.get<boolean>('qualifyWithOwner', true);
+            const qualifiedName = qualifyWithOwner ? `dbo.${obj.name}` : obj.name;
+            item.insertText = qualifiedName;
+
+            // Trigger insertInsertTemplate command after accepting
+            item.command = {
+                command: 'tsql-intellisense.insertInsertTemplate',
+                title: 'Insert columns + VALUES',
+                arguments: [obj.name, dbName],
+            };
+
+            // Reuse table documentation
+            const doc = this.buildTableDocumentation(obj.name);
+            if (doc) {
+                item.documentation = doc;
+            } else {
+                item.documentation = new vscode.MarkdownString(`**${obj.name}** (${obj.type})`);
+            }
+
+            items.push(item);
+        }
+
+        return new vscode.CompletionList(items, true);
     }
 
     /**

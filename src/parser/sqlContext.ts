@@ -16,6 +16,7 @@ export enum SqlContextType {
     AFTER_GROUP_BY = 'AFTER_GROUP_BY',
     AFTER_ALTER_CREATE = 'AFTER_ALTER_CREATE',
     AFTER_ALTER_OBJECT = 'AFTER_ALTER_OBJECT',
+    AFTER_INSERT_INTO = 'AFTER_INSERT_INTO',
 }
 
 export interface SqlContext {
@@ -301,7 +302,7 @@ export function detectContext(textBeforeCursor: string, fullStatementText: strin
     const insertMatch = textBeforeCursor.match(/INSERT\s+(?:INTO\s+)?(?:dbo\.)?(\w*)$/i);
     if (insertMatch) {
         return {
-            type: SqlContextType.AFTER_FROM_JOIN,
+            type: SqlContextType.AFTER_INSERT_INTO,
             prefix: insertMatch[1],
         };
     }
