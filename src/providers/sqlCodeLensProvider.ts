@@ -15,42 +15,56 @@ export class TsqlCodeLensProvider implements vscode.CodeLensProvider {
         if (document.languageId !== 'sql') { return []; }
 
         const text = document.getText();
-        if (!text.trim()) { return []; }
-
         const docDb = this.queryRunner.getDocumentDatabase(document.uri);
-        const serverLabel = docDb
-            ? `$(server) ${docDb.profileName}  $(database) ${docDb.dbName}`
-            : '$(database) No DB associated';
+
+        const connLabel = docDb ? docDb.profileName : 'Not connected';
+        const dbLabel = docDb ? docDb.dbName : 'No database';
 
         const lenses: vscode.CodeLens[] = [];
-        const batchStarts = this.getBatchStartLines(text);
 
-        for (const startLine of batchStarts) {
-            const range = new vscode.Range(startLine, 0, startLine, 0);
+        // Always show connection + db on line 0 (even for empty files)
+        const topRange = new vscode.Range(0, 0, 0, 0);
 
-            // ▷ Run this batch
-            lenses.push(new vscode.CodeLens(range, {
-                title: '▷ Run',
-                command: 'tsql-intellisense.runBatchAtLine',
-                arguments: [document.uri, startLine],
-                tooltip: 'Run this batch (up to the next GO)',
-            }));
+        // Connection button — click to switch connection
+        lenses.push(new vscode.CodeLens(topRange, {
+            title: `$(plug) ${connLabel}`,
+            command: 'tsql-intellisense.connect',
+            tooltip: 'Click to switch connection',
+        }));
 
-            // Server / DB info (clickable to change DB for this file)
-            lenses.push(new vscode.CodeLens(range, {
-                title: serverLabel,
-                command: 'tsql-intellisense.changeDocDatabase',
-                arguments: [document.uri],
-                tooltip: 'Click to change the database for this file',
-            }));
+        // Database button — click to switch database
+        lenses.push(new vscode.CodeLens(topRange, {
+            title: `$(database) ${dbLabel}`,
+            command: 'tsql-intellisense.changeDocDatabase',
+            arguments: [document.uri],
+            tooltip: 'Click to switch database',
+        }));
 
-            // $(sync) Refresh cache for this file's DB
-            lenses.push(new vscode.CodeLens(range, {
-                title: '$(sync)',
-                command: 'tsql-intellisense.refreshDocumentCache',
-                arguments: [document.uri],
-                tooltip: 'Refresh schema cache for this file\'s database (Ctrl+Shift+D)',
-            }));
+        // Only add Run + Refresh if there's content
+        if (text.trim()) {
+            const batchStarts = this.getBatchStartLines(text);
+
+            for (const startLine of batchStarts) {
+                const range = new vscode.Range(startLine, 0, startLine, 0);
+
+                // ▷ Run this batch
+                lenses.push(new vscode.CodeLens(range, {
+                    title: '▷ Run',
+                    command: 'tsql-intellisense.runBatchAtLine',
+                    arguments: [document.uri, startLine],
+                    tooltip: 'Run this batch (up to the next GO)',
+                }));
+
+                // $(sync) Refresh cache — only on first batch
+                if (startLine === batchStarts[0]) {
+                    lenses.push(new vscode.CodeLens(range, {
+                        title: '$(sync)',
+                        command: 'tsql-intellisense.refreshDocumentCache',
+                        arguments: [document.uri],
+                        tooltip: 'Refresh schema cache (Ctrl+Shift+D)',
+                    }));
+                }
+            }
         }
 
         return lenses;
