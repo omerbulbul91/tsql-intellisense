@@ -25,17 +25,18 @@ export class TsqlCodeLensProvider implements vscode.CodeLensProvider {
         // Always show connection + db on line 0 (even for empty files)
         const topRange = new vscode.Range(0, 0, 0, 0);
 
-        // Connection button — click to switch connection
+        // Connection button — click to switch connection + database (2-step picker)
         lenses.push(new vscode.CodeLens(topRange, {
             title: `$(plug) ${connLabel}`,
-            command: 'tsql-intellisense.connect',
-            tooltip: 'Click to switch connection',
+            command: 'tsql-intellisense.changeDocDatabase',
+            arguments: [document.uri],
+            tooltip: 'Click to switch connection and database',
         }));
 
-        // Database button — click to switch database
+        // Database button — click to switch database only (same connection)
         lenses.push(new vscode.CodeLens(topRange, {
             title: `$(database) ${dbLabel}`,
-            command: 'tsql-intellisense.changeDocDatabase',
+            command: 'tsql-intellisense.switchDocDatabase',
             arguments: [document.uri],
             tooltip: 'Click to switch database',
         }));

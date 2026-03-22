@@ -1128,6 +1128,68 @@ export function activate(context: vscode.ExtensionContext) {
         })
     );
 
+    // CodeLens: switch database only (same connection) — skips connection picker
+    context.subscriptions.push(
+        vscode.commands.registerCommand('tsql-intellisense.switchDocDatabase', async (uri: vscode.Uri) => {
+            const targetUri = uri || vscode.window.activeTextEditor?.document.uri;
+            if (!targetUri) { return; }
+
+            const current = queryRunner.getDocumentDatabase(targetUri);
+            const profileName = current?.profileName ?? connectionManager.currentProfile?.name;
+            if (!profileName) {
+                // No connection yet — fall back to full 2-step picker
+                vscode.commands.executeCommand('tsql-intellisense.changeDocDatabase', targetUri);
+                return;
+            }
+
+            // Query DB list from this profile's pool
+            let dbNames: string[] = [];
+            try {
+                if (!treeQueryService.isConnected(profileName)) {
+                    await treeQueryService.connect(profileName);
+                }
+                const result = await treeQueryService.execute(
+                    `SELECT name FROM sys.databases WHERE state_desc = 'ONLINE' ORDER BY name`,
+                    undefined, profileName
+                );
+                dbNames = result.rows.map(r => r['name'] as string);
+            } catch {
+                const profile = connectionManager.getSavedProfiles().find(p => p.name === profileName);
+                if (profile?.database) { dbNames = [profile.database]; }
+            }
+
+            if (dbNames.length === 0) { return; }
+
+            // Add disconnect option
+            interface DbPickItem extends vscode.QuickPickItem { dbName: string; }
+            const dbItems: DbPickItem[] = dbNames.map(name => ({
+                label: `$(database) ${name}`,
+                description: name.toLowerCase() === (current?.dbName ?? '').toLowerCase() ? '(current)' : '',
+                dbName: name,
+            }));
+            dbItems.push({
+                label: '$(debug-disconnect) Disconnect',
+                description: 'Close the current connection',
+                dbName: '__disconnect__',
+            });
+
+            const picked = await vscode.window.showQuickPick(dbItems, {
+                placeHolder: 'Choose a database from the list below',
+                title: `Change File Database — ${profileName}`,
+            });
+            if (!picked) { return; }
+
+            if (picked.dbName === '__disconnect__') {
+                await connectionManager.disconnect();
+                codeLensProvider.refresh();
+                return;
+            }
+
+            queryRunner.setDocumentDatabase(targetUri, { profileName, dbName: picked.dbName });
+            codeLensProvider.refresh();
+        })
+    );
+
     // Refresh schema for a DB — switch if needed, cross-DB query if same server
     context.subscriptions.push(
         vscode.commands.registerCommand('tsql-intellisense.loadDatabaseSchema', async (arg: any) => {
