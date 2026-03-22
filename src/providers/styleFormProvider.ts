@@ -21,7 +21,7 @@ export class StyleFormProvider {
             'tsqlStyleForm',
             'SQL Prompt Options',
             column,
-            { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [vscode.Uri.joinPath(context.extensionUri, 'node_modules', 'monaco-editor', 'min')] }
+            { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [vscode.Uri.joinPath(context.extensionUri, 'node_modules', 'monaco-editor', 'min'), vscode.Uri.joinPath(context.extensionUri, 'resources')] }
         );
 
         StyleFormProvider.currentPanel = panel;
@@ -355,7 +355,16 @@ export class StyleFormProvider {
         }
         const allLangCodes = Object.keys(allTranslations);
         const builtInLangs = Object.keys(styleFormTranslations);
-        // Country codes as flag labels (emoji flags don't work on Windows)
+        // Flag image files (SVG) for languages that have them
+        const langFlagFiles: Record<string, string> = {
+            en: 'Flag_of_the_United_Kingdom_(3-5).svg',
+            tr: 'Flag_of_Turkey.svg',
+        };
+        const langFlagUris: Record<string, string> = {};
+        for (const [code, file] of Object.entries(langFlagFiles)) {
+            langFlagUris[code] = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'resources', 'icons', file)).toString();
+        }
+        // Country codes as fallback labels
         const langFlags: Record<string, string> = {
             en: 'GB', tr: 'TR', de: 'DE', fr: 'FR',
             es: 'ES', it: 'IT', pt: 'PT', ru: 'RU',
@@ -372,6 +381,22 @@ export class StyleFormProvider {
             fi: 'Suomi', no: 'Norsk', cs: '\u010Ce\u0161tina', hu: 'Magyar',
             ro: 'Rom\u00E2n\u0103', bg: '\u0411\u044A\u043B\u0433\u0430\u0440\u0441\u043A\u0438', uk: '\u0423\u043A\u0440\u0430\u0457\u043D\u0441\u044C\u043A\u0430', az: 'Az\u0259rbaycanca',
         };
+        // Build custom dropdown items with flag images
+        const langDropdownItems = allLangCodes.map(c => {
+            const flagUri = langFlagUris[c] || '';
+            const flagCode = langFlags[c] || c.toUpperCase();
+            const name = langNames[c] || c;
+            const suffix = builtInLangs.includes(c) ? '' : ' *';
+            const flagHtml = flagUri
+                ? `<img src="${flagUri}" style="width:20px;height:14px;border-radius:2px;object-fit:cover;vertical-align:middle;margin-right:6px;">`
+                : `<span style="display:inline-block;width:20px;height:14px;background:var(--vscode-input-border);border-radius:2px;text-align:center;font-size:9px;line-height:14px;margin-right:6px;vertical-align:middle;">${flagCode}</span>`;
+            return { code: c, flagHtml, flagUri, flagCode, name, suffix, selected: c === lang };
+        });
+        const selectedLang = langDropdownItems.find(l => l.selected) || langDropdownItems[0];
+        const langDropdownItemsHtml = langDropdownItems.map(l =>
+            `<div class="lang-option" onclick="selectLangOption('${l.code}')" data-lang="${l.code}">${l.flagHtml}${l.name}${l.suffix}</div>`
+        ).join('');
+        // Keep hidden select for compatibility
         const langOptionsHtml = allLangCodes.map(c => {
             const flag = langFlags[c] || c.toUpperCase();
             const name = langNames[c] || c;
@@ -382,7 +407,7 @@ export class StyleFormProvider {
 <html lang="${lang}">
 <head>
     <meta charset="UTF-8">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline' ${cspSource}; script-src 'unsafe-inline' ${cspSource}; font-src ${cspSource}; worker-src blob:;">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline' ${cspSource}; script-src 'unsafe-inline' ${cspSource}; font-src ${cspSource}; img-src ${cspSource}; worker-src blob:;">
     <title>Formatting Styles</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -751,14 +776,47 @@ export class StyleFormProvider {
         /* Monaco editor container in modal - no textarea needed */
         .snippet-modal-error { color: var(--vscode-errorForeground, #f48771); font-size: 12px; min-height: 16px; }
         .snippet-modal-buttons { display: flex; gap: 8px; justify-content: flex-end; margin-top: 8px; }
+        /* Custom language dropdown */
+        .lang-dropdown { position: relative; margin-left: auto; }
+        .lang-dropdown-btn {
+            display: flex; align-items: center; gap: 4px; padding: 3px 8px; font-size: 12px;
+            background: var(--vscode-input-background); color: var(--vscode-input-foreground);
+            border: 1px solid var(--vscode-input-border, var(--vscode-panel-border));
+            border-radius: 3px; cursor: pointer; font-family: inherit;
+        }
+        .lang-dropdown-btn:hover { background: var(--vscode-list-hoverBackground); }
+        .lang-dropdown-btn svg { margin-left: 4px; }
+        .lang-dropdown-list {
+            display: none; position: absolute; top: 100%; right: 0; margin-top: 2px;
+            background: var(--vscode-dropdown-background, var(--vscode-input-background));
+            border: 1px solid var(--vscode-dropdown-border, var(--vscode-panel-border));
+            border-radius: 3px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); z-index: 50;
+            min-width: 160px; max-height: 250px; overflow-y: auto;
+        }
+        .lang-dropdown-list.open { display: block; }
+        .lang-option {
+            display: flex; align-items: center; padding: 6px 10px; cursor: pointer;
+            font-size: 12px; white-space: nowrap;
+        }
+        .lang-option:hover { background: var(--vscode-list-hoverBackground); }
+        .lang-option.active { background: var(--vscode-list-activeSelectionBackground); color: var(--vscode-list-activeSelectionForeground); }
     </style>
 </head>
 <body>
     <div class="header">
         <h1>SQL Prompt Options</h1>
-        <select id="langSelect" onchange="setLang(this.value)" style="padding:3px 8px; font-size:12px; background:var(--vscode-input-background); color:var(--vscode-input-foreground); border:1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius:3px; cursor:pointer; margin-left:auto;">
+        <select id="langSelect" onchange="setLang(this.value)" style="display:none;">
             ${langOptionsHtml}
         </select>
+        <div class="lang-dropdown">
+            <button class="lang-dropdown-btn" onclick="toggleLangDropdown()" id="langDropdownBtn">
+                ${selectedLang.flagHtml}${selectedLang.name}
+                <svg width="10" height="6" viewBox="0 0 10 6" fill="none"><path d="M1 1l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+            </button>
+            <div class="lang-dropdown-list" id="langDropdownList">
+                ${langDropdownItemsHtml}
+            </div>
+        </div>
     </div>
 
     <div class="main">
@@ -1708,6 +1766,31 @@ export class StyleFormProvider {
                 if (el) el.value = lang;
             });
         }
+
+        function toggleLangDropdown() {
+            var list = document.getElementById('langDropdownList');
+            list.classList.toggle('open');
+        }
+        function selectLangOption(code) {
+            document.getElementById('langDropdownList').classList.remove('open');
+            // Update button content
+            var opt = document.querySelector('.lang-option[data-lang="' + code + '"]');
+            if (opt) {
+                document.getElementById('langDropdownBtn').innerHTML = opt.innerHTML +
+                    '<svg width="10" height="6" viewBox="0 0 10 6" fill="none"><path d="M1 1l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>';
+            }
+            // Mark active
+            document.querySelectorAll('.lang-option').forEach(function(el) { el.classList.remove('active'); });
+            if (opt) opt.classList.add('active');
+            setLang(code);
+        }
+        // Close dropdown on outside click
+        document.addEventListener('click', function(e) {
+            var dd = document.querySelector('.lang-dropdown');
+            if (dd && !dd.contains(e.target)) {
+                document.getElementById('langDropdownList').classList.remove('open');
+            }
+        });
 
         function openTranslationEditor() {
             vscode.postMessage({ cmd: 'openTranslationEditor' });
