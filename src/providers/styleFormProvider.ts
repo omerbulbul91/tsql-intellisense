@@ -21,7 +21,7 @@ export class StyleFormProvider {
             'tsqlStyleForm',
             'SQL Prompt Options',
             column,
-            { enableScripts: true, retainContextWhenHidden: true }
+            { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [vscode.Uri.joinPath(context.extensionUri, 'node_modules', 'monaco-editor', 'min')] }
         );
 
         StyleFormProvider.currentPanel = panel;
@@ -52,7 +52,7 @@ export class StyleFormProvider {
             schemaDdl: styleLoader.getSchemaDdlOptions(),
         };
 
-        panel.webview.html = StyleFormProvider.getHtml(casingOpts, layoutOpts, aliasOpts, insertionKeys, styleName, styleFile, snippetFolder, connections.length, lang, customTranslations, fmtConfig);
+        panel.webview.html = StyleFormProvider.getHtml(panel.webview, context.extensionUri, casingOpts, layoutOpts, aliasOpts, insertionKeys, styleName, styleFile, snippetFolder, connections.length, lang, customTranslations, fmtConfig);
 
         panel.webview.onDidReceiveMessage(async (msg) => {
             switch (msg.cmd) {
@@ -330,6 +330,8 @@ export class StyleFormProvider {
     }
 
     private static getHtml(
+        webview: vscode.Webview,
+        extensionUri: vscode.Uri,
         options: { reservedKeywords: CasingMode; builtInFunctions: CasingMode; builtInDataTypes: CasingMode },
         layout: { maxLineLength: number; placeCommasBeforeItems: boolean; alignItemsToTabStops: boolean },
         aliases: { assignAliases: boolean; includeAS: boolean; capitaliseAliases: boolean; prefixesToIgnore: string[] },
@@ -342,6 +344,8 @@ export class StyleFormProvider {
         customTranslations: Record<string, Record<string, string>>,
         fmtConfig: { whitespace: any; controlFlow: any; variables: any; dataDml: any; schemaDdl: any }
     ): string {
+        const monacoBase = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'node_modules', 'monaco-editor', 'min'));
+        const monacoVs = monacoBase.toString();
         // Merge built-in + custom translations for the webview
         const allTranslations: Record<string, Record<string, string>> = { ...styleFormTranslations };
         for (const [code, dict] of Object.entries(customTranslations)) {
@@ -376,7 +380,7 @@ export class StyleFormProvider {
 <html lang="${lang}">
 <head>
     <meta charset="UTF-8">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline';">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline' ${monacoVs}/; script-src 'unsafe-inline' ${monacoVs}/; font-src ${monacoVs}/; worker-src blob:;">
     <title>Formatting Styles</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -724,28 +728,7 @@ export class StyleFormProvider {
             cursor: pointer; display: flex; align-items: center; justify-content: center; padding: 0;
         }
         .snippet-copy-btn:hover { background: var(--vscode-toolbar-hoverBackground, #3d3d3d); }
-        .snippet-code {
-            margin-top: 6px;
-            padding: 12px;
-            background: var(--vscode-editor-background);
-            border: 1px solid var(--vscode-panel-border);
-            border-radius: 2px;
-            font-family: var(--vscode-editor-fontFamily, monospace);
-            font-size: var(--vscode-editor-fontSize, 13px);
-            line-height: 1.5;
-            white-space: pre-wrap;
-            min-height: 80px;
-            max-height: 200px;
-            overflow-y: auto;
-        }
-        /* SQL Syntax Highlighting */
-        .sql-keyword { color: #569cd6; }
-        .sql-function { color: #dcdcaa; }
-        .sql-string { color: #ce9178; }
-        .sql-number { color: #b5cea8; }
-        .sql-comment { color: #6a9955; }
-        .sql-operator { color: #d4d4d4; }
-        .sql-variable { color: #9cdcfe; }
+        /* Monaco handles code preview styling */
         /* Snippet Modal */
         .snippet-modal-overlay {
             display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0;
@@ -763,23 +746,12 @@ export class StyleFormProvider {
             border-radius: 3px; padding: 6px 8px; color: var(--vscode-input-foreground);
             font-size: 13px; width: 100%; font-family: inherit;
         }
-        .snippet-modal textarea {
-            background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border, #444);
-            border-radius: 3px; padding: 8px; color: var(--vscode-input-foreground);
-            font-family: var(--vscode-editor-fontFamily, monospace);
-            font-size: var(--vscode-editor-fontSize, 13px); line-height: 1.5;
-            min-height: 180px; max-height: 40vh; overflow-y: auto; resize: vertical;
-            width: 100%; white-space: pre-wrap; tab-size: 4;
-        }
+        /* Monaco editor container in modal - no textarea needed */
         .snippet-modal-error { color: var(--vscode-errorForeground, #f48771); font-size: 12px; min-height: 16px; }
         .snippet-modal-buttons { display: flex; gap: 8px; justify-content: flex-end; margin-top: 8px; }
     </style>
 </head>
 <body>
-    <div style="padding:6px 24px; font-size:12px; color:var(--vscode-descriptionForeground); background:var(--vscode-editorWidget-background); border-bottom:1px solid var(--vscode-panel-border);">
-        <span data-i18n="topBanner">T-SQL IntelliSense is a code auto-completion and formatting tool for writing SQL queries.</span>
-    </div>
-
     <div class="header">
         <h1>SQL Prompt Options</h1>
         <select id="langSelect" onchange="setLang(this.value)" style="padding:3px 8px; font-size:12px; background:var(--vscode-input-background); color:var(--vscode-input-foreground); border:1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius:3px; cursor:pointer; margin-left:auto;">
@@ -1139,7 +1111,7 @@ export class StyleFormProvider {
                             </svg>
                         </button>
                     </div>
-                    <div class="snippet-code" id="snippetCodePreview" style="color:var(--vscode-descriptionForeground);" data-i18n="snippets.selectToPreview">Select a snippet to preview</div>
+                    <div id="snippetCodePreview" style="height:200px; border:1px solid var(--vscode-panel-border); border-radius:2px; margin-top:6px;"></div>
                 </div>
 
                 <!-- Snippet Modal -->
@@ -1151,12 +1123,20 @@ export class StyleFormProvider {
                         <div class="snippet-modal-error" id="snippetPrefixError"></div>
                         <label>Description</label>
                         <input type="text" id="snippetModalDesc">
-                        <label>Body</label>
-                        <textarea id="snippetModalBody" spellcheck="false"></textarea>
+                        <div style="display:flex; align-items:center; justify-content:space-between;">
+                            <label>Body</label>
+                            <button class="snippet-copy-btn" onclick="copyModalCode()" title="Kopyala">
+                                <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                                    <rect x="5" y="5" width="9" height="9" rx="1" stroke="currentColor" stroke-width="1.5" fill="none"/>
+                                    <path d="M11 5V3a1 1 0 0 0-1-1H3a1 1 0 0 0-1 1v7a1 1 0 0 0 1 1h2" stroke="currentColor" stroke-width="1.5" fill="none"/>
+                                </svg>
+                            </button>
+                        </div>
+                        <div id="snippetModalBody" style="height:220px; border:1px solid var(--vscode-input-border, #444); border-radius:3px;"></div>
                         <div class="snippet-modal-error" id="snippetModalError"></div>
                         <div class="snippet-modal-buttons">
                             <button class="btn btn-secondary" onclick="closeSnippetModal()">İptal</button>
-                            <button class="btn" onclick="saveSnippetModal()">Kaydet</button>
+                            <button class="btn btn-secondary" onclick="saveSnippetModal()">Kaydet</button>
                         </div>
                     </div>
                 </div>
@@ -1983,34 +1963,11 @@ export class StyleFormProvider {
             const row = document.getElementById('snip-' + index);
             if (row) row.classList.add('selected');
             const s = snippetFilteredList[index];
-            const preview = document.getElementById('snippetCodePreview');
-            if (s && s.body) {
-                preview.innerHTML = highlightSql(s.body.replace(/\\\\n/g, '\\n'));
-                preview.style.color = '';
-            } else {
-                preview.textContent = 'No code';
-                preview.style.color = 'var(--vscode-descriptionForeground)';
+            if (s && s.body && previewEditor) {
+                previewEditor.setValue(s.body.replace(/\\\\n/g, '\\n'));
+            } else if (previewEditor) {
+                previewEditor.setValue('');
             }
-        }
-
-        // SQL syntax highlighting
-        function highlightSql(code) {
-            const keywords = /\\b(SELECT|FROM|WHERE|INSERT|INTO|UPDATE|DELETE|CREATE|ALTER|DROP|TABLE|INDEX|VIEW|PROCEDURE|FUNCTION|TRIGGER|BEGIN|END|IF|ELSE|WHILE|DECLARE|SET|EXEC|EXECUTE|RETURN|PRINT|GO|USE|JOIN|INNER|LEFT|RIGHT|OUTER|CROSS|ON|AND|OR|NOT|IN|EXISTS|BETWEEN|LIKE|IS|NULL|AS|WITH|NOCHECK|CHECK|CONSTRAINT|ALL|ANY|SOME|TOP|DISTINCT|ORDER|BY|GROUP|HAVING|UNION|EXCEPT|INTERSECT|CASE|WHEN|THEN|GRANT|REVOKE|DENY|PRIMARY|KEY|FOREIGN|REFERENCES|DEFAULT|VALUES|OUTPUT|MERGE|USING|MATCHED|TRUNCATE|ADD|COLUMN|NOLOCK|NONCLUSTERED|CLUSTERED|ASC|DESC|OVER|PARTITION|ROW_NUMBER|RANK|DENSE_RANK|IDENTITY|SCOPE_IDENTITY|NEWID|GETDATE|GETUTCDATE|CAST|CONVERT|ISNULL|COALESCE|NULLIF|IIF|TRY_CAST|TRY_CONVERT|FORMAT|CONCAT|STUFF|REPLACE|SUBSTRING|CHARINDEX|LEN|LTRIM|RTRIM|TRIM|UPPER|LOWER|COUNT|SUM|AVG|MIN|MAX|STRING_AGG|LAG|LEAD|FIRST_VALUE|LAST_VALUE|CURSOR|OPEN|CLOSE|FETCH|NEXT|DEALLOCATE|ROLLBACK|COMMIT|TRANSACTION|TRAN|NVARCHAR|VARCHAR|INT|BIGINT|BIT|DATETIME|DATE|TIME|FLOAT|DECIMAL|NUMERIC|CHAR|TEXT|XML|UNIQUEIDENTIFIER|MONEY|SMALLINT|TINYINT|VARBINARY|IMAGE)\\b/gi;
-            let escaped = code.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-            // Comments
-            escaped = escaped.replace(/(--[^\\n]*)/g, '<span class="sql-comment">$1</span>');
-            escaped = escaped.replace(/(\\/\\*[\\s\\S]*?\\*\\/)/g, '<span class="sql-comment">$1</span>');
-            // Strings
-            escaped = escaped.replace(/('(?:[^']|'')*')/g, '<span class="sql-string">$1</span>');
-            // Numbers
-            escaped = escaped.replace(/\\b(\\d+\\.?\\d*)\\b/g, '<span class="sql-number">$1</span>');
-            // Variables
-            escaped = escaped.replace(/(\\$[a-zA-Z_][a-zA-Z0-9_]*\\$|@[a-zA-Z_][a-zA-Z0-9_]*)/g, '<span class="sql-variable">$1</span>');
-            // Keywords (last so they don't interfere with strings/comments)
-            escaped = escaped.replace(keywords, function(m) {
-                return '<span class="sql-keyword">' + m + '</span>';
-            });
-            return escaped;
         }
 
         function filterSnippets() {
@@ -2042,7 +1999,11 @@ export class StyleFormProvider {
         }
 
         function copySnippetCode() {
-            const code = document.getElementById('snippetCodePreview').textContent;
+            const code = previewEditor ? previewEditor.getValue() : '';
+            if (code) navigator.clipboard.writeText(code);
+        }
+        function copyModalCode() {
+            const code = modalEditor ? modalEditor.getValue() : '';
             if (code) navigator.clipboard.writeText(code);
         }
 
@@ -2062,11 +2023,12 @@ export class StyleFormProvider {
             document.getElementById('snippetModalTitle').textContent = 'Yeni Snippet';
             document.getElementById('snippetModalPrefix').value = '';
             document.getElementById('snippetModalDesc').value = '';
-            document.getElementById('snippetModalBody').value = '';
+            if (modalEditor) modalEditor.setValue('');
             document.getElementById('snippetPrefixError').textContent = '';
             document.getElementById('snippetModalError').textContent = '';
             document.getElementById('snippetModalOverlay').style.display = 'flex';
             document.getElementById('snippetModalPrefix').focus();
+            setTimeout(function() { if (modalEditor) modalEditor.layout(); }, 100);
         }
         function openSnippetEditModal() {
             if (snippetSelectedIndex >= 0) openSnippetEditModalAt(snippetSelectedIndex);
@@ -2079,10 +2041,11 @@ export class StyleFormProvider {
             document.getElementById('snippetModalTitle').textContent = 'Snippet Düzenle';
             document.getElementById('snippetModalPrefix').value = s.prefix;
             document.getElementById('snippetModalDesc').value = s.description || '';
-            document.getElementById('snippetModalBody').value = s.body.replace(/\\\\n/g, '\\n');
+            if (modalEditor) modalEditor.setValue(s.body.replace(/\\\\n/g, '\\n'));
             document.getElementById('snippetPrefixError').textContent = '';
             document.getElementById('snippetModalError').textContent = '';
             document.getElementById('snippetModalOverlay').style.display = 'flex';
+            setTimeout(function() { if (modalEditor) modalEditor.layout(); }, 100);
         }
         function closeSnippetModal() {
             document.getElementById('snippetModalOverlay').style.display = 'none';
@@ -2090,7 +2053,7 @@ export class StyleFormProvider {
         function saveSnippetModal() {
             const prefix = document.getElementById('snippetModalPrefix').value.trim();
             const desc = document.getElementById('snippetModalDesc').value.trim();
-            const body = document.getElementById('snippetModalBody').value || '';
+            const body = modalEditor ? modalEditor.getValue() : '';
             const err = validateSnippetPrefix(prefix);
             if (err) { document.getElementById('snippetPrefixError').textContent = err; return; }
             document.getElementById('snippetPrefixError').textContent = '';
@@ -2187,8 +2150,7 @@ export class StyleFormProvider {
                     return a.prefix.localeCompare(b.prefix, undefined, { sensitivity: 'base' });
                 });
                 snippetSelectedIndex = -1;
-                document.getElementById('snippetCodePreview').textContent = '';
-                document.getElementById('snippetCodePreview').style.color = 'var(--vscode-descriptionForeground)';
+                if (previewEditor) previewEditor.setValue('');
                 filterSnippets();
             } else if (msg.cmd === 'snippetSaved') {
                 if (msg.success) { closeSnippetModal(); }
@@ -2222,6 +2184,45 @@ export class StyleFormProvider {
 
         // Initial preview
         updatePreview();
+    </script>
+
+    <!-- Monaco Editor -->
+    <script src="${monacoVs}/loader.js"></script>
+    <script>
+        let previewEditor = null;
+        let modalEditor = null;
+
+        require.config({ paths: { vs: '${monacoVs}/vs' } });
+        require(['vs/editor/editor.main'], function () {
+            // Preview editor (readonly)
+            previewEditor = monaco.editor.create(document.getElementById('snippetCodePreview'), {
+                value: '',
+                language: 'sql',
+                theme: 'vs-dark',
+                readOnly: true,
+                minimap: { enabled: false },
+                scrollBeyondLastLine: false,
+                lineNumbers: 'on',
+                fontSize: 13,
+                automaticLayout: true,
+                wordWrap: 'on',
+                scrollbar: { vertical: 'auto', horizontal: 'auto' }
+            });
+
+            // Modal editor (editable)
+            modalEditor = monaco.editor.create(document.getElementById('snippetModalBody'), {
+                value: '',
+                language: 'sql',
+                theme: 'vs-dark',
+                minimap: { enabled: false },
+                scrollBeyondLastLine: false,
+                lineNumbers: 'on',
+                fontSize: 13,
+                automaticLayout: true,
+                wordWrap: 'on',
+                scrollbar: { vertical: 'auto', horizontal: 'auto' }
+            });
+        });
     </script>
 </body>
 </html>`;
