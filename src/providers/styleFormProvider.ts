@@ -25,7 +25,7 @@ export class StyleFormProvider {
         );
 
         StyleFormProvider.currentPanel = panel;
-        panel.iconPath = new vscode.ThemeIcon('symbol-color');
+        panel.iconPath = new vscode.ThemeIcon('settings-gear');
 
         const casingOpts = styleLoader.getCasingOptions();
         const layoutOpts = styleLoader.getLayoutOptions();
@@ -355,13 +355,14 @@ export class StyleFormProvider {
         }
         const allLangCodes = Object.keys(allTranslations);
         const builtInLangs = Object.keys(styleFormTranslations);
+        // Country codes as flag labels (emoji flags don't work on Windows)
         const langFlags: Record<string, string> = {
-            en: '\uD83C\uDDEC\uD83C\uDDE7', tr: '\uD83C\uDDF9\uD83C\uDDF7', de: '\uD83C\uDDE9\uD83C\uDDEA', fr: '\uD83C\uDDEB\uD83C\uDDF7',
-            es: '\uD83C\uDDEA\uD83C\uDDF8', it: '\uD83C\uDDEE\uD83C\uDDF9', pt: '\uD83C\uDDF5\uD83C\uDDF9', ru: '\uD83C\uDDF7\uD83C\uDDFA',
-            ja: '\uD83C\uDDEF\uD83C\uDDF5', ko: '\uD83C\uDDF0\uD83C\uDDF7', zh: '\uD83C\uDDE8\uD83C\uDDF3', ar: '\uD83C\uDDF8\uD83C\uDDE6',
-            nl: '\uD83C\uDDF3\uD83C\uDDF1', pl: '\uD83C\uDDF5\uD83C\uDDF1', sv: '\uD83C\uDDF8\uD83C\uDDEA', da: '\uD83C\uDDE9\uD83C\uDDF0',
-            fi: '\uD83C\uDDEB\uD83C\uDDEE', no: '\uD83C\uDDF3\uD83C\uDDF4', cs: '\uD83C\uDDE8\uD83C\uDDFF', hu: '\uD83C\uDDED\uD83C\uDDFA',
-            ro: '\uD83C\uDDF7\uD83C\uDDF4', bg: '\uD83C\uDDE7\uD83C\uDDEC', uk: '\uD83C\uDDFA\uD83C\uDDE6', az: '\uD83C\uDDE6\uD83C\uDDFF',
+            en: 'GB', tr: 'TR', de: 'DE', fr: 'FR',
+            es: 'ES', it: 'IT', pt: 'PT', ru: 'RU',
+            ja: 'JP', ko: 'KR', zh: 'CN', ar: 'SA',
+            nl: 'NL', pl: 'PL', sv: 'SE', da: 'DK',
+            fi: 'FI', no: 'NO', cs: 'CZ', hu: 'HU',
+            ro: 'RO', bg: 'BG', uk: 'UA', az: 'AZ',
         };
         const langNames: Record<string, string> = {
             en: 'English', tr: 'T\u00FCrk\u00E7e', de: 'Deutsch', fr: 'Fran\u00E7ais',
@@ -372,7 +373,7 @@ export class StyleFormProvider {
             ro: 'Rom\u00E2n\u0103', bg: '\u0411\u044A\u043B\u0433\u0430\u0440\u0441\u043A\u0438', uk: '\u0423\u043A\u0440\u0430\u0457\u043D\u0441\u044C\u043A\u0430', az: 'Az\u0259rbaycanca',
         };
         const langOptionsHtml = allLangCodes.map(c => {
-            const flag = langFlags[c] || '\uD83C\uDFF3\uFE0F';
+            const flag = langFlags[c] || c.toUpperCase();
             const name = langNames[c] || c;
             const suffix = builtInLangs.includes(c) ? '' : ' *';
             return `<option value="${c}" ${c === lang ? 'selected' : ''}>${flag} ${name}${suffix}</option>`;
@@ -1139,7 +1140,7 @@ export class StyleFormProvider {
                         <div id="snippetModalBody" style="height:220px; border:1px solid var(--vscode-input-border, #444); border-radius:3px;"></div>
                         <div class="snippet-modal-error" id="snippetModalError"></div>
                         <div class="snippet-modal-buttons">
-                            <button class="btn btn-secondary" onclick="saveSnippetModal()" data-i18n="snippets.save">Save</button>
+                            <button class="btn" onclick="saveSnippetModal()" data-i18n="snippets.save" style="background:var(--vscode-button-background);color:var(--vscode-button-foreground);border:none;padding:6px 18px;">Save</button>
                             <button class="btn btn-secondary" onclick="closeSnippetModal()" data-i18n="snippets.cancel">Cancel</button>
                         </div>
                     </div>
