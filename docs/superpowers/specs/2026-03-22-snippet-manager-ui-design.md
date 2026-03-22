@@ -111,7 +111,6 @@ Webview postMessage ← Updated snippet list
 | `createSnippet` | `{prefix, description, body}` | Yeni snippet oluştur |
 | `updateSnippet` | `{originalPrefix, prefix, description, body}` | Snippet güncelle |
 | `deleteSnippet` | `{prefix}` | Snippet sil (onay sonrası) |
-| `copyCode` | `{body}` | Kodu panoya kopyala |
 | `openFolderPicker` | — | Klasör seçici aç |
 
 **Extension → Webview:**
@@ -122,21 +121,76 @@ Webview postMessage ← Updated snippet list
 | `snippetDeleted` | `{success, error?}` | Silme sonucu |
 | `folderChanged` | `{folder}` | Yeni klasör yolu |
 
+### Prefix Validation
+
+Prefix dosya adı olarak kullanıldığından aşağıdaki kurallar uygulanır:
+- **Yasaklı karakterler:** `/`, `\`, `:`, `?`, `"`, `<`, `>`, `|`, `*` ve `..` — modal'da kaydetmeden önce doğrulama yapılır
+- **Windows reserved adlar:** `CON`, `PRN`, `AUX`, `NUL`, `COM1-9`, `LPT1-9` yasaklı
+- **Boş prefix:** kabul edilmez
+- **Dosya adı:** Prefix doğrudan dosya adı olarak kullanılır (`${prefix}.json`)
+
+### Duplicate Prefix Handling
+
+- **Create:** Kaydetmeden önce `${prefix}.json` dosyasının varlığı kontrol edilir. Varsa hata mesajı gösterilir: "Bu prefix zaten mevcut."
+- **Update:** Prefix değiştirilirse yeni prefix'in mevcut bir dosyayla çakışıp çakışmadığı kontrol edilir.
+
 ### File Operations
 
-- **Create:** `fs.writeFile(path.join(folder, `${prefix}.json`), JSON.stringify(snippet, null, 2))`
-- **Update:** Eski dosyayı sil + yeni dosya yaz (prefix değişebilir → dosya adı değişir)
-- **Delete:** `fs.unlink(path.join(folder, `${prefix}.json`))` — silmeden önce VS Code confirmation dialog göster
-- **Read:** Mevcut `SnippetProvider` ile aynı mantık — klasördeki tüm `.json` dosyalarını oku
+- **Create:** `fs.writeFile(path.join(folder, `${prefix}.json`), JSON.stringify(snippet, null, 2))` — duplicate check sonrası
+- **Update:** Eski dosyayı sil + yeni dosya yaz (prefix değişebilir → dosya adı değişir) — yeni prefix duplicate check sonrası
+- **Delete:** `fs.unlink(path.join(folder, `${prefix}.json`))` — silmeden önce VS Code confirmation dialog: "'{prefix}' snippet'ini silmek istediğinize emin misiniz?"
+- **Read:** `SnippetProvider.getSnippets()` public metodu ile (aşağıya bkz.)
+
+### SnippetProvider Refactoring
+
+`SnippetProvider`'a aşağıdaki public metotlar eklenir (snippet okuma mantığı tekrarını önlemek için):
+
+```typescript
+// Raw snippet listesini döndürür (UI için)
+public getSnippets(): RedgateSnippet[] { ... }
+
+// Snippet klasör yolunu döndürür
+public getSnippetFolder(): string { ... }
+```
+
+`RedgateSnippet` interface'i `snippetProvider.ts`'den export edilir.
+
+### Empty State Handling
+
+- **Klasör ayarlanmamış:** "Snippet klasörü ayarlanmamış. [...] butonuna tıklayarak bir klasör seçin."
+- **Klasör boş:** "Bu klasörde snippet bulunamadı. New butonuna tıklayarak yeni snippet oluşturun."
+- **Klasör erişilemez:** "Snippet klasörüne erişilemiyor: {path}. Klasör yolunu kontrol edin."
 
 ### Monaco Editor Integration
 
 Webview içinde Monaco Editor kullanımı:
-- Monaco Editor'ü CDN'den yükle (`https://cdn.jsdelivr.net/npm/monaco-editor@latest/min/vs`)
-- Alternatif: Extension bundle'a dahil et (`node_modules/monaco-editor/min`)
+- Monaco Editor extension bundle'a dahil edilir (`node_modules/monaco-editor/min`) — CSP uyumluluğu ve offline çalışma için CDN yerine bundled tercih edilir
 - İki instance: biri preview (readonly), biri modal (editable)
 - Dil: `sql`
 - Tema: `vs-dark`
+
+### Webview State
+
+- `retainContextWhenHidden: true` — kullanıcı başka sekmeye geçip geri döndüğünde state korunur
+- Modal açıkken sekme değiştirilirse, geri dönüldüğünde modal hâlâ açık kalır
+
+### Clipboard
+
+- Kopyala butonu webview tarafında `navigator.clipboard.writeText()` ile çalışır — extension'a mesaj göndermeye gerek yok
+
+### Error Display
+
+- CRUD hataları (dosya yazma izni, disk dolu vb.) modal içinde inline hata mesajı olarak gösterilir
+- Hata metni kırmızı renkte, ilgili alanın altında
+
+### Keyboard Shortcuts
+
+- Modal içinde `Escape` → modal'ı kapat
+- Modal içinde `Ctrl+S` → kaydet
+
+### Sort Order
+
+- Snippet listesi prefix'e göre alfabetik sıralı (case-insensitive)
 
 ### Registration (extension.ts)
 
@@ -168,7 +222,7 @@ Command palette ve/veya context menu'den erişilebilir:
 
 ## Dependencies
 
-- `monaco-editor` (CDN veya bundled)
-- Mevcut `SnippetProvider` (completion cache refresh için)
+- `monaco-editor` (bundled)
+- Mevcut `SnippetProvider` (completion cache refresh + raw snippet data için)
 - VS Code `WebviewPanel` API
 - Node.js `fs` modülü (dosya CRUD)
