@@ -82,6 +82,7 @@
   "config.connections.databaseProjects": "Veritabanı bazlı proje yolları: { \"DbAdı\": \"c:\\\\yol\\\\proje\" }",
   "config.autoRefreshMinutes": "Şema cache otomatik yenileme süresi (dakika, 0 = kapalı)",
   "config.resultDisplayMode": "Birden fazla sonuç setini gösterme şekli: 'tabs' (sekmeler arası geçiş) veya 'stacked' (alt alta, hepsi görünür)",
+  "config.gridLibrary": "Sorgu sonuçları için grid kütüphanesi: 'tabulator', 'ag-grid' veya 'handsontable'",
   "config.queryShortcuts": "SSMS tarzı sorgu kısayolları. Cursor altındaki kelime için @WORD kullanın.",
   "config.queryShortcuts.key": "Kısayol tuşu etiketi (sadece görüntüleme amaçlı)",
   "config.queryShortcuts.query": "Çalıştırılacak SQL sorgusu. @WORD = cursor altındaki kelime",
