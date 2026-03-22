@@ -78,6 +78,13 @@ export function applyLayout(tokens: Token[], options: LayoutOptions): string {
                 continue;
             }
 
+            // WHERE/HAVING clause — wrap at AND/OR boundaries
+            const kwUpper = clause.keyword.toUpperCase();
+            if ((kwUpper === 'WHERE' || kwUpper === 'HAVING') && options.maxLineLength > 0 && hasAndOrTokens(clause.rawTokens)) {
+                formattedClauses.push(formatWhereClause(clause, kwPadded, paddingWidth, options, ind));
+                continue;
+            }
+
             if (clause.items.length === 0) {
                 formattedClauses.push(kwPadded + prefix);
                 continue;
@@ -422,6 +429,104 @@ function rebuildRaw(clauses: Clause[], suffixTokens: Token[]): string {
         result += t.value;
     }
     return result;
+}
+
+// ─── WHERE/HAVING wrapping helpers ───
+
+interface WhereSegment {
+    connector: string; // '' for first, 'And'/'Or' for subsequent
+    text: string;
+}
+
+/**
+ * Check if clause rawTokens have depth-0 AND/OR keywords.
+ */
+function hasAndOrTokens(tokens: Token[]): boolean {
+    let depth = 0;
+    let seenBetween = false;
+    for (const t of tokens) {
+        if (t.type === 'punctuation' && t.value === '(') depth++;
+        if (t.type === 'punctuation' && t.value === ')') depth = Math.max(0, depth - 1);
+        if (depth === 0 && t.type === 'keyword') {
+            const upper = t.value.toUpperCase();
+            if (upper === 'BETWEEN') { seenBetween = true; continue; }
+            if (upper === 'AND' && seenBetween) { seenBetween = false; continue; }
+            if (upper === 'AND' || upper === 'OR') return true;
+        }
+    }
+    return false;
+}
+
+/**
+ * Split WHERE/HAVING rawTokens into segments at depth-0 AND/OR boundaries.
+ * Respects parentheses and BETWEEN...AND.
+ */
+function splitWhereConditions(tokens: Token[]): WhereSegment[] {
+    const segments: WhereSegment[] = [];
+    let current: Token[] = [];
+    let depth = 0;
+    let seenBetween = false;
+    let pendingConnector = '';
+
+    for (const t of tokens) {
+        if (t.type === 'punctuation' && t.value === '(') depth++;
+        if (t.type === 'punctuation' && t.value === ')') depth = Math.max(0, depth - 1);
+
+        if (depth === 0 && t.type === 'keyword') {
+            const upper = t.value.toUpperCase();
+            if (upper === 'BETWEEN') { seenBetween = true; current.push(t); continue; }
+            if (upper === 'AND' && seenBetween) { seenBetween = false; current.push(t); continue; }
+            if (upper === 'AND' || upper === 'OR') {
+                // Flush accumulated tokens as a segment
+                const text = trimTokens(current);
+                if (text) {
+                    segments.push({ connector: pendingConnector, text });
+                }
+                pendingConnector = t.value;
+                current = [];
+                continue;
+            }
+        }
+        current.push(t);
+    }
+
+    // Flush remaining
+    const text = trimTokens(current);
+    if (text) {
+        segments.push({ connector: pendingConnector, text });
+    }
+
+    return segments;
+}
+
+/**
+ * Format WHERE/HAVING clause with line wrapping at AND/OR boundaries.
+ */
+function formatWhereClause(clause: Clause, kwPadded: string, paddingWidth: number, options: LayoutOptions, blockIndent: string): string {
+    const segments = splitWhereConditions(clause.rawTokens);
+    if (segments.length === 0) {
+        return kwPadded;
+    }
+
+    const lines: string[] = [];
+    // First segment: keyword + first condition
+    let currentLine = kwPadded + segments[0].text;
+
+    for (let i = 1; i < segments.length; i++) {
+        const seg = segments[i];
+        const addition = ' ' + seg.connector + ' ' + seg.text;
+        const testLine = currentLine + addition;
+
+        if (options.maxLineLength > 0 && testLine.length > options.maxLineLength) {
+            // Wrap to new line
+            lines.push(currentLine);
+            currentLine = blockIndent + ' '.repeat(paddingWidth) + seg.connector + ' ' + seg.text;
+        } else {
+            currentLine = testLine;
+        }
+    }
+    lines.push(currentLine);
+    return lines.join('\n');
 }
 
 // ─── JOIN formatting helpers ───

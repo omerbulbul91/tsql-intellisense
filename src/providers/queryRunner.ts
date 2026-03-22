@@ -12,7 +12,7 @@ export class QueryRunner implements vscode.WebviewViewProvider {
     /** Tracks which database each document belongs to (URI → {profileName, dbName}) */
     private documentDbMap = new Map<string, { profileName: string; dbName: string } | null>();
 
-    constructor(private connectionManager: ConnectionManager) {
+    constructor(private connectionManager: ConnectionManager, private extensionUri?: vscode.Uri) {
         // Switch query results when active editor changes
         vscode.window.onDidChangeActiveTextEditor((editor) => {
             if (!editor || !this.webviewView) { return; }
@@ -44,20 +44,14 @@ export class QueryRunner implements vscode.WebviewViewProvider {
     ): void {
         this.webviewView = webviewView;
 
+        const localRoots: vscode.Uri[] = [];
+        if (this.extensionUri) {
+            localRoots.push(vscode.Uri.joinPath(this.extensionUri, 'node_modules', 'tabulator-tables'));
+        }
         webviewView.webview.options = {
             enableScripts: true,
+            localResourceRoots: localRoots.length > 0 ? localRoots : undefined,
         };
-
-        // Handle messages from webview (export)
-        webviewView.webview.onDidReceiveMessage((msg) => {
-            if (msg.type === 'exportCsv') {
-                this.exportCsv(msg.data);
-            } else if (msg.type === 'exportJson') {
-                this.exportJson(msg.data);
-            } else if (msg.type === 'openInExcel') {
-                this.openInExcel(msg.data);
-            }
-        });
 
         // Show last result if available
         if (this.lastResult) {
@@ -252,22 +246,31 @@ export class QueryRunner implements vscode.WebviewViewProvider {
 <body>Run a query (F5) to see results here</body></html>`;
     }
 
+    private getTabulatorUris(webview: vscode.Webview): { js: vscode.Uri; css: vscode.Uri } | null {
+        if (!this.extensionUri) { return null; }
+        const base = vscode.Uri.joinPath(this.extensionUri, 'node_modules', 'tabulator-tables', 'dist');
+        return {
+            js: webview.asWebviewUri(vscode.Uri.joinPath(base, 'js', 'tabulator.min.js')),
+            css: webview.asWebviewUri(vscode.Uri.joinPath(base, 'css', 'tabulator_midnight.min.css')),
+        };
+    }
+
     private buildHtml(result: BatchResult): string {
+        if (!this.webviewView) { return this.buildEmptyHtml(); }
+        const uris = this.getTabulatorUris(this.webviewView.webview);
+
         const config = vscode.workspace.getConfiguration('tsql-intellisense');
         const displayMode = config.get<string>('resultDisplayMode', 'tabs');
-        const resultTabs = result.resultSets.map((rs, i) => this.buildResultSetTab(rs, i));
         const messagesHtml = this.buildMessages(result);
-        const activeTab = result.resultSets.length > 0 ? 0 : -1;
-
-        if (displayMode === 'stacked' && result.resultSets.length > 1) {
-            return this.buildStackedHtml(result, resultTabs, messagesHtml);
-        }
+        const resultSetsJson = JSON.stringify(result.resultSets.map(rs => ({ columns: rs.columns, rows: rs.rows })));
+        const isStacked = displayMode === 'stacked' && result.resultSets.length > 1;
 
         return `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+${uris ? `<link rel="stylesheet" href="${uris.css}">` : ''}
 <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body {
@@ -280,40 +283,59 @@ export class QueryRunner implements vscode.WebviewViewProvider {
         display: flex;
         flex-direction: column;
     }
+    /* ── Toolbar ─────────────────────────────────── */
     .toolbar {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        padding: 4px 8px;
+        display: flex; align-items: center; gap: 6px; padding: 3px 8px;
         background: var(--vscode-editorWidget-background);
         border-bottom: 1px solid var(--vscode-editorWidget-border);
+        flex-shrink: 0;
     }
-    .toolbar .info {
-        flex: 1;
-        font-size: 12px;
-        color: var(--vscode-descriptionForeground);
+    .toolbar label { font-size: 11px; color: var(--vscode-descriptionForeground); white-space: nowrap; }
+    .toolbar input[type="text"] {
+        flex: 1; padding: 2px 6px; font-size: 11px;
+        background: var(--vscode-input-background);
+        color: var(--vscode-input-foreground);
+        border: 1px solid var(--vscode-input-border, transparent);
+        border-radius: 2px; outline: none;
     }
+    .toolbar input[type="text"]:focus { border-color: var(--vscode-focusBorder); }
+    .toolbar input[type="text"]::placeholder { color: var(--vscode-input-placeholderForeground); }
     .toolbar button {
-        padding: 2px 8px;
-        font-size: 11px;
-        cursor: pointer;
+        padding: 2px 8px; font-size: 11px; cursor: pointer;
         background: var(--vscode-button-secondaryBackground);
         color: var(--vscode-button-secondaryForeground);
-        border: none;
-        border-radius: 2px;
+        border: none; border-radius: 2px; white-space: nowrap;
     }
-    .toolbar button:hover {
-        background: var(--vscode-button-secondaryHoverBackground);
+    .toolbar button:hover { background: var(--vscode-button-secondaryHoverBackground); }
+    /* ── Column Chooser Popup ────────────────────── */
+    .col-chooser {
+        position: fixed; z-index: 1000;
+        background: var(--vscode-menu-background, #252526);
+        border: 1px solid var(--vscode-menu-border, #454545);
+        border-radius: 4px; padding: 6px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+        max-height: 300px; overflow-y: auto; min-width: 180px;
     }
+    .col-chooser label {
+        display: flex; align-items: center; gap: 6px; padding: 2px 4px;
+        font-size: 11px; cursor: pointer;
+        color: var(--vscode-menu-foreground, #ccc);
+    }
+    .col-chooser label:hover { background: var(--vscode-menu-selectionBackground, #094771); border-radius: 2px; }
+    .col-chooser .col-chooser-actions {
+        display: flex; gap: 4px; padding: 4px 0 2px; border-top: 1px solid var(--vscode-menu-separatorBackground, #454545);
+        margin-top: 4px;
+    }
+    .col-chooser .col-chooser-actions button { flex: 1; font-size: 10px; padding: 2px 4px; }
+    /* ── Tabs ─────────────────────────────────────── */
     .tabs {
         display: flex;
         background: var(--vscode-editorWidget-background);
         border-bottom: 1px solid var(--vscode-editorWidget-border);
+        flex-shrink: 0;
     }
     .tab {
-        padding: 4px 12px;
-        font-size: 11px;
-        cursor: pointer;
+        padding: 4px 12px; font-size: 11px; cursor: pointer;
         border-bottom: 2px solid transparent;
         color: var(--vscode-descriptionForeground);
     }
@@ -321,116 +343,185 @@ export class QueryRunner implements vscode.WebviewViewProvider {
         color: var(--vscode-foreground);
         border-bottom-color: var(--vscode-focusBorder);
     }
-    .tab-content { display: none; }
-    .tab-content.active { display: block; }
-    .table-container {
-        overflow: auto;
-        flex: 1;
-    }
-    table {
-        width: 100%;
-        border-collapse: collapse;
-        font-size: 12px;
-    }
-    th {
-        position: sticky;
-        top: 0;
+    /* ── Grid containers ─────────────────────────── */
+    .grid-wrapper { flex: 1; overflow: hidden; }
+    .grid-container { width: 100%; height: 100%; }
+    .stacked-wrapper { flex: 1; overflow: auto; }
+    .stacked-section { margin-bottom: 4px; }
+    .stacked-header {
+        padding: 4px 8px; font-size: 11px; font-weight: bold;
         background: var(--vscode-editorWidget-background);
-        padding: 4px 8px;
-        text-align: left;
-        border-bottom: 2px solid var(--vscode-editorWidget-border);
-        cursor: pointer;
-        user-select: none;
-        white-space: nowrap;
+        border-bottom: 2px solid var(--vscode-focusBorder);
+        color: var(--vscode-foreground);
     }
-    th:hover { background: var(--vscode-list-hoverBackground); }
-    th .sort-arrow { margin-left: 4px; opacity: 0.5; font-size: 10px; }
-    td {
-        padding: 2px 8px;
-        border-bottom: 1px solid var(--vscode-editorWidget-border);
-        white-space: nowrap;
-        max-width: 400px;
-        overflow: hidden;
-        text-overflow: ellipsis;
-    }
-    tr:hover td { background: var(--vscode-list-hoverBackground); }
-    tr.selected td { background: var(--vscode-list-activeSelectionBackground); color: var(--vscode-list-activeSelectionForeground); }
-    td.selected-cell { background: rgba(0, 120, 212, 0.15); }
-    td.active-cell { outline: 2px solid var(--vscode-focusBorder); outline-offset: -2px; }
-    td.null-val { color: var(--vscode-descriptionForeground); font-style: italic; }
-    th.row-check, td.row-check {
-        width: 28px;
-        min-width: 28px;
-        max-width: 28px;
-        text-align: center;
-        padding: 2px 4px;
-        cursor: pointer;
-        user-select: none;
-    }
-    th.row-check { font-size: 10px; }
-    td.row-check input[type="checkbox"] {
-        cursor: pointer;
-        margin: 0;
-        accent-color: var(--vscode-focusBorder);
-    }
-    .messages {
-        padding: 6px 8px;
-        font-family: var(--vscode-editor-fontFamily, monospace);
-        font-size: 12px;
-        white-space: pre-wrap;
+    .stacked-grid { width: 100%; }
+    /* ── Status bar ──────────────────────────────── */
+    .status-bar {
+        display: flex; align-items: center; gap: 12px; padding: 2px 8px;
+        background: var(--vscode-editorWidget-background);
         border-top: 1px solid var(--vscode-editorWidget-border);
-        max-height: 120px;
-        overflow-y: auto;
+        flex-shrink: 0; font-size: 11px;
+        color: var(--vscode-descriptionForeground);
     }
-    .context-menu {
-        position: fixed;
-        background: var(--vscode-menu-background, #252526);
-        border: 1px solid var(--vscode-menu-border, #454545);
-        border-radius: 4px;
-        padding: 4px 0;
-        min-width: 180px;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.4);
-        z-index: 1000;
-        font-size: 12px;
-    }
-    .context-menu-item {
-        padding: 4px 24px;
-        cursor: pointer;
-        display: flex;
-        justify-content: space-between;
-        color: var(--vscode-menu-foreground, #ccc);
-    }
-    .context-menu-item:hover {
-        background: var(--vscode-menu-selectionBackground, #094771);
-        color: var(--vscode-menu-selectionForeground, #fff);
-    }
-    .context-menu-item .shortcut {
-        margin-left: 24px;
-        opacity: 0.7;
-        font-size: 11px;
-    }
-    .context-menu-separator {
-        height: 1px;
-        background: var(--vscode-menu-separatorBackground, #454545);
-        margin: 4px 0;
+    /* ── Messages / Error ────────────────────────── */
+    .messages {
+        padding: 6px 8px; font-family: var(--vscode-editor-fontFamily, monospace);
+        font-size: 12px; white-space: pre-wrap;
+        border-top: 1px solid var(--vscode-editorWidget-border);
+        max-height: 120px; overflow-y: auto; flex-shrink: 0;
     }
     .error {
         color: var(--vscode-errorForeground);
         background: var(--vscode-inputValidation-errorBackground);
-        padding: 6px 8px;
-        border-left: 3px solid var(--vscode-inputValidation-errorBorder);
+        padding: 6px 8px; border-left: 3px solid var(--vscode-inputValidation-errorBorder);
+    }
+    /* ── Tabulator VS Code theme overrides ────────── */
+    .tabulator {
+        background: var(--vscode-editor-background) !important;
+        border: none !important;
+        font-family: var(--vscode-font-family, 'Segoe UI', sans-serif) !important;
+        font-size: 12px !important;
+        color: var(--vscode-foreground) !important;
+    }
+    .tabulator .tabulator-header {
+        background: var(--vscode-editorWidget-background) !important;
+        border-bottom: 2px solid var(--vscode-editorWidget-border) !important;
+        color: var(--vscode-foreground) !important;
+    }
+    .tabulator .tabulator-header .tabulator-col {
+        background: var(--vscode-editorWidget-background) !important;
+        border-right: 1px solid var(--vscode-editorWidget-border) !important;
+    }
+    .tabulator .tabulator-header .tabulator-col:hover {
+        background: var(--vscode-list-hoverBackground) !important;
+    }
+    .tabulator .tabulator-header .tabulator-col .tabulator-col-content {
+        padding: 4px 8px !important;
+    }
+    .tabulator .tabulator-header .tabulator-col .tabulator-header-filter input {
+        background: var(--vscode-input-background) !important;
+        color: var(--vscode-input-foreground) !important;
+        border: 1px solid var(--vscode-input-border, transparent) !important;
+        border-radius: 2px !important;
+        padding: 1px 4px !important;
+        font-size: 11px !important;
+        outline: none !important;
+    }
+    .tabulator .tabulator-header .tabulator-col .tabulator-header-filter input:focus {
+        border-color: var(--vscode-focusBorder) !important;
+    }
+    .tabulator .tabulator-header .tabulator-col .tabulator-header-filter input::placeholder {
+        color: var(--vscode-input-placeholderForeground) !important;
+    }
+    .tabulator .tabulator-tableholder {
+        background: var(--vscode-editor-background) !important;
+    }
+    .tabulator-row {
+        border-bottom: 1px solid var(--vscode-editorWidget-border) !important;
+        background: var(--vscode-editor-background) !important;
+        color: var(--vscode-foreground) !important;
+    }
+    .tabulator-row:hover {
+        background: var(--vscode-list-hoverBackground) !important;
+    }
+    .tabulator-row.tabulator-selected {
+        background: var(--vscode-list-activeSelectionBackground) !important;
+        color: var(--vscode-list-activeSelectionForeground) !important;
+    }
+    .tabulator-row .tabulator-cell {
+        border-right: 1px solid var(--vscode-editorWidget-border) !important;
+        padding: 2px 8px !important;
+    }
+    .tabulator-row .tabulator-cell.cell-selected {
+        background: rgba(0, 120, 212, 0.15) !important;
+    }
+    .tabulator-row .tabulator-cell.cell-active {
+        outline: 2px solid var(--vscode-focusBorder) !important;
+        outline-offset: -2px;
+    }
+    .tabulator-row .tabulator-cell.null-val {
+        color: var(--vscode-descriptionForeground) !important;
+        font-style: italic;
+    }
+    .tabulator .tabulator-footer {
+        background: var(--vscode-editorWidget-background) !important;
+        border-top: 1px solid var(--vscode-editorWidget-border) !important;
+        color: var(--vscode-descriptionForeground) !important;
+    }
+    /* checkbox styling */
+    .tabulator-row .tabulator-cell input[type="checkbox"] {
+        accent-color: var(--vscode-focusBorder);
+        cursor: pointer;
+    }
+    /* ── Header menu (funnel) icon ───────────────── */
+    .tabulator .tabulator-header .tabulator-col .tabulator-header-popup-button {
+        color: var(--vscode-descriptionForeground) !important;
+        opacity: 0.5;
+        padding: 0 2px !important;
+        font-size: 10px !important;
+    }
+    .tabulator .tabulator-header .tabulator-col .tabulator-header-popup-button:hover {
+        opacity: 1;
+    }
+    .tabulator .tabulator-header .tabulator-col.has-filter .tabulator-header-popup-button {
+        opacity: 1;
+        color: var(--vscode-focusBorder) !important;
+    }
+    /* ── Header menu popup ───────────────────────── */
+    .tabulator-popup {
+        background: var(--vscode-menu-background, #252526) !important;
+        border: 1px solid var(--vscode-menu-border, #454545) !important;
+        border-radius: 4px !important;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.4) !important;
+        padding: 6px !important;
+    }
+    .tabulator-popup .filter-popup {
+        display: flex; flex-direction: column; gap: 4px; min-width: 160px;
+    }
+    .tabulator-popup .filter-popup input {
+        padding: 3px 6px; font-size: 11px;
+        background: var(--vscode-input-background);
+        color: var(--vscode-input-foreground);
+        border: 1px solid var(--vscode-input-border, transparent);
+        border-radius: 2px; outline: none;
+    }
+    .tabulator-popup .filter-popup input:focus {
+        border-color: var(--vscode-focusBorder);
+    }
+    .tabulator-popup .filter-popup input::placeholder {
+        color: var(--vscode-input-placeholderForeground);
+    }
+    .tabulator-popup .filter-popup .filter-actions {
+        display: flex; gap: 4px;
+    }
+    .tabulator-popup .filter-popup .filter-actions button {
+        flex: 1; padding: 2px 6px; font-size: 10px; cursor: pointer;
+        background: var(--vscode-button-secondaryBackground);
+        color: var(--vscode-button-secondaryForeground);
+        border: none; border-radius: 2px;
+    }
+    .tabulator-popup .filter-popup .filter-actions button:hover {
+        background: var(--vscode-button-secondaryHoverBackground);
+    }
+    .tabulator-popup .filter-popup .filter-actions button.primary {
+        background: var(--vscode-button-background);
+        color: var(--vscode-button-foreground);
+    }
+    .tabulator-popup .filter-popup .filter-actions button.primary:hover {
+        background: var(--vscode-button-hoverBackground);
     }
 </style>
 </head>
 <body>
+    ${result.resultSets.length > 0 ? `
     <div class="toolbar">
-        <span class="info">${this.buildInfoText(result)}</span>
-        ${result.resultSets.length > 0 ? `
-            <button onclick="exportCsv()">CSV</button>
-            <button onclick="exportJson()">JSON</button>
-        ` : ''}
+        <label>Filter:</label>
+        <input type="text" id="quickFilter" placeholder="Filter any column..." oninput="onQuickFilter(this.value)">
+        <button onclick="toggleColumnChooser(event)">Columns</button>
+        <button onclick="exportCsv()">CSV</button>
     </div>
-    ${result.resultSets.length > 1 ? `
+    ` : ''}
+    ${!isStacked && result.resultSets.length > 1 ? `
         <div class="tabs">
             ${result.resultSets.map((_, i) => `
                 <div class="tab ${i === 0 ? 'active' : ''}" onclick="switchTab(${i})">
@@ -440,439 +531,307 @@ export class QueryRunner implements vscode.WebviewViewProvider {
             <div class="tab" onclick="switchTab(-1)">Messages</div>
         </div>
     ` : ''}
-    ${resultTabs.map((html, i) => `
-        <div class="tab-content ${i === activeTab ? 'active' : ''}" data-tab="${i}">
-            ${html}
+    ${isStacked ? `
+        <div class="stacked-wrapper">
+            ${result.resultSets.map((rs, i) => `
+                <div class="stacked-section">
+                    <div class="stacked-header">Result ${i + 1} (${rs.rows.length} rows)</div>
+                    <div id="grid-${i}" class="stacked-grid"></div>
+                </div>
+            `).join('')}
+            ${messagesHtml ? `<div class="stacked-section"><div class="stacked-header">Messages</div>${messagesHtml}</div>` : ''}
         </div>
-    `).join('')}
-    <div class="tab-content ${activeTab === -1 ? 'active' : ''}" data-tab="-1">
-        ${messagesHtml}
+    ` : `
+        ${result.resultSets.map((_, i) => `
+            <div class="grid-wrapper" id="tab-${i}" style="${i > 0 ? 'display:none' : ''}">
+                <div id="grid-${i}" class="grid-container"></div>
+            </div>
+        `).join('')}
+        <div id="tab-messages" style="${result.resultSets.length > 0 ? 'display:none' : ''}">
+            ${messagesHtml}
+        </div>
+    `}
+    ${!isStacked && result.resultSets.length <= 1 ? messagesHtml : ''}
+    <div class="status-bar">
+        <span id="status-info">${this.buildInfoText(result)}</span>
     </div>
+${uris ? `<script src="${uris.js}"></script>` : ''}
 <script>
-    const vscode = acquireVsCodeApi();
-    let currentTab = ${activeTab};
-    const resultSets = ${JSON.stringify(result.resultSets.map(rs => ({ columns: rs.columns, rows: rs.rows })))};
+    const vscodeApi = acquireVsCodeApi();
+    const resultSets = ${resultSetsJson};
+    const tables = [];
+    const isStacked = ${isStacked};
+    const totalRows = ${result.resultSets.reduce((s, rs) => s + rs.rows.length, 0)};
+    const elapsed = '${(result.elapsed / 1000).toFixed(2)}s';
 
-    function switchTab(index) {
-        document.querySelectorAll('.tab').forEach((t, i) => {
-            t.classList.toggle('active', i === (index === -1 ? document.querySelectorAll('.tab').length - 1 : index));
+    resultSets.forEach((rs, i) => {
+        if (rs.columns.length === 0) return;
+        const el = document.getElementById('grid-' + i);
+        if (!el) return;
+
+        ${isStacked ? `
+        const rowH = 28, headerH = 56;
+        el.style.height = Math.min(headerH + rs.rows.length * rowH, 400) + 'px';
+        ` : ''}
+
+        const columns = [
+            { formatter: "rowSelection", titleFormatter: "rowSelection", headerSort: false, resizable: false, width: 30, hozAlign: "center" },
+            ...rs.columns.map(col => ({
+                title: col,
+                field: col,
+                sorter: "string",
+                resizable: true,
+                headerPopup: function(e, column) {
+                    return buildFilterMenu(column);
+                },
+                headerPopupIcon: "<svg width='10' height='10' viewBox='0 0 24 24' fill='currentColor'><path d='M3 4h18l-7 8v5l-4 2v-7z'/></svg>",
+                formatter: function(cell) {
+                    const v = cell.getValue();
+                    if (v === null || v === undefined) {
+                        cell.getElement().classList.add('null-val');
+                        return 'NULL';
+                    }
+                    return v;
+                },
+            })),
+        ];
+
+        const table = new Tabulator(el, {
+            data: rs.rows,
+            columns: columns,
+            layout: "fitDataFill",
+            height: isStacked ? undefined : "100%",
+            selectable: true,
+            selectableRangeMode: "click",
+            clipboard: true,
+            clipboardCopyRowRange: "selected",
+            clipboardCopyConfig: { columnHeaders: true },
+            headerSortTristate: true,
+            movableColumns: false,
+            resizableColumnFit: true,
+            rowHeight: 25,
+            headerHeight: 28,
+            dataFiltered: function(filters, rows) {
+                updateStatus(rows.length);
+            },
         });
-        document.querySelectorAll('.tab-content').forEach(tc => {
-            tc.classList.toggle('active', tc.dataset.tab == index);
-        });
-        currentTab = index;
+
+        tables.push(table);
+    });
+
+    // ── Column Filter Menu (funnel) ───────────────────
+    const columnFilters = {};
+    function buildFilterMenu(column) {
+        const field = column.getField();
+        const container = document.createElement('div');
+        container.className = 'filter-popup';
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.placeholder = 'Filter ' + field + '...';
+        input.value = columnFilters[field] || '';
+        input.addEventListener('keydown', (e) => { if (e.key === 'Enter') applyBtn.click(); });
+        const actions = document.createElement('div');
+        actions.className = 'filter-actions';
+        const applyBtn = document.createElement('button');
+        applyBtn.className = 'primary';
+        applyBtn.textContent = 'Apply';
+        applyBtn.onclick = () => {
+            const val = input.value.trim();
+            const table = column.getTable();
+            const colEl = column.getElement();
+            if (val) {
+                columnFilters[field] = val;
+                table.addFilter(field, "like", val);
+                colEl.classList.add('has-filter');
+            } else {
+                delete columnFilters[field];
+                table.removeFilter(field, "like", columnFilters[field]);
+                table.clearFilter();
+                // re-apply remaining filters
+                Object.entries(columnFilters).forEach(([f, v]) => table.addFilter(f, "like", v));
+                colEl.classList.remove('has-filter');
+            }
+        };
+        const clearBtn = document.createElement('button');
+        clearBtn.textContent = 'Clear';
+        clearBtn.onclick = () => {
+            input.value = '';
+            delete columnFilters[field];
+            const table = column.getTable();
+            table.removeFilter(field, "like");
+            column.getElement().classList.remove('has-filter');
+        };
+        actions.appendChild(applyBtn);
+        actions.appendChild(clearBtn);
+        container.appendChild(input);
+        container.appendChild(actions);
+        setTimeout(() => input.focus(), 50);
+        return container;
     }
 
-    function sortTable(tabIndex, colIndex) {
-        const container = document.querySelector('[data-tab="' + tabIndex + '"] table tbody');
-        if (!container) return;
-        const rows = Array.from(container.rows);
-        const isAsc = container.dataset.sortCol == colIndex && container.dataset.sortDir === 'asc';
-        rows.sort((a, b) => {
-            const aVal = a.cells[colIndex].textContent || '';
-            const bVal = b.cells[colIndex].textContent || '';
-            const aNum = Number(aVal), bNum = Number(bVal);
-            if (!isNaN(aNum) && !isNaN(bNum)) return isAsc ? bNum - aNum : aNum - bNum;
-            return isAsc ? bVal.localeCompare(aVal) : aVal.localeCompare(bVal);
+    // ── Quick Filter ────────────────────────────────
+    function onQuickFilter(value) {
+        tables.forEach(table => {
+            if (!value) {
+                table.clearFilter();
+                return;
+            }
+            const rs = resultSets[tables.indexOf(table)];
+            if (!rs) return;
+            const filters = rs.columns.map(col => ({
+                field: col,
+                type: "like",
+                value: value,
+            }));
+            table.setFilter([filters]);
         });
-        rows.forEach(r => container.appendChild(r));
-        container.dataset.sortCol = colIndex;
-        container.dataset.sortDir = isAsc ? 'desc' : 'asc';
     }
 
-    function exportCsv() {
-        const rs = resultSets[Math.max(0, currentTab)];
-        if (!rs) return;
-        const lines = [rs.columns.join(',')];
-        rs.rows.forEach(row => {
-            lines.push(rs.columns.map(c => {
-                const val = row[c];
-                if (val === null || val === undefined) return '';
-                const str = String(val);
-                return str.includes(',') || str.includes('"') ? '"' + str.replace(/"/g, '""') + '"' : str;
-            }).join(','));
+    // ── Column Chooser ──────────────────────────────
+    let chooserEl = null;
+    function toggleColumnChooser(event) {
+        if (chooserEl) { chooserEl.remove(); chooserEl = null; return; }
+        const table = tables[Math.max(0, currentTab || 0)];
+        if (!table) return;
+        const cols = table.getColumns().filter(c => c.getField());
+        chooserEl = document.createElement('div');
+        chooserEl.className = 'col-chooser';
+        cols.forEach(col => {
+            const lbl = document.createElement('label');
+            const cb = document.createElement('input');
+            cb.type = 'checkbox';
+            cb.checked = col.isVisible();
+            cb.onchange = () => col.isVisible() ? col.hide() : col.show();
+            lbl.appendChild(cb);
+            lbl.appendChild(document.createTextNode(col.getDefinition().title || col.getField()));
+            chooserEl.appendChild(lbl);
         });
-        vscode.postMessage({ type: 'exportCsv', data: lines.join('\\n') });
-    }
+        const actions = document.createElement('div');
+        actions.className = 'col-chooser-actions';
+        const showAll = document.createElement('button');
+        showAll.textContent = 'Show All';
+        showAll.onclick = () => { cols.forEach(c => c.show()); chooserEl.querySelectorAll('input').forEach(cb => cb.checked = true); };
+        const hideAll = document.createElement('button');
+        hideAll.textContent = 'Hide All';
+        hideAll.onclick = () => { cols.forEach(c => c.hide()); chooserEl.querySelectorAll('input').forEach(cb => cb.checked = false); };
+        actions.appendChild(showAll);
+        actions.appendChild(hideAll);
+        chooserEl.appendChild(actions);
 
-    function exportJson() {
-        const rs = resultSets[Math.max(0, currentTab)];
-        if (!rs) return;
-        vscode.postMessage({ type: 'exportJson', data: JSON.stringify(rs.rows, null, 2) });
+        const btn = event.target;
+        const rect = btn.getBoundingClientRect();
+        chooserEl.style.top = rect.bottom + 2 + 'px';
+        chooserEl.style.right = (window.innerWidth - rect.right) + 'px';
+        document.body.appendChild(chooserEl);
     }
+    document.addEventListener('click', (e) => {
+        if (chooserEl && !chooserEl.contains(e.target) && !e.target.closest('.toolbar button')) {
+            chooserEl.remove(); chooserEl = null;
+        }
+    });
 
-    // ── Cell Selection ─────────────────────────────────────────
+    // ── Cell Selection (Click, Ctrl+Click, Shift+Click range) ──
     let selectedCells = new Set();
     let activeCell = null;
     let lastClickedCell = null;
-
-    // ── Row Selection (via checkbox column) ─────────────────
-    let selectedRows = new Set();
-    let lastCheckedRow = null;
-
     document.addEventListener('click', (e) => {
-        // Ignore clicks on checkboxes (handled by toggleRowCheck)
-        if (e.target.closest('.row-check')) { return; }
+        const cell = e.target.closest('.tabulator-cell');
+        if (!cell || cell.closest('.tabulator-header')) return;
+        if (cell.querySelector('input[type="checkbox"]')) return;
 
-        const cell = e.target.closest('td');
-        const row = e.target.closest('tbody tr');
-        if (!cell || !row) {
-            selectedCells.clear();
-            activeCell = null;
-            refreshSelection();
-            return;
-        }
-
-        // Cell selection
         if (e.ctrlKey) {
-            if (selectedCells.has(cell)) { selectedCells.delete(cell); } else { selectedCells.add(cell); }
+            if (selectedCells.has(cell)) {
+                selectedCells.delete(cell); cell.classList.remove('cell-selected');
+            } else {
+                selectedCells.add(cell); cell.classList.add('cell-selected');
+            }
         } else if (e.shiftKey && lastClickedCell) {
-            // Range select cells between lastClickedCell and current
-            const allCells = Array.from(document.querySelectorAll('[data-tab="' + Math.max(0, currentTab) + '"] tbody td:not(.row-check)'));
+            // Range select between lastClickedCell and current
+            const allCells = Array.from(document.querySelectorAll('.tabulator-row .tabulator-cell:not(:first-child)'));
             const lastIdx = allCells.indexOf(lastClickedCell);
             const currIdx = allCells.indexOf(cell);
             if (lastIdx >= 0 && currIdx >= 0) {
                 const [start, end] = lastIdx < currIdx ? [lastIdx, currIdx] : [currIdx, lastIdx];
-                for (let i = start; i <= end; i++) { selectedCells.add(allCells[i]); }
-            }
-        } else {
-            selectedCells.clear();
-            selectedCells.add(cell);
-        }
-        activeCell = cell;
-        lastClickedCell = cell;
-        refreshSelection();
-    });
-
-    function toggleRowCheck(checkbox, event) {
-        const row = checkbox.closest('tr');
-        if (!row) return;
-
-        if (event.shiftKey && lastCheckedRow) {
-            const allRows = Array.from(row.parentElement.rows);
-            const lastIdx = allRows.indexOf(lastCheckedRow);
-            const currIdx = allRows.indexOf(row);
-            const [start, end] = lastIdx < currIdx ? [lastIdx, currIdx] : [currIdx, lastIdx];
-            const checked = checkbox.checked;
-            for (let i = start; i <= end; i++) {
-                const cb = allRows[i].querySelector('.row-check input');
-                if (cb) { cb.checked = checked; }
-                if (checked) { selectedRows.add(allRows[i]); } else { selectedRows.delete(allRows[i]); }
-            }
-        } else {
-            if (checkbox.checked) { selectedRows.add(row); } else { selectedRows.delete(row); }
-        }
-        lastCheckedRow = row;
-        refreshSelection();
-    }
-
-    function toggleAllRows(tabIndex, checked) {
-        const tbody = document.querySelector('[data-tab="' + tabIndex + '"] tbody');
-        if (!tbody) return;
-        selectedRows.clear();
-        Array.from(tbody.rows).forEach(r => {
-            const cb = r.querySelector('.row-check input');
-            if (cb) { cb.checked = checked; }
-            if (checked) { selectedRows.add(r); }
-        });
-        refreshSelection();
-    }
-
-    function refreshSelection() {
-        document.querySelectorAll('tbody tr').forEach(r => r.classList.toggle('selected', selectedRows.has(r)));
-        document.querySelectorAll('td.selected-cell').forEach(c => c.classList.remove('selected-cell'));
-        document.querySelectorAll('td.active-cell').forEach(c => c.classList.remove('active-cell'));
-        selectedCells.forEach(c => c.classList.add('selected-cell'));
-        if (activeCell) { activeCell.classList.add('active-cell'); }
-    }
-
-    function getSelectedData(withHeaders) {
-        const rs = resultSets[Math.max(0, currentTab)];
-        if (!rs) return '';
-
-        // If cells are selected, copy only those cells
-        if (selectedCells.size > 0 && selectedRows.size === 0) {
-            const vals = Array.from(selectedCells).map(c => c.textContent || '');
-            return vals.join('\\t');
-        }
-
-        // Otherwise use row selection (checkbox) or all rows
-        const rows = selectedRows.size > 0 ? Array.from(selectedRows) : Array.from(document.querySelectorAll('[data-tab="' + Math.max(0, currentTab) + '"] tbody tr'));
-        const lines = [];
-        if (withHeaders) { lines.push(rs.columns.join('\\t')); }
-        rows.forEach(row => {
-            // Skip first cell (checkbox column)
-            const dataCells = Array.from(row.cells).slice(1);
-            lines.push(dataCells.map(c => c.textContent || '').join('\\t'));
-        });
-        return lines.join('\\n');
-    }
-
-    // ── Context Menu ───────────────────────────────────────────
-    let contextMenu = null;
-
-    document.addEventListener('contextmenu', (e) => {
-        const row = e.target.closest('tbody tr');
-        if (!row) return;
-        e.preventDefault();
-        if (!selectedRows.has(row) && !e.ctrlKey) {
-            selectedRows.clear();
-            selectedRows.add(row);
-            refreshSelection();
-        }
-        showContextMenu(e.clientX, e.clientY);
-    });
-
-    document.addEventListener('click', (e) => {
-        if (contextMenu && !contextMenu.contains(e.target)) { hideContextMenu(); }
-    });
-
-    document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape') { hideContextMenu(); }
-        if ((e.ctrlKey || e.metaKey) && e.key === 'c') { e.preventDefault(); doCopy(false); }
-        if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'C') { e.preventDefault(); doCopy(true); }
-        if ((e.ctrlKey || e.metaKey) && e.key === 'a') {
-            e.preventDefault();
-            toggleAllRows(Math.max(0, currentTab), true);
-        }
-    });
-
-    function showContextMenu(x, y) {
-        hideContextMenu();
-        contextMenu = document.createElement('div');
-        contextMenu.className = 'context-menu';
-        const items = [
-            { label: 'Copy', shortcut: 'Ctrl+C', action: () => doCopy(false) },
-            { label: 'Copy with Headers', shortcut: 'Ctrl+Shift+C', action: () => doCopy(true) },
-            { separator: true },
-            { label: 'Select All', shortcut: 'Ctrl+A', action: () => toggleAllRows(Math.max(0, currentTab), true) },
-            { separator: true },
-            { label: 'Script as INSERT', action: () => scriptAsInsert() },
-            { label: 'Open in Excel', action: () => openInExcel() },
-        ];
-        items.forEach(item => {
-            if (item.separator) {
-                const sep = document.createElement('div');
-                sep.className = 'context-menu-separator';
-                contextMenu.appendChild(sep);
-                return;
-            }
-            const div = document.createElement('div');
-            div.className = 'context-menu-item';
-            div.innerHTML = '<span>' + item.label + '</span>' + (item.shortcut ? '<span class="shortcut">' + item.shortcut + '</span>' : '');
-            div.addEventListener('click', () => { hideContextMenu(); item.action(); });
-            contextMenu.appendChild(div);
-        });
-        // Position
-        contextMenu.style.left = Math.min(x, window.innerWidth - 200) + 'px';
-        contextMenu.style.top = Math.min(y, window.innerHeight - 200) + 'px';
-        document.body.appendChild(contextMenu);
-    }
-
-    function hideContextMenu() {
-        if (contextMenu) { contextMenu.remove(); contextMenu = null; }
-    }
-
-    function doCopy(withHeaders) {
-        const text = getSelectedData(withHeaders);
-        navigator.clipboard.writeText(text);
-    }
-
-    function scriptAsInsert() {
-        const rs = resultSets[Math.max(0, currentTab)];
-        if (!rs) return;
-        const rows = selectedRows.size > 0 ? Array.from(selectedRows) : Array.from(document.querySelectorAll('[data-tab="' + Math.max(0, currentTab) + '"] tbody tr'));
-        const cols = rs.columns;
-        const lines = rows.map(row => {
-            const dataCells = Array.from(row.cells).slice(1); // skip checkbox column
-            const vals = dataCells.map((c, i) => {
-                const v = c.textContent;
-                if (v === 'NULL') return 'NULL';
-                const num = Number(v);
-                if (!isNaN(num) && v.trim() !== '') return v;
-                return "N'" + v.replace(/'/g, "''") + "'";
-            });
-            return 'INSERT INTO [TableName] (' + cols.map(c => '[' + c + ']').join(', ') + ') VALUES (' + vals.join(', ') + ');';
-        });
-        navigator.clipboard.writeText(lines.join('\\n'));
-    }
-
-    function openInExcel() {
-        const data = getSelectedData(true);
-        vscode.postMessage({ type: 'openInExcel', data: data });
-    }
-</script>
-</body>
-</html>`;
-    }
-
-    /** Build stacked layout — all result sets shown vertically */
-    private buildStackedHtml(result: BatchResult, resultTabs: string[], messagesHtml: string): string {
-        const stackedContent = resultTabs.map((html, i) => `
-            <div class="stacked-section">
-                <div class="stacked-header">Result ${i + 1} (${result.resultSets[i].rows.length} rows)</div>
-                ${html}
-            </div>
-        `).join('');
-
-        return `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    html, body {
-        height: 100%;
-        overflow: hidden;
-        font-family: var(--vscode-font-family, 'Segoe UI', sans-serif);
-        font-size: var(--vscode-font-size, 13px);
-        color: var(--vscode-foreground);
-        background: var(--vscode-editor-background);
-        display: flex;
-        flex-direction: column;
-    }
-    .toolbar {
-        display: flex; align-items: center; gap: 8px; padding: 4px 8px;
-        background: var(--vscode-editorWidget-background);
-        border-bottom: 1px solid var(--vscode-editorWidget-border);
-    }
-    .toolbar .info { flex: 1; font-size: 12px; color: var(--vscode-descriptionForeground); }
-    .toolbar button {
-        padding: 2px 8px; font-size: 11px; cursor: pointer;
-        background: var(--vscode-button-secondaryBackground);
-        color: var(--vscode-button-secondaryForeground);
-        border: none; border-radius: 2px;
-    }
-    .toolbar button:hover { background: var(--vscode-button-secondaryHoverBackground); }
-    .stacked-section { margin-bottom: 12px; }
-    .stacked-header {
-        padding: 4px 8px; font-size: 11px; font-weight: bold;
-        background: var(--vscode-editorWidget-background);
-        border-bottom: 2px solid var(--vscode-focusBorder);
-        color: var(--vscode-foreground);
-    }
-    .table-container { overflow: auto; }
-    table { width: 100%; border-collapse: collapse; font-size: 12px; }
-    th {
-        position: sticky; top: 0;
-        background: var(--vscode-editorWidget-background);
-        padding: 4px 8px; text-align: left;
-        border-bottom: 2px solid var(--vscode-editorWidget-border);
-        cursor: pointer; user-select: none; white-space: nowrap;
-    }
-    th:hover { background: var(--vscode-list-hoverBackground); }
-    th .sort-arrow { margin-left: 4px; opacity: 0.5; font-size: 10px; }
-    td {
-        padding: 2px 8px;
-        border-bottom: 1px solid var(--vscode-editorWidget-border);
-        white-space: nowrap; max-width: 400px; overflow: hidden; text-overflow: ellipsis;
-    }
-    tr:hover td { background: var(--vscode-list-hoverBackground); }
-    td.null-val { color: var(--vscode-descriptionForeground); font-style: italic; }
-    .messages {
-        padding: 6px 8px; font-family: var(--vscode-editor-fontFamily, monospace);
-        font-size: 12px; white-space: pre-wrap;
-        border-top: 1px solid var(--vscode-editorWidget-border);
-    }
-    .error {
-        color: var(--vscode-errorForeground);
-        background: var(--vscode-inputValidation-errorBackground);
-        padding: 6px 8px; border-left: 3px solid var(--vscode-inputValidation-errorBorder);
-    }
-</style>
-</head>
-<body>
-    <div class="toolbar">
-        <span class="info">${this.buildInfoText(result)}</span>
-    </div>
-    <div style="overflow: auto; height: calc(100vh - 40px);">
-        ${stackedContent}
-        ${messagesHtml ? `<div class="stacked-section"><div class="stacked-header">Messages</div>${messagesHtml}</div>` : ''}
-    </div>
-<script>
-    function sortTable(tabIndex, colIndex) {
-        const tables = document.querySelectorAll('.stacked-section table tbody');
-        const container = tables[tabIndex];
-        if (!container) return;
-        const rows = Array.from(container.rows);
-        const isAsc = container.dataset.sortCol == colIndex && container.dataset.sortDir === 'asc';
-        rows.sort((a, b) => {
-            const aVal = a.cells[colIndex].textContent || '';
-            const bVal = b.cells[colIndex].textContent || '';
-            const aNum = Number(aVal), bNum = Number(bVal);
-            if (!isNaN(aNum) && !isNaN(bNum)) return isAsc ? bNum - aNum : aNum - bNum;
-            return isAsc ? bVal.localeCompare(aVal) : aVal.localeCompare(bVal);
-        });
-        rows.forEach(r => container.appendChild(r));
-        container.dataset.sortCol = colIndex;
-        container.dataset.sortDir = isAsc ? 'desc' : 'asc';
-    }
-</script>
-</body>
-</html>`;
-    }
-
-    private buildResultSetTab(rs: QueryResult, index: number): string {
-        if (rs.columns.length === 0) { return '<div class="messages">No columns returned</div>'; }
-
-        const checkHeader = `<th class="row-check"><input type="checkbox" onclick="toggleAllRows(${index}, this.checked)" title="Select All"></th>`;
-        const headerCells = checkHeader + rs.columns
-            .map((col, i) => `<th onclick="sortTable(${index}, ${i + 1})">${this.escapeHtml(col)} <span class="sort-arrow">⇅</span></th>`)
-            .join('');
-
-        const bodyRows = rs.rows.map((row, rowIdx) => {
-            const checkCell = `<td class="row-check"><input type="checkbox" data-row-idx="${rowIdx}" onclick="toggleRowCheck(this, event)"></td>`;
-            const cells = rs.columns.map(col => {
-                const val = row[col];
-                if (val === null || val === undefined) {
-                    return '<td class="null-val">NULL</td>';
+                selectedCells.forEach(c => c.classList.remove('cell-selected', 'cell-active'));
+                selectedCells.clear();
+                for (let j = start; j <= end; j++) {
+                    selectedCells.add(allCells[j]);
+                    allCells[j].classList.add('cell-selected');
                 }
-                return `<td>${this.escapeHtml(String(val))}</td>`;
-            }).join('');
-            return `<tr>${checkCell}${cells}</tr>`;
-        }).join('');
+            }
+        } else {
+            selectedCells.forEach(c => c.classList.remove('cell-selected', 'cell-active'));
+            selectedCells.clear();
+            selectedCells.add(cell); cell.classList.add('cell-selected');
+        }
+        if (activeCell) activeCell.classList.remove('cell-active');
+        activeCell = cell; cell.classList.add('cell-active');
+        lastClickedCell = cell;
+    });
 
-        return `<div class="table-container">
-            <table>
-                <thead><tr>${headerCells}</tr></thead>
-                <tbody>${bodyRows}</tbody>
-            </table>
-        </div>`;
+    // ── CSV Export ───────────────────────────────────
+    function exportCsv() {
+        const table = tables[Math.max(0, currentTab || 0)];
+        if (table) table.download("csv", "query_results.csv");
+    }
+
+    // ── Status Bar ──────────────────────────────────
+    function updateStatus(filteredCount) {
+        const el = document.getElementById('status-info');
+        if (!el) return;
+        if (filteredCount < totalRows) {
+            el.textContent = filteredCount + ' of ' + totalRows + ' rows | ' + elapsed;
+        } else {
+            el.textContent = totalRows + ' rows | ' + elapsed;
+        }
+    }
+
+    // ── Tab Switching ───────────────────────────────
+    ${!isStacked ? `
+    let currentTab = 0;
+    function switchTab(index) {
+        document.querySelectorAll('.tab').forEach((t, i) => {
+            t.classList.toggle('active', i === (index === -1 ? document.querySelectorAll('.tab').length - 1 : index));
+        });
+        resultSets.forEach((_, i) => {
+            const el = document.getElementById('tab-' + i);
+            if (el) el.style.display = i === index ? '' : 'none';
+        });
+        const msgEl = document.getElementById('tab-messages');
+        if (msgEl) msgEl.style.display = index === -1 ? '' : 'none';
+        currentTab = index;
+        if (index >= 0 && tables[index]) {
+            setTimeout(() => tables[index].redraw(true), 50);
+        }
+    }
+    ` : ''}
+</script>
+</body>
+</html>`;
     }
 
     private buildMessages(result: BatchResult): string {
         let html = '';
-
         if (result.error) {
             html += `<div class="error">${this.escapeHtml(result.error)}</div>`;
         }
-
         if (result.messages.length > 0) {
             html += `<div class="messages">${result.messages.map(m => this.escapeHtml(m)).join('\n')}</div>`;
         }
-
         if (!result.error && result.messages.length === 0 && result.resultSets.length === 0) {
             html += '<div class="messages">Command(s) completed successfully.</div>';
         }
-
         return html;
     }
 
     private buildInfoText(result: BatchResult): string {
         const parts: string[] = [];
-
         if (result.resultSets.length > 0) {
             const totalRows = result.resultSets.reduce((sum, rs) => sum + rs.rows.length, 0);
             parts.push(`${totalRows} rows`);
         }
-
         parts.push(`${(result.elapsed / 1000).toFixed(2)}s`);
-
-        if (result.error) {
-            parts.push('ERROR');
-        }
-
+        if (result.error) { parts.push('ERROR'); }
         return parts.join(' | ');
     }
 
@@ -882,47 +841,6 @@ export class QueryRunner implements vscode.WebviewViewProvider {
             .replace(/</g, '&lt;')
             .replace(/>/g, '&gt;')
             .replace(/"/g, '&quot;');
-    }
-
-    private async exportCsv(data: string): Promise<void> {
-        const uri = await vscode.window.showSaveDialog({
-            filters: { 'CSV': ['csv'] },
-            defaultUri: vscode.Uri.file('query_results.csv'),
-        });
-        if (uri) {
-            await vscode.workspace.fs.writeFile(uri, Buffer.from(data, 'utf-8'));
-            vscode.window.showInformationMessage(`Exported to ${uri.fsPath}`);
-        }
-    }
-
-    private async exportJson(data: string): Promise<void> {
-        const uri = await vscode.window.showSaveDialog({
-            filters: { 'JSON': ['json'] },
-            defaultUri: vscode.Uri.file('query_results.json'),
-        });
-        if (uri) {
-            await vscode.workspace.fs.writeFile(uri, Buffer.from(data, 'utf-8'));
-            vscode.window.showInformationMessage(`Exported to ${uri.fsPath}`);
-        }
-    }
-
-    private async openInExcel(data: string): Promise<void> {
-        const os = require('os');
-        const path = require('path');
-        const fs = require('fs');
-        const tmpFile = path.join(os.tmpdir(), `tsql_result_${Date.now()}.csv`);
-        // Convert tab-separated to CSV
-        const csvData = data.split('\n').map(line =>
-            line.split('\t').map(cell => {
-                if (cell.includes(',') || cell.includes('"') || cell.includes('\n')) {
-                    return '"' + cell.replace(/"/g, '""') + '"';
-                }
-                return cell;
-            }).join(',')
-        ).join('\n');
-        fs.writeFileSync(tmpFile, '\uFEFF' + csvData, 'utf-8'); // BOM for Excel UTF-8
-        const uri = vscode.Uri.file(tmpFile);
-        await vscode.env.openExternal(uri);
     }
 
     dispose(): void {

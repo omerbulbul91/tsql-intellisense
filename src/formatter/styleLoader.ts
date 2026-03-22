@@ -321,6 +321,35 @@ export class StyleLoader {
         this.log(`Applied overrides: kw=${this.casingOptions.reservedKeywords}, fn=${this.casingOptions.builtInFunctions}, dt=${this.casingOptions.builtInDataTypes}`);
     }
 
+    /**
+     * Create a shallow clone with overrides applied — used for live preview without saving.
+     */
+    cloneWithOverrides(overrides: {
+        reservedKeywords?: string;
+        builtInFunctions?: string;
+        builtInDataTypes?: string;
+        lists?: { placeCommasBeforeItems?: boolean; alignItemsToTabStops?: boolean };
+        caseExpressions?: Partial<CaseOptions>;
+        whitespace?: Partial<WhitespaceOptions>;
+        controlFlow?: Partial<ControlFlowOptions>;
+        variables?: Partial<VariablesOptions>;
+        dataDml?: Partial<DataDmlOptions>;
+        schemaDdl?: Partial<SchemaDdlOptions>;
+    }): StyleLoader {
+        const clone = new StyleLoader();
+        clone.casingOptions = { ...this.casingOptions };
+        clone.layoutOptions = { ...this.layoutOptions };
+        clone.caseOptions = { ...this.caseOptions };
+        clone.whitespaceOptions = { ...this.whitespaceOptions };
+        clone.controlFlowOptions = { ...this.controlFlowOptions };
+        clone.variablesOptions = { ...this.variablesOptions };
+        clone.dataDmlOptions = { ...this.dataDmlOptions };
+        clone.schemaDdlOptions = { ...this.schemaDdlOptions };
+        clone.styleName = this.styleName;
+        clone.applyOverrides(overrides);
+        return clone;
+    }
+
     getCasingOptions(): CasingOptions { return this.casingOptions; }
     getLayoutOptions(): LayoutOptions { return this.layoutOptions; }
     getCaseOptions(): CaseOptions { return this.caseOptions; }

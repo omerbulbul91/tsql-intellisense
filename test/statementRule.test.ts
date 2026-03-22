@@ -128,6 +128,43 @@ assert(sp.includes('    Begin Catch'), 'SP: BEGIN CATCH at depth 1', sp);
 assert(!!sp.match(/^End/m), 'SP: outer END at depth 0', sp);
 
 // ═══════════════════════════════════════════════
+// Empty Lines Between Statements
+// ═══════════════════════════════════════════════
+console.log('\nEmpty Lines Between Statements:');
+
+// Two top-level SELECTs with emptyLinesBetweenStatements=1
+const el1 = fmt('Select 1\nSelect 2', { emptyLinesBetweenStatements: 1 });
+const el1Lines = el1.split('\n');
+const el1BlankCount = el1Lines.filter((l, i) => i > 0 && l.trim() === '' && i < el1Lines.length - 1).length;
+assert(el1BlankCount === 1, 'emptyLines=1: 1 blank line between two SELECTs', el1);
+
+// Two top-level SELECTs with emptyLinesBetweenStatements=2
+const el2 = fmt('Select 1\nSelect 2', { emptyLinesBetweenStatements: 2 });
+const el2Lines = el2.split('\n');
+const el2BlankCount = el2Lines.filter((l, i) => i > 0 && l.trim() === '' && i < el2Lines.length - 1).length;
+assert(el2BlankCount === 2, 'emptyLines=2: 2 blank lines between two SELECTs', el2);
+
+// Two top-level SELECTs with emptyLinesBetweenStatements=0 (does not remove existing blank lines)
+const el0 = fmt('Select 1\nSelect 2', { emptyLinesBetweenStatements: 0 });
+assert(!el0.includes('\n\n'), 'emptyLines=0: no extra blank lines added', el0);
+
+// Mixed statements: SELECT then INSERT
+const el3 = fmt('Select 1\nInsert Into T Values(1)', { emptyLinesBetweenStatements: 1 });
+assert(el3.includes('\n\n'), 'emptyLines=1: blank line between SELECT and INSERT', el3);
+
+// Mixed: DECLARE then SET then SELECT
+const el4 = fmt('Declare @x Int\nSet @x = 1\nSelect @x', { emptyLinesBetweenStatements: 2 });
+const el4Parts = el4.split(/\n{3}/); // 2 blank lines = 3 newlines
+assert(el4Parts.length >= 3, 'emptyLines=2: 2 blank lines between DECLARE-SET-SELECT', el4);
+
+// Existing blank lines replaced: input has 1 blank, setting says 2
+const el5 = fmt('Select 1\n\nSelect 2', { emptyLinesBetweenStatements: 2 });
+const el5Chunks = el5.split('Select');
+const el5Between = el5Chunks[1]?.split('\n').filter(l => l.trim() === '').length || 0;
+// Between first Select's content and second Select, should have exactly 2 blank lines
+assert(el5.includes('\n\n\n') && !el5.includes('\n\n\n\n'), 'emptyLines=2: existing 1 blank replaced with 2', el5);
+
+// ═══════════════════════════════════════════════
 
 console.log(`\nStatement Rule: ${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

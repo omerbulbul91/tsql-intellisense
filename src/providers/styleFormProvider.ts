@@ -9,11 +9,15 @@ export class StyleFormProvider {
     static show(
         context: vscode.ExtensionContext,
         styleLoader: StyleLoader,
+        initialSection?: string,
     ): void {
         const column = vscode.window.activeTextEditor?.viewColumn || vscode.ViewColumn.One;
 
         if (StyleFormProvider.currentPanel) {
             StyleFormProvider.currentPanel.reveal(column);
+            if (initialSection) {
+                StyleFormProvider.currentPanel.webview.postMessage({ cmd: 'navigateSection', section: initialSection });
+            }
             return;
         }
 
@@ -53,6 +57,13 @@ export class StyleFormProvider {
         };
 
         panel.webview.html = StyleFormProvider.getHtml(panel.webview, context.extensionUri, casingOpts, layoutOpts, aliasOpts, insertionKeys, styleName, styleFile, snippetFolder, connections.length, lang, customTranslations, fmtConfig);
+
+        // Navigate to initial section after webview is ready
+        if (initialSection) {
+            setTimeout(() => {
+                panel.webview.postMessage({ cmd: 'navigateSection', section: initialSection });
+            }, 500);
+        }
 
         panel.webview.onDidReceiveMessage(async (msg) => {
             switch (msg.cmd) {
@@ -321,11 +332,209 @@ export class StyleFormProvider {
                     }
                     break;
                 }
+                case 'webviewReady':
+                case 'refreshSqlFiles': {
+                    const pathMod = await import('path');
+                    const sqlFiles: { path: string; fileName: string; content: string }[] = [];
+                    const seen = new Set<string>();
+                    // Collect all open SQL-related editor tabs
+                    for (const doc of vscode.workspace.textDocuments) {
+                        const isSqlLang = doc.languageId === 'sql' || doc.languageId === 'mssql' || doc.languageId === 'tsql';
+                        const isSqlFile = doc.uri.fsPath?.toLowerCase().endsWith('.sql');
+                        if (doc.isClosed) continue;
+                        if (isSqlLang || isSqlFile) {
+                            const key = doc.uri.toString();
+                            if (seen.has(key)) continue;
+                            seen.add(key);
+                            if (doc.isUntitled) {
+                                const name = doc.uri.path.split('/').pop() || 'Untitled';
+                                sqlFiles.push({
+                                    path: '__untitled__' + key,
+                                    fileName: name,
+                                    content: doc.getText()
+                                });
+                            } else if (doc.uri.scheme === 'file') {
+                                sqlFiles.push({
+                                    path: doc.uri.fsPath,
+                                    fileName: pathMod.basename(doc.uri.fsPath),
+                                    content: doc.getText()
+                                });
+                            }
+                        }
+                    }
+                    // Also check visible editors (tabs) that might not be in textDocuments
+                    for (const editor of vscode.window.visibleTextEditors) {
+                        const doc = editor.document;
+                        const key = doc.uri.toString();
+                        if (seen.has(key)) continue;
+                        const isSqlLang = doc.languageId === 'sql' || doc.languageId === 'mssql' || doc.languageId === 'tsql';
+                        const isSqlFile = doc.uri.fsPath?.toLowerCase().endsWith('.sql');
+                        if (isSqlLang || isSqlFile) {
+                            seen.add(key);
+                            if (doc.isUntitled) {
+                                sqlFiles.push({
+                                    path: '__untitled__' + key,
+                                    fileName: doc.uri.path.split('/').pop() || 'Untitled',
+                                    content: doc.getText()
+                                });
+                            } else if (doc.uri.scheme === 'file') {
+                                sqlFiles.push({
+                                    path: doc.uri.fsPath,
+                                    fileName: pathMod.basename(doc.uri.fsPath),
+                                    content: doc.getText()
+                                });
+                            }
+                        }
+                    }
+                    panel.webview.postMessage({ cmd: 'sqlFilesRefreshed', files: sqlFiles });
+                    break;
+                }
+                case 'readSqlFile': {
+                    const pathMod2 = await import('path');
+                    let content = '';
+                    let fileName = msg.path;
+                    if (msg.path.startsWith('__untitled__')) {
+                        // Find untitled document by URI
+                        const uriStr = msg.path.replace('__untitled__', '');
+                        // Search ALL text documents by URI or by partial match
+                        for (const doc of vscode.workspace.textDocuments) {
+                            if (doc.uri.toString() === uriStr || doc.uri.toString() === decodeURIComponent(uriStr)) {
+                                content = doc.getText();
+                                fileName = doc.uri.path.split('/').pop() || 'Untitled';
+                                break;
+                            }
+                        }
+                        // Fallback: search by filename suffix (e.g. "Untitled-4")
+                        if (!content) {
+                            const namePart = uriStr.split('/').pop()?.split(':').pop() || '';
+                            if (namePart) {
+                                for (const doc of vscode.workspace.textDocuments) {
+                                    const docName = doc.uri.path.split('/').pop() || '';
+                                    if (doc.isUntitled && docName === namePart) {
+                                        content = doc.getText();
+                                        fileName = docName;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        // Also check visible editors
+                        if (!content) {
+                            for (const editor of vscode.window.visibleTextEditors) {
+                                const d = editor.document;
+                                if (d.uri.toString() === uriStr || d.uri.toString() === decodeURIComponent(uriStr)) {
+                                    content = d.getText();
+                                    fileName = d.uri.path.split('/').pop() || 'Untitled';
+                                    break;
+                                }
+                            }
+                        }
+                    } else {
+                        // Read from filesystem
+                        try {
+                            const fs = await import('fs');
+                            content = await fs.promises.readFile(msg.path, 'utf-8');
+                            fileName = pathMod2.basename(msg.path);
+                        } catch { /* file not accessible */ }
+                    }
+                    panel.webview.postMessage({
+                        cmd: 'sqlFileLoaded',
+                        path: msg.path,
+                        fileName,
+                        content: content || '-- File could not be read',
+                        select: true
+                    });
+                    break;
+                }
+                case 'browseSqlFile': {
+                    const result = await vscode.window.showOpenDialog({
+                        canSelectFiles: true,
+                        canSelectFolders: false,
+                        canSelectMany: false,
+                        openLabel: 'SQL Dosyası Seç',
+                        filters: { 'SQL Files': ['sql'] }
+                    });
+                    if (result && result[0]) {
+                        try {
+                            const fs = await import('fs');
+                            const path = await import('path');
+                            const content = await fs.promises.readFile(result[0].fsPath, 'utf-8');
+                            panel.webview.postMessage({
+                                cmd: 'sqlFileLoaded',
+                                path: result[0].fsPath,
+                                fileName: path.basename(result[0].fsPath),
+                                content: content,
+                                select: true
+                            });
+                        } catch (err: any) {
+                            vscode.window.showErrorMessage(`Dosya okunamadı: ${err.message}`);
+                        }
+                    }
+                    break;
+                }
+                case 'formatPreview': {
+                    try {
+                        // Create a temporary StyleLoader clone with the preview settings
+                        const tempLoader = styleLoader.cloneWithOverrides({
+                            reservedKeywords: msg.settings.casing.reservedKeywords,
+                            builtInFunctions: msg.settings.casing.builtInFunctions,
+                            builtInDataTypes: msg.settings.casing.builtInDataTypes,
+                            lists: msg.settings.lists,
+                            caseExpressions: msg.settings.caseExpressions,
+                            whitespace: msg.settings.whitespace,
+                            controlFlow: msg.settings.controlFlow,
+                            variables: msg.settings.variables,
+                            dataDml: msg.settings.dataDml,
+                            schemaDdl: msg.settings.schemaDdl,
+                        });
+                        // Sync maxLineLength from both Lists and Whitespace
+                        const effectiveMaxLine = msg.settings.whitespace?.wrapLinesLongerThan ?? msg.settings.maxLineLength;
+                        tempLoader.setMaxLineLength(effectiveMaxLine);
+                        const { SqlFormatter } = await import('../formatter/sqlFormatter');
+                        const formatter = new SqlFormatter(tempLoader);
+                        const formatted = formatter.format(msg.sql);
+                        panel.webview.postMessage({ cmd: 'previewFormatted', formatted });
+                    } catch (err: any) {
+                        // If formatting fails, show original SQL
+                        panel.webview.postMessage({ cmd: 'previewFormatted', formatted: msg.sql });
+                    }
+                    break;
+                }
             }
         });
 
+        // Watch for document open/close to update preview file list
+        const sendFileList = async () => {
+            const pathMod = await import('path');
+            const sqlFiles: { path: string; fileName: string; content: string }[] = [];
+            const seen = new Set<string>();
+            for (const doc of vscode.workspace.textDocuments) {
+                const isSqlLang = doc.languageId === 'sql' || doc.languageId === 'mssql' || doc.languageId === 'tsql';
+                const isSqlFile = doc.uri.fsPath?.toLowerCase().endsWith('.sql');
+                if (doc.isClosed) continue;
+                if (isSqlLang || isSqlFile) {
+                    const key = doc.uri.toString();
+                    if (seen.has(key)) continue;
+                    seen.add(key);
+                    if (doc.isUntitled) {
+                        sqlFiles.push({ path: '__untitled__' + key, fileName: doc.uri.path.split('/').pop() || 'Untitled', content: doc.getText() });
+                    } else if (doc.uri.scheme === 'file') {
+                        sqlFiles.push({ path: doc.uri.fsPath, fileName: pathMod.basename(doc.uri.fsPath), content: doc.getText() });
+                    }
+                }
+            }
+            panel.webview.postMessage({ cmd: 'sqlFilesRefreshed', files: sqlFiles });
+        };
+
+        const docOpenSub = vscode.workspace.onDidOpenTextDocument(() => sendFileList());
+        const docCloseSub = vscode.workspace.onDidCloseTextDocument(() => sendFileList());
+        const editorChangeSub = vscode.window.onDidChangeActiveTextEditor(() => sendFileList());
+
         panel.onDidDispose(() => {
             StyleFormProvider.currentPanel = undefined;
+            docOpenSub.dispose();
+            docCloseSub.dispose();
+            editorChangeSub.dispose();
         }, null, context.subscriptions);
     }
 
@@ -628,25 +837,103 @@ export class StyleFormProvider {
             cursor: pointer;
         }
 
-        /* Preview */
-        .preview {
-            border-top: 1px solid var(--vscode-panel-border);
-            max-height: 200px;
-            overflow-y: auto;
+        /* Tooltip icon */
+        .tip {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 15px;
+            height: 15px;
+            border-radius: 50%;
+            background: var(--vscode-badge-background, #4d4d4d);
+            color: var(--vscode-badge-foreground, #ccc);
+            font-size: 10px;
+            font-weight: 700;
+            font-style: normal;
+            cursor: help;
+            margin-left: 4px;
+            flex-shrink: 0;
+            vertical-align: middle;
+            line-height: 1;
         }
-        .preview pre {
-            padding: 12px 16px;
-            font-family: var(--vscode-editor-fontFamily, 'Consolas', monospace);
-            font-size: var(--vscode-editor-fontSize, 13px);
+        .tip:hover { background: var(--vscode-focusBorder); color: #fff; }
+        /* Tooltip popup (positioned by JS) */
+        .tip-popup {
+            position: fixed;
+            background: var(--vscode-editorHoverWidget-background, #2d2d30);
+            color: var(--vscode-editorHoverWidget-foreground, #ccc);
+            border: 1px solid var(--vscode-editorHoverWidget-border, #454545);
+            border-radius: 3px;
+            padding: 8px 12px;
+            font-size: 12px;
+            font-weight: 400;
+            white-space: pre-wrap;
+            max-width: 360px;
+            z-index: 1000;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.5);
             line-height: 1.5;
-            white-space: pre;
-            margin: 0;
+            text-align: left;
+            pointer-events: none;
         }
-        .preview .kw { color: var(--vscode-symbolIcon-keywordForeground, #569cd6); }
-        .preview .fn { color: var(--vscode-symbolIcon-functionForeground, #dcdcaa); }
-        .preview .dt { color: var(--vscode-symbolIcon-typeParameterForeground, #4ec9b0); }
-        .preview .sv { color: var(--vscode-symbolIcon-variableForeground, #9cdcfe); }
-        .preview .cm { color: var(--vscode-editorLineNumber-foreground, #6a9955); }
+
+        /* Preview panel with splitter */
+        .preview-panel {
+            display: none;
+            flex-direction: column;
+            border-top: none;
+            min-height: 80px;
+        }
+        .preview-panel.visible {
+            display: flex;
+        }
+        .preview-splitter {
+            height: 5px;
+            background: var(--vscode-panel-border);
+            cursor: ns-resize;
+            flex-shrink: 0;
+            position: relative;
+            z-index: 10;
+        }
+        .preview-splitter:hover,
+        .preview-splitter.dragging {
+            background: var(--vscode-focusBorder);
+        }
+        .preview-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 12px;
+            background: var(--vscode-editorWidget-background);
+            border-bottom: 1px solid var(--vscode-panel-border);
+            flex-shrink: 0;
+        }
+        .preview-header .preview-label {
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--vscode-descriptionForeground);
+        }
+        .preview-header select {
+            padding: 3px 6px;
+            font-size: 12px;
+            font-family: var(--vscode-font-family);
+            background: var(--vscode-input-background);
+            color: var(--vscode-input-foreground);
+            border: 1px solid var(--vscode-input-border, var(--vscode-panel-border));
+            border-radius: 2px;
+            outline: none;
+            max-width: 300px;
+        }
+        .preview-header select:focus {
+            border-color: var(--vscode-focusBorder);
+        }
+        .preview-header .spacer { flex: 1; }
+        .preview-editor-container {
+            flex: 1;
+            overflow: hidden;
+            min-height: 60px;
+        }
 
         /* Footer */
         .footer {
@@ -1040,52 +1327,52 @@ export class StyleFormProvider {
 
                     <div class="checkbox-row" style="margin-left:0">
                         <input type="checkbox" id="casePlaceExprOnNewLine">
-                        <label for="casePlaceExprOnNewLine" data-i18n="case.placeExprOnNewLine">Place expressions on new line</label>
+                        <label for="casePlaceExprOnNewLine" data-i18n="case.placeExprOnNewLine">Place expressions on new line<i class="tip" data-tip-i18n="tip.casePlaceExprOnNewLine">i</i></label>
                     </div>
 
                     <h3>WHEN</h3>
                     <div class="form-row">
-                        <label data-i18n="case.placeFirstWhen">Place first WHEN on new line:</label>
+                        <label data-i18n="case.placeFirstWhen">Place first WHEN on new line:<i class="tip" data-tip-i18n="tip.caseFirstWhenNewLine">i</i></label>
                         <select id="caseFirstWhenNewLine" style="width:160px; padding:5px 8px; font-size:13px; font-family:var(--vscode-font-family); background:var(--vscode-input-background); color:var(--vscode-input-foreground); border:1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius:2px;">
-                            <option value="never" selected>Never</option>
-                            <option value="always">Always</option>
-                            <option value="ifLong">If longer than max line length</option>
+                            <option value="never" selected data-i18n="opt.never">Never</option>
+                            <option value="always" data-i18n="opt.always">Always</option>
+                            <option value="ifLong" data-i18n="opt.ifLongerMax">If longer than max line length</option>
                         </select>
                     </div>
 
                     <div class="form-row">
-                        <label data-i18n="case.whenAlignment">WHEN alignment:</label>
+                        <label data-i18n="case.whenAlignment">WHEN alignment:<i class="tip" data-tip-i18n="tip.caseWhenAlignment">i</i></label>
                         <select id="caseWhenAlignment" style="width:160px; padding:5px 8px; font-size:13px; font-family:var(--vscode-font-family); background:var(--vscode-input-background); color:var(--vscode-input-foreground); border:1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius:2px;">
-                            <option value="toFirstItem" selected>To first item</option>
-                            <option value="toCase">To CASE</option>
-                            <option value="indented">Indented</option>
+                            <option value="toFirstItem" selected data-i18n="opt.toFirstItem">To first item</option>
+                            <option value="toCase" data-i18n="opt.toCase">To CASE</option>
+                            <option value="indented" data-i18n="opt.indented">Indented</option>
                         </select>
                     </div>
 
                     <h3 data-i18n="case.thenExpressions">THEN expressions</h3>
                     <div class="checkbox-row" style="margin-left:0">
                         <input type="checkbox" id="casePlaceThenOnNewLine">
-                        <label for="casePlaceThenOnNewLine" data-i18n="case.placeThenOnNewLine">Place THEN on new line</label>
+                        <label for="casePlaceThenOnNewLine" data-i18n="case.placeThenOnNewLine">Place THEN on new line<i class="tip" data-tip-i18n="tip.casePlaceThenOnNewLine">i</i></label>
                     </div>
 
                     <div class="form-row">
-                        <label data-i18n="case.exprAlignment">Expression alignment:</label>
+                        <label data-i18n="case.exprAlignment">Expression alignment:<i class="tip" data-tip-i18n="tip.caseThenAlignment">i</i></label>
                         <select id="caseThenAlignment" style="width:160px; padding:5px 8px; font-size:13px; font-family:var(--vscode-font-family); background:var(--vscode-input-background); color:var(--vscode-input-foreground); border:1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius:2px;">
-                            <option value="indentedFromWhen" selected>Indented from WHEN</option>
-                            <option value="toCase">To CASE</option>
-                            <option value="toFirstItem">To first item</option>
+                            <option value="indentedFromWhen" selected data-i18n="opt.indentedFromWhen">Indented from WHEN</option>
+                            <option value="toCase" data-i18n="opt.toCase">To CASE</option>
+                            <option value="toFirstItem" data-i18n="opt.toFirstItem">To first item</option>
                         </select>
                     </div>
 
                     <h3>ELSE</h3>
                     <div class="checkbox-row" style="margin-left:0">
                         <input type="checkbox" id="casePlaceElseOnNewLine" checked>
-                        <label for="casePlaceElseOnNewLine" data-i18n="case.placeElseOnNewLine">Place ELSE on new line</label>
+                        <label for="casePlaceElseOnNewLine" data-i18n="case.placeElseOnNewLine">Place ELSE on new line<i class="tip" data-tip-i18n="tip.casePlaceElseOnNewLine">i</i></label>
                     </div>
 
                     <div class="checkbox-row" style="margin-left:0">
                         <input type="checkbox" id="caseAlignElseToWhen" checked>
-                        <label for="caseAlignElseToWhen" data-i18n="case.alignElseToWhen">Align ELSE to WHEN</label>
+                        <label for="caseAlignElseToWhen" data-i18n="case.alignElseToWhen">Align ELSE to WHEN<i class="tip" data-tip-i18n="tip.caseAlignElseToWhen">i</i></label>
                     </div>
                 </div>
 
@@ -1210,21 +1497,21 @@ export class StyleFormProvider {
 
                     <h3 data-i18n="ws.tabBehavior">Tab behavior</h3>
                     <div class="form-row">
-                        <label data-i18n="ws.spacesOrTabs">Spaces or tabs:</label>
+                        <label data-i18n="ws.spacesOrTabs">Spaces or tabs:<i class="tip" data-tip-i18n="tip.spacesOrTabs">i</i></label>
                         <select id="ws_spacesOrTabs" style="width:160px; padding:5px 8px; font-size:13px; font-family:var(--vscode-font-family); background:var(--vscode-input-background); color:var(--vscode-input-foreground); border:1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius:2px;">
-                            <option value="spaces" ${fmtConfig.whitespace.spacesOrTabs === 'spaces' ? 'selected' : ''}>Only spaces</option>
-                            <option value="tabs" ${fmtConfig.whitespace.spacesOrTabs === 'tabs' ? 'selected' : ''}>Tabs</option>
+                            <option value="spaces" ${fmtConfig.whitespace.spacesOrTabs === 'spaces' ? 'selected' : ''} data-i18n="ws.optSpaces">Spaces</option>
+                            <option value="tabs" ${fmtConfig.whitespace.spacesOrTabs === 'tabs' ? 'selected' : ''} data-i18n="ws.optTabs">Tabs</option>
                         </select>
                     </div>
                     <div class="form-row">
-                        <label data-i18n="ws.numberOfSpaces">Number of spaces in tabs:</label>
+                        <label data-i18n="ws.numberOfSpaces">Number of spaces in tabs:<i class="tip" data-tip-i18n="tip.numberOfSpaces">i</i></label>
                         <input type="number" id="ws_numberOfSpaces" value="${fmtConfig.whitespace.numberOfSpacesInTabs}" min="1" max="8"
                             style="width:60px; padding:5px 8px; font-size:13px; font-family:var(--vscode-font-family); background:var(--vscode-input-background); color:var(--vscode-input-foreground); border:1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius:2px;" />
                     </div>
 
                     <h3 data-i18n="ws.wrapping">Wrapping</h3>
                     <div class="form-row">
-                        <label data-i18n="ws.wrapLines">Wrap lines longer than:</label>
+                        <label data-i18n="ws.wrapLines">Wrap lines longer than:<i class="tip" data-tip-i18n="tip.wrapLines">i</i></label>
                         <input type="number" id="ws_wrapLines" value="${fmtConfig.whitespace.wrapLinesLongerThan}" min="0" max="500"
                             style="width:80px; padding:5px 8px; font-size:13px; font-family:var(--vscode-font-family); background:var(--vscode-input-background); color:var(--vscode-input-foreground); border:1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius:2px;" />
                         <span style="font-size:12px; color:var(--vscode-descriptionForeground)" data-i18n="ws.characters">characters</span>
@@ -1232,19 +1519,19 @@ export class StyleFormProvider {
 
                     <h3 data-i18n="ws.newLines">New lines</h3>
                     <div class="checkbox-row" style="margin-left:0">
-                        <input type="checkbox" id="ws_preserveEmptyBetween" ${fmtConfig.whitespace.preserveExistingEmptyLinesBetweenStatements ? 'checked' : ''}>
-                        <label for="ws_preserveEmptyBetween" data-i18n="ws.preserveEmptyBetween">Preserve existing empty lines between statements</label>
+                        <input type="checkbox" id="ws_preserveEmptyBetween" ${fmtConfig.whitespace.preserveExistingEmptyLinesBetweenStatements ? 'checked' : ''} onchange="toggleEmptyLinesControls(); updatePreview()">
+                        <label for="ws_preserveEmptyBetween" data-i18n="ws.preserveEmptyBetween">Preserve existing empty lines between statements<i class="tip" data-tip-i18n="tip.preserveEmptyBetween">i</i></label>
                     </div>
-                    <div class="form-row" style="margin-left:24px">
-                        <label data-i18n="ws.emptyLinesBetween">Empty lines between statements:</label>
+                    <div class="form-row" id="ws_emptyLinesBetweenRow">
+                        <label data-i18n="ws.emptyLinesBetween">Empty lines between statements:<i class="tip" data-tip-i18n="tip.emptyLinesBetween">i</i></label>
                         <select id="ws_emptyLinesBetween" style="width:60px; padding:5px 8px; font-size:13px; font-family:var(--vscode-font-family); background:var(--vscode-input-background); color:var(--vscode-input-foreground); border:1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius:2px;">
                             <option value="0" ${fmtConfig.whitespace.emptyLinesBetweenStatements === 0 ? 'selected' : ''}>0</option>
                             <option value="1" ${fmtConfig.whitespace.emptyLinesBetweenStatements === 1 ? 'selected' : ''}>1</option>
                             <option value="2" ${fmtConfig.whitespace.emptyLinesBetweenStatements === 2 ? 'selected' : ''}>2</option>
                         </select>
                     </div>
-                    <div class="form-row" style="margin-left:24px">
-                        <label data-i18n="ws.emptyLinesAfterBatch">Empty lines after batch separator:</label>
+                    <div class="form-row" id="ws_emptyLinesAfterBatchRow">
+                        <label data-i18n="ws.emptyLinesAfterBatch">Empty lines after batch separator:<i class="tip" data-tip-i18n="tip.emptyLinesAfterBatch">i</i></label>
                         <select id="ws_emptyLinesAfterBatch" style="width:60px; padding:5px 8px; font-size:13px; font-family:var(--vscode-font-family); background:var(--vscode-input-background); color:var(--vscode-input-foreground); border:1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius:2px;">
                             <option value="0" ${fmtConfig.whitespace.emptyLinesAfterBatchSeparator === 0 ? 'selected' : ''}>0</option>
                             <option value="1" ${fmtConfig.whitespace.emptyLinesAfterBatchSeparator === 1 ? 'selected' : ''}>1</option>
@@ -1253,15 +1540,15 @@ export class StyleFormProvider {
                     </div>
                     <div class="checkbox-row" style="margin-left:0">
                         <input type="checkbox" id="ws_preserveEmptyWithin" ${fmtConfig.whitespace.preserveExistingEmptyLinesWithinStatements ? 'checked' : ''}>
-                        <label for="ws_preserveEmptyWithin" data-i18n="ws.preserveEmptyWithin">Preserve existing empty lines within statements</label>
+                        <label for="ws_preserveEmptyWithin" data-i18n="ws.preserveEmptyWithin">Preserve existing empty lines within statements<i class="tip" data-tip-i18n="tip.preserveEmptyWithin">i</i></label>
                     </div>
                     <div class="checkbox-row" style="margin-left:0">
                         <input type="checkbox" id="ws_alignSingleLineComments" ${fmtConfig.whitespace.alignGroupsOfSingleLineComments ? 'checked' : ''}>
-                        <label for="ws_alignSingleLineComments" data-i18n="ws.alignSingleLineComments">Align groups of single-line comments</label>
+                        <label for="ws_alignSingleLineComments" data-i18n="ws.alignSingleLineComments">Align groups of single-line comments<i class="tip" data-tip-i18n="tip.alignSingleLineComments">i</i></label>
                     </div>
                     <div class="checkbox-row" style="margin-left:0">
                         <input type="checkbox" id="ws_alignMultilineComments" ${fmtConfig.whitespace.alignMultilineCommentsMatchingCommonPatterns ? 'checked' : ''}>
-                        <label for="ws_alignMultilineComments" data-i18n="ws.alignMultilineComments">Align multiline comments matching common patterns</label>
+                        <label for="ws_alignMultilineComments" data-i18n="ws.alignMultilineComments">Align multiline comments matching common patterns<i class="tip" data-tip-i18n="tip.alignMultilineComments">i</i></label>
                     </div>
                 </div>
 
@@ -1272,14 +1559,14 @@ export class StyleFormProvider {
 
                     <h3 data-i18n="dml.clauses">Clauses</h3>
                     <div class="form-row">
-                        <label data-i18n="dml.clauseAlignment">Clause alignment:</label>
+                        <label data-i18n="dml.clauseAlignment">Clause alignment:<i class="tip" data-tip-i18n="tip.clauseAlignment">i</i></label>
                         <select id="dml_clauseAlignment" style="width:160px; padding:5px 8px; font-size:13px; font-family:var(--vscode-font-family); background:var(--vscode-input-background); color:var(--vscode-input-foreground); border:1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius:2px;">
-                            <option value="toStatement" ${fmtConfig.dataDml.clauseAlignment === 'toStatement' ? 'selected' : ''}>To statement</option>
-                            <option value="toKeyword" ${fmtConfig.dataDml.clauseAlignment === 'toKeyword' ? 'selected' : ''}>To keyword</option>
+                            <option value="toStatement" ${fmtConfig.dataDml.clauseAlignment === 'toStatement' ? 'selected' : ''} data-i18n="opt.toStatement">To statement</option>
+                            <option value="toKeyword" ${fmtConfig.dataDml.clauseAlignment === 'toKeyword' ? 'selected' : ''} data-i18n="opt.toKeyword">To keyword</option>
                         </select>
                     </div>
                     <div class="form-row">
-                        <label data-i18n="dml.clauseIndentation">Clause indentation:</label>
+                        <label data-i18n="dml.clauseIndentation">Clause indentation:<i class="tip" data-tip-i18n="tip.clauseIndentation">i</i></label>
                         <select id="dml_clauseIndentation" style="width:60px; padding:5px 8px; font-size:13px; font-family:var(--vscode-font-family); background:var(--vscode-input-background); color:var(--vscode-input-foreground); border:1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius:2px;">
                             <option value="0" ${fmtConfig.dataDml.clauseIndentation === 0 ? 'selected' : ''}>0</option>
                             <option value="1" ${fmtConfig.dataDml.clauseIndentation === 1 ? 'selected' : ''}>1</option>
@@ -1289,48 +1576,48 @@ export class StyleFormProvider {
 
                     <h3 data-i18n="dml.listItems">List items</h3>
                     <div class="form-row">
-                        <label data-i18n="dml.placeFromOnNewLine">Place FROM table on new line:</label>
+                        <label data-i18n="dml.placeFromOnNewLine">Place FROM table on new line:<i class="tip" data-tip-i18n="tip.placeFromOnNewLine">i</i></label>
                         <select id="dml_placeFromOnNewLine" style="width:100px; padding:5px 8px; font-size:13px; font-family:var(--vscode-font-family); background:var(--vscode-input-background); color:var(--vscode-input-foreground); border:1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius:2px;">
-                            <option value="never" ${fmtConfig.dataDml.placeFromTableOnNewLine === 'never' ? 'selected' : ''}>Never</option>
-                            <option value="always" ${fmtConfig.dataDml.placeFromTableOnNewLine === 'always' ? 'selected' : ''}>Always</option>
-                            <option value="ifLong" ${fmtConfig.dataDml.placeFromTableOnNewLine === 'ifLong' ? 'selected' : ''}>If long</option>
+                            <option value="never" ${fmtConfig.dataDml.placeFromTableOnNewLine === 'never' ? 'selected' : ''} data-i18n="opt.never">Never</option>
+                            <option value="always" ${fmtConfig.dataDml.placeFromTableOnNewLine === 'always' ? 'selected' : ''} data-i18n="opt.always">Always</option>
+                            <option value="ifLong" ${fmtConfig.dataDml.placeFromTableOnNewLine === 'ifLong' ? 'selected' : ''} data-i18n="opt.ifLong">If long</option>
                         </select>
                     </div>
                     <div class="form-row">
-                        <label data-i18n="dml.placeWhereOnNewLine">Place WHERE condition on new line:</label>
+                        <label data-i18n="dml.placeWhereOnNewLine">Place WHERE condition on new line:<i class="tip" data-tip-i18n="tip.placeWhereOnNewLine">i</i></label>
                         <select id="dml_placeWhereOnNewLine" style="width:100px; padding:5px 8px; font-size:13px; font-family:var(--vscode-font-family); background:var(--vscode-input-background); color:var(--vscode-input-foreground); border:1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius:2px;">
-                            <option value="never" ${fmtConfig.dataDml.placeWhereConditionOnNewLine === 'never' ? 'selected' : ''}>Never</option>
-                            <option value="always" ${fmtConfig.dataDml.placeWhereConditionOnNewLine === 'always' ? 'selected' : ''}>Always</option>
-                            <option value="ifLong" ${fmtConfig.dataDml.placeWhereConditionOnNewLine === 'ifLong' ? 'selected' : ''}>If long</option>
+                            <option value="never" ${fmtConfig.dataDml.placeWhereConditionOnNewLine === 'never' ? 'selected' : ''} data-i18n="opt.never">Never</option>
+                            <option value="always" ${fmtConfig.dataDml.placeWhereConditionOnNewLine === 'always' ? 'selected' : ''} data-i18n="opt.always">Always</option>
+                            <option value="ifLong" ${fmtConfig.dataDml.placeWhereConditionOnNewLine === 'ifLong' ? 'selected' : ''} data-i18n="opt.ifLong">If long</option>
                         </select>
                     </div>
                     <div class="form-row">
-                        <label data-i18n="dml.placeGroupByOnNewLine">Place GROUP BY / ORDER BY expression on new line:</label>
+                        <label data-i18n="dml.placeGroupByOnNewLine">Place GROUP BY / ORDER BY expression on new line:<i class="tip" data-tip-i18n="tip.placeGroupByOnNewLine">i</i></label>
                         <select id="dml_placeGroupByOnNewLine" style="width:100px; padding:5px 8px; font-size:13px; font-family:var(--vscode-font-family); background:var(--vscode-input-background); color:var(--vscode-input-foreground); border:1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius:2px;">
-                            <option value="never" ${fmtConfig.dataDml.placeGroupByOrderByExpressionOnNewLine === 'never' ? 'selected' : ''}>Never</option>
-                            <option value="always" ${fmtConfig.dataDml.placeGroupByOrderByExpressionOnNewLine === 'always' ? 'selected' : ''}>Always</option>
-                            <option value="ifLong" ${fmtConfig.dataDml.placeGroupByOrderByExpressionOnNewLine === 'ifLong' ? 'selected' : ''}>If long</option>
+                            <option value="never" ${fmtConfig.dataDml.placeGroupByOrderByExpressionOnNewLine === 'never' ? 'selected' : ''} data-i18n="opt.never">Never</option>
+                            <option value="always" ${fmtConfig.dataDml.placeGroupByOrderByExpressionOnNewLine === 'always' ? 'selected' : ''} data-i18n="opt.always">Always</option>
+                            <option value="ifLong" ${fmtConfig.dataDml.placeGroupByOrderByExpressionOnNewLine === 'ifLong' ? 'selected' : ''} data-i18n="opt.ifLong">If long</option>
                         </select>
                     </div>
                     <div class="checkbox-row" style="margin-left:0">
                         <input type="checkbox" id="dml_placeInsertTableOnNewLine" ${fmtConfig.dataDml.placeInsertTableOnNewLine ? 'checked' : ''}>
-                        <label for="dml_placeInsertTableOnNewLine" data-i18n="dml.placeInsertTableOnNewLine">Place INSERT table on new line</label>
+                        <label for="dml_placeInsertTableOnNewLine" data-i18n="dml.placeInsertTableOnNewLine">Place INSERT table on new line<i class="tip" data-tip-i18n="tip.placeInsertTableOnNewLine">i</i></label>
                     </div>
 
                     <h3 data-i18n="dml.distinctTop">DISTINCT / TOP clause</h3>
                     <div class="checkbox-row" style="margin-left:0">
                         <input type="checkbox" id="dml_placeDistinctTopOnNewLine" ${fmtConfig.dataDml.placeDistinctTopOnNewLine ? 'checked' : ''}>
-                        <label for="dml_placeDistinctTopOnNewLine" data-i18n="dml.placeDistinctTopOnNewLine">Place DISTINCT / TOP clause on new line</label>
+                        <label for="dml_placeDistinctTopOnNewLine" data-i18n="dml.placeDistinctTopOnNewLine">Place DISTINCT / TOP clause on new line<i class="tip" data-tip-i18n="tip.placeDistinctTopOnNewLine">i</i></label>
                     </div>
                     <div class="checkbox-row" style="margin-left:0">
                         <input type="checkbox" id="dml_addNewLineAfterDistinctTop" ${fmtConfig.dataDml.addNewLineAfterDistinctTop ? 'checked' : ''}>
-                        <label for="dml_addNewLineAfterDistinctTop" data-i18n="dml.addNewLineAfterDistinctTop">Add new line after DISTINCT / TOP clause</label>
+                        <label for="dml_addNewLineAfterDistinctTop" data-i18n="dml.addNewLineAfterDistinctTop">Add new line after DISTINCT / TOP clause<i class="tip" data-tip-i18n="tip.addNewLineAfterDistinctTop">i</i></label>
                     </div>
 
                     <h3 data-i18n="dml.shortDml">Short DML statements</h3>
                     <div class="checkbox-row" style="margin-left:0">
                         <input type="checkbox" id="dml_collapseShort" ${fmtConfig.dataDml.collapseShortDmlStatements ? 'checked' : ''}>
-                        <label for="dml_collapseShort" data-i18n="dml.collapseShort">Collapse statements shorter than</label>
+                        <label for="dml_collapseShort" data-i18n="dml.collapseShort">Collapse statements shorter than<i class="tip" data-tip-i18n="tip.collapseShortDml">i</i></label>
                         <input type="number" id="dml_collapseShortLen" value="${fmtConfig.dataDml.collapseShortDmlShorterThan}" min="0" max="500"
                             style="width:60px; margin:0 6px; padding:5px 8px; font-size:13px; font-family:var(--vscode-font-family); background:var(--vscode-input-background); color:var(--vscode-input-foreground); border:1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius:2px;" />
                         <span style="font-size:12px; color:var(--vscode-descriptionForeground)" data-i18n="ws.characters">characters</span>
@@ -1339,7 +1626,7 @@ export class StyleFormProvider {
                     <h3 data-i18n="dml.subqueries">Subqueries</h3>
                     <div class="checkbox-row" style="margin-left:0">
                         <input type="checkbox" id="dml_collapseSubqueries" checked>
-                        <label for="dml_collapseSubqueries" data-i18n="dml.collapseSubqueries">Collapse subqueries shorter than</label>
+                        <label for="dml_collapseSubqueries" data-i18n="dml.collapseSubqueries">Collapse subqueries shorter than<i class="tip" data-tip-i18n="tip.collapseSubqueries">i</i></label>
                         <input type="number" id="dml_collapseSubqueriesLen" value="${fmtConfig.dataDml.collapseSubqueriesShorterThan}" min="0" max="500"
                             style="width:60px; margin:0 6px; padding:5px 8px; font-size:13px; font-family:var(--vscode-font-family); background:var(--vscode-input-background); color:var(--vscode-input-foreground); border:1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius:2px;" />
                         <span style="font-size:12px; color:var(--vscode-descriptionForeground)" data-i18n="ws.characters">characters</span>
@@ -1354,35 +1641,35 @@ export class StyleFormProvider {
                     <h3 data-i18n="ddl.dataTypes">Data types and constraints</h3>
                     <div class="checkbox-row" style="margin-left:0">
                         <input type="checkbox" id="ddl_alignDataTypes" ${fmtConfig.schemaDdl.alignDataTypesAndConstraints ? 'checked' : ''}>
-                        <label for="ddl_alignDataTypes" data-i18n="ddl.alignDataTypes">Align data types and constraints</label>
+                        <label for="ddl_alignDataTypes" data-i18n="ddl.alignDataTypes">Align data types and constraints<i class="tip" data-tip-i18n="tip.alignDataTypesDdl">i</i></label>
                     </div>
                     <div class="checkbox-row" style="margin-left:0">
                         <input type="checkbox" id="ddl_placeConstraintsOnNewLines" ${fmtConfig.schemaDdl.placeConstraintsOnNewLines ? 'checked' : ''}>
-                        <label for="ddl_placeConstraintsOnNewLines" data-i18n="ddl.placeConstraintsOnNewLines">Place constraints on new lines</label>
+                        <label for="ddl_placeConstraintsOnNewLines" data-i18n="ddl.placeConstraintsOnNewLines">Place constraints on new lines<i class="tip" data-tip-i18n="tip.placeConstraintsOnNewLines">i</i></label>
                     </div>
                     <div class="form-row" style="margin-left:24px">
-                        <label data-i18n="ddl.placeConstraintCols">Place constraint columns on new lines:</label>
+                        <label data-i18n="ddl.placeConstraintCols">Place constraint columns on new lines:<i class="tip" data-tip-i18n="tip.placeConstraintCols">i</i></label>
                         <select id="ddl_placeConstraintCols" style="width:200px; padding:5px 8px; font-size:13px; font-family:var(--vscode-font-family); background:var(--vscode-input-background); color:var(--vscode-input-foreground); border:1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius:2px;">
-                            <option value="never" ${fmtConfig.schemaDdl.placeConstraintColumnsOnNewLines === 'never' ? 'selected' : ''}>Never</option>
-                            <option value="always" ${fmtConfig.schemaDdl.placeConstraintColumnsOnNewLines === 'always' ? 'selected' : ''}>Always</option>
-                            <option value="ifLongerOrMultiple" ${fmtConfig.schemaDdl.placeConstraintColumnsOnNewLines === 'ifLongerOrMultiple' ? 'selected' : ''}>If longer or multiple columns</option>
+                            <option value="never" ${fmtConfig.schemaDdl.placeConstraintColumnsOnNewLines === 'never' ? 'selected' : ''} data-i18n="opt.never">Never</option>
+                            <option value="always" ${fmtConfig.schemaDdl.placeConstraintColumnsOnNewLines === 'always' ? 'selected' : ''} data-i18n="opt.always">Always</option>
+                            <option value="ifLongerOrMultiple" ${fmtConfig.schemaDdl.placeConstraintColumnsOnNewLines === 'ifLongerOrMultiple' ? 'selected' : ''} data-i18n="opt.ifLongerOrMultiple">If longer or multiple columns</option>
                         </select>
                     </div>
 
                     <h3 data-i18n="ddl.procedures">Procedures</h3>
                     <div class="form-row">
-                        <label data-i18n="ddl.placeFirstParam">Place first procedure parameter on new line:</label>
+                        <label data-i18n="ddl.placeFirstParam">Place first procedure parameter on new line:<i class="tip" data-tip-i18n="tip.placeFirstParam">i</i></label>
                         <select id="ddl_placeFirstParam" style="width:120px; padding:5px 8px; font-size:13px; font-family:var(--vscode-font-family); background:var(--vscode-input-background); color:var(--vscode-input-foreground); border:1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius:2px;">
-                            <option value="never" ${fmtConfig.schemaDdl.placeFirstProcedureParameterOnNewLine === 'never' ? 'selected' : ''}>Never</option>
-                            <option value="always" ${fmtConfig.schemaDdl.placeFirstProcedureParameterOnNewLine === 'always' ? 'selected' : ''}>Always</option>
-                            <option value="ifMultiple" ${fmtConfig.schemaDdl.placeFirstProcedureParameterOnNewLine === 'ifMultiple' ? 'selected' : ''}>If multiple</option>
+                            <option value="never" ${fmtConfig.schemaDdl.placeFirstProcedureParameterOnNewLine === 'never' ? 'selected' : ''} data-i18n="opt.never">Never</option>
+                            <option value="always" ${fmtConfig.schemaDdl.placeFirstProcedureParameterOnNewLine === 'always' ? 'selected' : ''} data-i18n="opt.always">Always</option>
+                            <option value="ifMultiple" ${fmtConfig.schemaDdl.placeFirstProcedureParameterOnNewLine === 'ifMultiple' ? 'selected' : ''} data-i18n="opt.ifMultiple">If multiple</option>
                         </select>
                     </div>
 
                     <h3 data-i18n="ddl.shortDdl">Short DDL statements</h3>
                     <div class="checkbox-row" style="margin-left:0">
                         <input type="checkbox" id="ddl_collapseShort" ${fmtConfig.schemaDdl.collapseShortDdlStatements ? 'checked' : ''}>
-                        <label for="ddl_collapseShort" data-i18n="ddl.collapseShort">Collapse statements shorter than</label>
+                        <label for="ddl_collapseShort" data-i18n="ddl.collapseShort">Collapse statements shorter than<i class="tip" data-tip-i18n="tip.collapseShortDdl">i</i></label>
                         <input type="number" id="ddl_collapseShortLen" value="${fmtConfig.schemaDdl.collapseShortDdlShorterThan}" min="0" max="500"
                             style="width:60px; margin:0 6px; padding:5px 8px; font-size:13px; font-family:var(--vscode-font-family); background:var(--vscode-input-background); color:var(--vscode-input-foreground); border:1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius:2px;" />
                         <span style="font-size:12px; color:var(--vscode-descriptionForeground)" data-i18n="ws.characters">characters</span>
@@ -1397,23 +1684,23 @@ export class StyleFormProvider {
                     <h3>BEGIN...END</h3>
                     <div class="checkbox-row" style="margin-left:0">
                         <input type="checkbox" id="cf_placeBeginOnNewLine" ${fmtConfig.controlFlow.placeBeginOnNewLine ? 'checked' : ''}>
-                        <label for="cf_placeBeginOnNewLine" data-i18n="cf.placeBeginOnNewLine">Place BEGIN keyword on new line</label>
+                        <label for="cf_placeBeginOnNewLine" data-i18n="cf.placeBeginOnNewLine">Place BEGIN keyword on new line<i class="tip" data-tip-i18n="tip.placeBeginOnNewLine">i</i></label>
                     </div>
                     <div class="checkbox-row" style="margin-left:24px">
                         <input type="checkbox" id="cf_indentBeginEnd" ${fmtConfig.controlFlow.indentBeginEndKeywords ? 'checked' : ''}>
-                        <label for="cf_indentBeginEnd" data-i18n="cf.indentBeginEnd">Indent BEGIN END keywords</label>
+                        <label for="cf_indentBeginEnd" data-i18n="cf.indentBeginEnd">Indent BEGIN END keywords<i class="tip" data-tip-i18n="tip.indentBeginEnd">i</i></label>
                     </div>
 
                     <h3 data-i18n="cf.controlFlowStatements">Control flow statements</h3>
                     <div class="checkbox-row" style="margin-left:0">
                         <input type="checkbox" id="cf_indentContents" ${fmtConfig.controlFlow.indentContentsOfStatements ? 'checked' : ''}>
-                        <label for="cf_indentContents" data-i18n="cf.indentContents">Indent contents of statements</label>
+                        <label for="cf_indentContents" data-i18n="cf.indentContents">Indent contents of statements<i class="tip" data-tip-i18n="tip.indentContents">i</i></label>
                     </div>
 
                     <h3 data-i18n="cf.shortControlFlow">Short control flow statements</h3>
                     <div class="checkbox-row" style="margin-left:0">
                         <input type="checkbox" id="cf_collapseShort" ${fmtConfig.controlFlow.collapseShortStatements ? 'checked' : ''}>
-                        <label for="cf_collapseShort" data-i18n="cf.collapseShort">Collapse statements shorter than</label>
+                        <label for="cf_collapseShort" data-i18n="cf.collapseShort">Collapse statements shorter than<i class="tip" data-tip-i18n="tip.collapseShortCf">i</i></label>
                         <input type="number" id="cf_collapseShortLen" value="${fmtConfig.controlFlow.collapseShortStatementsShorterThan}" min="0" max="500"
                             style="width:60px; margin:0 6px; padding:5px 8px; font-size:13px; font-family:var(--vscode-font-family); background:var(--vscode-input-background); color:var(--vscode-input-foreground); border:1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius:2px;" />
                         <span style="font-size:12px; color:var(--vscode-descriptionForeground)" data-i18n="ws.characters">characters</span>
@@ -1427,21 +1714,21 @@ export class StyleFormProvider {
                     <h3>DECLARE</h3>
                     <div class="checkbox-row" style="margin-left:0">
                         <input type="checkbox" id="var_alignDataTypes" ${fmtConfig.variables.declareAlignDataTypesAndValues ? 'checked' : ''}>
-                        <label for="var_alignDataTypes" data-i18n="var.alignDataTypes">Align data types and values</label>
+                        <label for="var_alignDataTypes" data-i18n="var.alignDataTypes">Align data types and values<i class="tip" data-tip-i18n="tip.varAlignDataTypes">i</i></label>
                     </div>
                     <div class="checkbox-row" style="margin-left:0">
                         <input type="checkbox" id="var_addSpaceBetween" ${fmtConfig.variables.declareAddSpaceBetweenTypeAndPrecision ? 'checked' : ''}>
-                        <label for="var_addSpaceBetween" data-i18n="var.addSpaceBetween">Add a space between data type and precision</label>
+                        <label for="var_addSpaceBetween" data-i18n="var.addSpaceBetween">Add a space between data type and precision<i class="tip" data-tip-i18n="tip.varAddSpace">i</i></label>
                     </div>
 
                     <h3>SET</h3>
                     <div class="checkbox-row" style="margin-left:0">
                         <input type="checkbox" id="var_setPlaceValueOnNewLine" ${fmtConfig.variables.setPlaceAssignedValueOnNewLine ? 'checked' : ''}>
-                        <label for="var_setPlaceValueOnNewLine" data-i18n="var.setPlaceValueOnNewLine">Place assigned value on new line if longer than wrap column</label>
+                        <label for="var_setPlaceValueOnNewLine" data-i18n="var.setPlaceValueOnNewLine">Place assigned value on new line if longer than wrap column<i class="tip" data-tip-i18n="tip.varPlaceValueOnNewLine">i</i></label>
                     </div>
                     <div class="checkbox-row" style="margin-left:24px">
                         <input type="checkbox" id="var_setPlaceEqualsOnNewLine" ${fmtConfig.variables.setPlaceEqualsSignOnNewLine ? 'checked' : ''}>
-                        <label for="var_setPlaceEqualsOnNewLine" data-i18n="var.setPlaceEqualsOnNewLine">Place equals sign on new line</label>
+                        <label for="var_setPlaceEqualsOnNewLine" data-i18n="var.setPlaceEqualsOnNewLine">Place equals sign on new line<i class="tip" data-tip-i18n="tip.varPlaceEqualsOnNewLine">i</i></label>
                     </div>
                 </div>
 
@@ -1477,32 +1764,32 @@ export class StyleFormProvider {
                     <h3 data-i18n="casing.builtInTitle">Built-in keywords, functions and types</h3>
 
                     <div class="form-row">
-                        <label data-i18n="casing.reservedKeywords">Reserved keywords:</label>
+                        <label data-i18n="casing.reservedKeywords">Reserved keywords:<i class="tip" data-tip-i18n="tip.reservedKeywords">i</i></label>
                         <select id="reservedKeywords" onchange="updatePreview()">
                             <option value="upperCamelCase" ${options.reservedKeywords === 'upperCamelCase' ? 'selected' : ''}>UpperCamelCase</option>
                             <option value="uppercase" ${options.reservedKeywords === 'uppercase' ? 'selected' : ''}>UPPERCASE</option>
                             <option value="lowercase" ${options.reservedKeywords === 'lowercase' ? 'selected' : ''}>lowercase</option>
-                            <option value="leaveAsIs" ${options.reservedKeywords === 'leaveAsIs' ? 'selected' : ''}>Leave as is</option>
+                            <option value="leaveAsIs" ${options.reservedKeywords === 'leaveAsIs' ? 'selected' : ''} data-i18n="opt.leaveAsIs">Leave as is</option>
                         </select>
                     </div>
 
                     <div class="form-row">
-                        <label data-i18n="casing.builtInFunctions">Built-in functions:</label>
+                        <label data-i18n="casing.builtInFunctions">Built-in functions:<i class="tip" data-tip-i18n="tip.builtInFunctions">i</i></label>
                         <select id="builtInFunctions" onchange="updatePreview()">
                             <option value="uppercase" ${options.builtInFunctions === 'uppercase' ? 'selected' : ''}>UPPERCASE</option>
                             <option value="upperCamelCase" ${options.builtInFunctions === 'upperCamelCase' ? 'selected' : ''}>UpperCamelCase</option>
                             <option value="lowercase" ${options.builtInFunctions === 'lowercase' ? 'selected' : ''}>lowercase</option>
-                            <option value="leaveAsIs" ${options.builtInFunctions === 'leaveAsIs' ? 'selected' : ''}>Leave as is</option>
+                            <option value="leaveAsIs" ${options.builtInFunctions === 'leaveAsIs' ? 'selected' : ''} data-i18n="opt.leaveAsIs">Leave as is</option>
                         </select>
                     </div>
 
                     <div class="form-row">
-                        <label data-i18n="casing.builtInDataTypes">Built-in data types:</label>
+                        <label data-i18n="casing.builtInDataTypes">Built-in data types:<i class="tip" data-tip-i18n="tip.builtInDataTypes">i</i></label>
                         <select id="builtInDataTypes" onchange="updatePreview()">
                             <option value="upperCamelCase" ${options.builtInDataTypes === 'upperCamelCase' ? 'selected' : ''}>UpperCamelCase</option>
                             <option value="uppercase" ${options.builtInDataTypes === 'uppercase' ? 'selected' : ''}>UPPERCASE</option>
                             <option value="lowercase" ${options.builtInDataTypes === 'lowercase' ? 'selected' : ''}>lowercase</option>
-                            <option value="leaveAsIs" ${options.builtInDataTypes === 'leaveAsIs' ? 'selected' : ''}>Leave as is</option>
+                            <option value="leaveAsIs" ${options.builtInDataTypes === 'leaveAsIs' ? 'selected' : ''} data-i18n="opt.leaveAsIs">Leave as is</option>
                         </select>
                     </div>
 
@@ -1514,7 +1801,7 @@ export class StyleFormProvider {
                     <h3 data-i18n="casing.userDefinedObjects">User-defined objects</h3>
                     <div class="checkbox-row">
                         <input type="checkbox" id="useObjectDefinitionCase" checked disabled>
-                        <label for="useObjectDefinitionCase" data-i18n="casing.useObjectDefinitionCase">Use object definition case</label>
+                        <label for="useObjectDefinitionCase" data-i18n="casing.useObjectDefinitionCase">Use object definition case<i class="tip" data-tip-i18n="tip.useObjectDefinitionCase">i</i></label>
                     </div>
                 </div>
 
@@ -1523,7 +1810,7 @@ export class StyleFormProvider {
                     <h2 data-i18n="nav.lists">Lists</h2>
 
                     <div class="form-row">
-                        <label data-i18n="lists.maxLineLength">Max line length:</label>
+                        <label data-i18n="lists.maxLineLength">Max line length:<i class="tip" data-tip-i18n="tip.maxLineLength">i</i></label>
                         <input type="number" id="maxLineLength" value="${layout.maxLineLength}" min="0" max="500"
                             style="width:100px; padding:5px 8px; font-size:13px; font-family:var(--vscode-font-family); background:var(--vscode-input-background); color:var(--vscode-input-foreground); border:1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius:2px; outline:none;"
                             onchange="updatePreview()" />
@@ -1532,12 +1819,12 @@ export class StyleFormProvider {
 
                     <div class="checkbox-row" style="margin-left:0">
                         <input type="checkbox" id="placeCommasBeforeItems" ${layout.placeCommasBeforeItems ? 'checked' : ''} onchange="updatePreview()">
-                        <label for="placeCommasBeforeItems" data-i18n="lists.placeCommasBefore">Place commas before items</label>
+                        <label for="placeCommasBeforeItems" data-i18n="lists.placeCommasBefore">Place commas before items<i class="tip" data-tip-i18n="tip.placeCommasBefore">i</i></label>
                     </div>
 
                     <div class="checkbox-row" style="margin-left:0">
                         <input type="checkbox" id="alignItemsToTabStops" ${layout.alignItemsToTabStops ? 'checked' : ''} onchange="updatePreview()">
-                        <label for="alignItemsToTabStops" data-i18n="lists.alignToTabStops">Align items to tab stops (clause padding)</label>
+                        <label for="alignItemsToTabStops" data-i18n="lists.alignToTabStops">Align items to tab stops (clause padding)<i class="tip" data-tip-i18n="tip.alignToTabStops">i</i></label>
                     </div>
 
                     <div class="info-bar">
@@ -1726,8 +2013,17 @@ export class StyleFormProvider {
                 </div>
             </div>
 
-            <div class="preview" id="formatPreview">
-                <pre id="previewCode"></pre>
+            <div class="preview-panel" id="formatPreviewPanel">
+                <div class="preview-splitter" id="previewSplitter"></div>
+                <div class="preview-header">
+                    <span class="preview-label" data-i18n="preview.title">preview</span>
+                    <span class="spacer"></span>
+                    <select id="previewFileSelect" onchange="onPreviewFileChange()">
+                        <option value="__builtin__" data-i18n="preview.builtinSample">Built-in sample</option>
+                    </select>
+                    <button class="btn btn-secondary" onclick="browseSqlFile()" style="padding:3px 8px; font-size:12px;" title="*.sql dosya seçimi">...</button>
+                </div>
+                <div class="preview-editor-container" id="formatPreviewEditorContainer"></div>
             </div>
         </div>
     </div>
@@ -1749,11 +2045,30 @@ export class StyleFormProvider {
             const dict = T[lang] || T.en;
             document.querySelectorAll('[data-i18n]').forEach(el => {
                 const key = el.getAttribute('data-i18n');
-                if (dict[key] !== undefined) el.textContent = dict[key];
+                if (dict[key] === undefined) return;
+                // Preserve child tooltip icons when updating text
+                const tipEl = el.querySelector('.tip');
+                if (tipEl) {
+                    // Set only the text node, keep the icon
+                    const textNode = el.firstChild;
+                    if (textNode && textNode.nodeType === 3) {
+                        textNode.textContent = dict[key];
+                    } else {
+                        el.insertBefore(document.createTextNode(dict[key]), tipEl);
+                    }
+                } else {
+                    el.textContent = dict[key];
+                }
             });
             document.querySelectorAll('[data-i18n-html]').forEach(el => {
                 const key = el.getAttribute('data-i18n-html');
                 if (dict[key] !== undefined) el.innerHTML = dict[key];
+            });
+            // Update tooltip texts
+            document.querySelectorAll('[data-tip-i18n]').forEach(el => {
+                const key = el.getAttribute('data-tip-i18n');
+                const text = (dict[key] || (T.en && T.en[key]) || '');
+                el.setAttribute('data-tip', text);
             });
         }
 
@@ -1882,64 +2197,225 @@ export class StyleFormProvider {
             updateLangEditProgress();
         }
 
-        // Apply on load if not English
-        if (currentLang !== 'en') {
-            setTimeout(() => applyLang(currentLang), 0);
-        }
+        // Apply translations on load (always — needed for tooltips even in English)
+        setTimeout(() => applyLang(currentLang), 0);
 
-        const sampleCode = [
-            { type: 'kw', text: 'Declare' }, { type: '', text: ' @dateOnly ' }, { type: 'dt', text: 'DateTime' },
-            { type: '', text: '\\n\\n' },
-            { type: 'kw', text: 'Set' }, { type: '', text: ' @dateOnly = ' },
-            { type: 'fn', text: 'CAST' }, { type: '', text: '(' },
-            { type: 'fn', text: 'FLOOR' }, { type: '', text: '(' },
-            { type: 'fn', text: 'CAST' }, { type: '', text: '(' },
-            { type: 'fn', text: 'GETDATE' }, { type: '', text: '() ' },
-            { type: 'kw', text: 'As' }, { type: '', text: ' ' }, { type: 'dt', text: 'Float' },
-            { type: '', text: ')) ' },
-            { type: 'kw', text: 'As' }, { type: '', text: ' ' }, { type: 'dt', text: 'DateTime' },
-            { type: '', text: ')' },
-            { type: '', text: '\\n\\n' },
-            { type: 'kw', text: 'Select' }, { type: '', text: '  ' },
-            { type: 'sv', text: '@@ROWCOUNT' },
-        ];
+        const builtinSamples = {
+            styles: 'Declare @dateOnly Datetime\\nSet @dateOnly = CAST(FLOOR(CAST(GETDATE() As Float)) As Datetime)\\n\\nSelect  @@ROWCOUNT',
 
-        function applyCasing(text, mode) {
-            switch (mode) {
-                case 'uppercase': return text.toUpperCase();
-                case 'lowercase': return text.toLowerCase();
-                case 'upperCamelCase': return text.charAt(0).toUpperCase() + text.slice(1).toLowerCase();
-                case 'leaveAsIs': return text;
-                default: return text;
+            casing: 'Declare @dateOnly Datetime\\n\\nSet @dateOnly = CAST(FLOOR(CAST(GETDATE() As Float)) As Datetime)\\n\\nSelect  @@ROWCOUNT',
+
+            lists: 'Select p.ProductId, p.ProductName, p.UnitPrice, p.UnitsInStock, p.ReorderLevel, c.CategoryName, s.CompanyName As SupplierName\\nFrom dbo.Products p\\nJoin dbo.Categories c On c.CategoryId = p.CategoryId\\nJoin dbo.Suppliers s On s.SupplierId = p.SupplierId\\nWhere p.UnitPrice > 10 And p.UnitsInStock > 0 And p.Discontinued = 0\\nOrder By c.CategoryName, p.ProductName',
+
+            whitespace: 'Use AdventureWorks\\nGo\\n-- Siparis ozeti raporu\\nSelect o.OrderId, o.OrderDate, c.CompanyName, c.ContactName, c.City, c.Country, Sum(od.UnitPrice * od.Quantity * (1 - od.Discount)) As TotalAmount\\nFrom dbo.Orders o\\nJoin dbo.Customers c On c.CustomerId = o.CustomerId\\nJoin dbo.OrderDetails od On od.OrderId = o.OrderId\\nWhere o.OrderDate >= \\'2024-01-01\\' And o.ShippedDate Is Not Null And c.Country In (\\'Germany\\', \\'France\\', \\'UK\\', \\'USA\\', \\'Brazil\\')\\nGroup By o.OrderId, o.OrderDate, c.CompanyName, c.ContactName, c.City, c.Country\\nHaving Sum(od.UnitPrice * od.Quantity * (1 - od.Discount)) > 500\\nOrder By TotalAmount Desc\\nGo\\nPrint \\'Batch 1 tamamlandi\\'\\nSelect c.CategoryName, Count(*) As ProductCount, Avg(p.UnitPrice) As AvgPrice, Sum(p.UnitsInStock) As TotalStock\\nFrom dbo.Products p Join dbo.Categories c On c.CategoryId = p.CategoryId\\nWhere p.Discontinued = 0\\nGroup By c.CategoryName',
+
+            dataDml: 'Select p.ProductId, p.ProductName, c.CategoryName, s.CompanyName As SupplierName, p.UnitPrice, p.UnitsInStock, p.UnitsOnOrder\\nFrom dbo.Products p\\nJoin dbo.Categories c On c.CategoryId = p.CategoryId\\nJoin dbo.Suppliers s On s.SupplierId = p.SupplierId\\nWhere p.UnitPrice > 20 And p.Discontinued = 0 And p.UnitsInStock > 0\\nGroup By c.CategoryName, s.CompanyName, p.ProductId, p.ProductName, p.UnitPrice, p.UnitsInStock, p.UnitsOnOrder\\nOrder By c.CategoryName, p.ProductName\\n\\nSelect Distinct Top 10 p.ProductName, p.UnitPrice\\nFrom dbo.Products p\\nWhere p.CategoryId = 1\\nOrder By p.UnitPrice Desc\\n\\nInsert Into dbo.OrderDetails (OrderId, ProductId, UnitPrice, Quantity, Discount)\\nValues (10248, 11, 14.00, 12, 0)\\n\\nUpdate dbo.Products Set UnitPrice = UnitPrice * 1.10, UnitsOnOrder = UnitsOnOrder + 5 Where CategoryId = 1 And Discontinued = 0\\n\\nDelete From dbo.OrderDetails Where Quantity = 0 And Discount = 0',
+
+            schemaDdl: 'Create Table dbo.Employees (\\n    EmployeeId Int Not Null Identity(1,1),\\n    FirstName NVarchar(50) Not Null,\\n    LastName NVarchar(50) Not Null,\\n    Email NVarchar(100) Null,\\n    HireDate Date Not Null Default GetDate(),\\n    Salary Decimal(10,2) Null,\\n    DepartmentId Int Not Null,\\n    Constraint PK_Employees Primary Key Clustered (EmployeeId),\\n    Constraint FK_Employees_Dept Foreign Key (DepartmentId) References dbo.Departments(DepartmentId)\\n)\\n\\nCreate Or Alter Procedure dbo.GetEmployeesByDept\\n    @DepartmentId Int,\\n    @MinSalary Decimal(10,2) = 0\\nAs\\nBegin\\n    Select EmployeeId, FirstName, LastName, Salary\\n    From dbo.Employees\\n    Where DepartmentId = @DepartmentId And Salary >= @MinSalary\\n    Order By LastName\\nEnd',
+
+            controlFlow: 'Declare @Status Int = 0\\nDeclare @Message NVarchar(200)\\n\\nIf @Status = 1\\nBegin\\n    Set @Message = \\'Active\\'\\n    Print @Message\\nEnd\\nElse If @Status = 0\\nBegin\\n    Set @Message = \\'Inactive\\'\\n    Print @Message\\nEnd\\nElse\\nBegin\\n    Set @Message = \\'Unknown\\'\\nEnd\\n\\nBegin Try\\n    Insert Into dbo.AuditLog (Message) Values (@Message)\\nEnd Try\\nBegin Catch\\n    Print ERROR_MESSAGE()\\nEnd Catch',
+
+            variables: 'Declare @StartDate Datetime = \\'2024-01-01\\'\\nDeclare @EndDate Datetime = GetDate()\\nDeclare @CategoryId Int\\nDeclare @TotalAmount Decimal(18,2)\\nDeclare @CustomerName NVarchar(100) = \\'ACME Corp\\'\\n\\nSet @CategoryId = 5\\nSet @TotalAmount = (Select Sum(UnitPrice * Quantity) From dbo.OrderDetails Where OrderId = 10248)\\n\\nDeclare @Counter Int = 0, @MaxRetries Int = 3, @Success Bit = 0',
+
+            caseExpr: 'Select\\n    ProductName,\\n    UnitPrice,\\n    Case\\n        When UnitPrice < 10 Then \\'Budget\\'\\n        When UnitPrice < 50 Then \\'Standard\\'\\n        When UnitPrice < 100 Then \\'Premium\\'\\n        Else \\'Luxury\\'\\n    End As PriceCategory,\\n    Case CategoryId\\n        When 1 Then \\'Beverages\\'\\n        When 2 Then \\'Condiments\\'\\n        When 3 Then \\'Confections\\'\\n        Else \\'Other\\'\\n    End As CategoryLabel\\nFrom dbo.Products\\nWhere Discontinued = 0\\nOrder By Case When UnitPrice < 10 Then 0 Else 1 End, ProductName',
+        };
+
+        let currentActiveSection = 'styles';
+        let previewSqlSource = '__builtin__';
+        let previewSqlFiles = {}; // path -> content
+        let formatPreviewEditor = null;
+        let previewPanelHeight = 220;
+
+        function getPreviewSql() {
+            if (previewSqlSource !== '__builtin__') {
+                return previewSqlFiles[previewSqlSource] || builtinSamples[currentActiveSection] || builtinSamples.styles;
             }
+            return builtinSamples[currentActiveSection] || builtinSamples.styles;
         }
 
+        function collectCurrentSettings() {
+            return {
+                casing: {
+                    reservedKeywords: document.getElementById('reservedKeywords').value,
+                    builtInFunctions: document.getElementById('builtInFunctions').value,
+                    builtInDataTypes: document.getElementById('builtInDataTypes').value,
+                },
+                lists: {
+                    placeCommasBeforeItems: document.getElementById('placeCommasBeforeItems').checked,
+                    alignItemsToTabStops: document.getElementById('alignItemsToTabStops').checked,
+                },
+                maxLineLength: parseInt(document.getElementById('maxLineLength').value) || 0,
+                whitespace: {
+                    spacesOrTabs: document.getElementById('ws_spacesOrTabs').value,
+                    numberOfSpacesInTabs: parseInt(document.getElementById('ws_numberOfSpaces').value) || 4,
+                    wrapLinesLongerThan: parseInt(document.getElementById('ws_wrapLines').value) || 120,
+                    emptyLinesBetweenStatements: parseInt(document.getElementById('ws_emptyLinesBetween').value) || 0,
+                    emptyLinesAfterBatchSeparator: parseInt(document.getElementById('ws_emptyLinesAfterBatch').value) || 1,
+                    preserveExistingEmptyLinesBetweenStatements: document.getElementById('ws_preserveEmptyBetween').checked,
+                    preserveExistingEmptyLinesWithinStatements: document.getElementById('ws_preserveEmptyWithin').checked,
+                    alignGroupsOfSingleLineComments: document.getElementById('ws_alignSingleLineComments').checked,
+                    alignMultilineCommentsMatchingCommonPatterns: document.getElementById('ws_alignMultilineComments').checked,
+                },
+                controlFlow: {
+                    placeBeginOnNewLine: document.getElementById('cf_placeBeginOnNewLine').checked,
+                    indentBeginEndKeywords: document.getElementById('cf_indentBeginEnd').checked,
+                    indentContentsOfStatements: document.getElementById('cf_indentContents').checked,
+                    collapseShortStatements: document.getElementById('cf_collapseShort').checked,
+                    collapseShortStatementsShorterThan: parseInt(document.getElementById('cf_collapseShortLen').value) || 78,
+                },
+                variables: {
+                    declareAlignDataTypesAndValues: document.getElementById('var_alignDataTypes').checked,
+                    declareAddSpaceBetweenTypeAndPrecision: document.getElementById('var_addSpaceBetween').checked,
+                    setPlaceAssignedValueOnNewLine: document.getElementById('var_setPlaceValueOnNewLine').checked,
+                    setPlaceEqualsSignOnNewLine: document.getElementById('var_setPlaceEqualsOnNewLine').checked,
+                },
+                dataDml: {
+                    clauseAlignment: document.getElementById('dml_clauseAlignment').value,
+                    clauseIndentation: parseInt(document.getElementById('dml_clauseIndentation').value) || 0,
+                    placeFromTableOnNewLine: document.getElementById('dml_placeFromOnNewLine').value,
+                    placeWhereConditionOnNewLine: document.getElementById('dml_placeWhereOnNewLine').value,
+                    placeGroupByOrderByExpressionOnNewLine: document.getElementById('dml_placeGroupByOnNewLine').value,
+                    placeInsertTableOnNewLine: document.getElementById('dml_placeInsertTableOnNewLine').checked,
+                    placeDistinctTopOnNewLine: document.getElementById('dml_placeDistinctTopOnNewLine').checked,
+                    addNewLineAfterDistinctTop: document.getElementById('dml_addNewLineAfterDistinctTop').checked,
+                    collapseShortDmlStatements: document.getElementById('dml_collapseShort').checked,
+                    collapseShortDmlShorterThan: parseInt(document.getElementById('dml_collapseShortLen').value) || 120,
+                    collapseSubqueriesShorterThan: parseInt(document.getElementById('dml_collapseSubqueriesLen').value) || 120,
+                },
+                schemaDdl: {
+                    alignDataTypesAndConstraints: document.getElementById('ddl_alignDataTypes').checked,
+                    placeConstraintsOnNewLines: document.getElementById('ddl_placeConstraintsOnNewLines').checked,
+                    placeConstraintColumnsOnNewLines: document.getElementById('ddl_placeConstraintCols').value,
+                    placeFirstProcedureParameterOnNewLine: document.getElementById('ddl_placeFirstParam').value,
+                    collapseShortDdlStatements: document.getElementById('ddl_collapseShort').checked,
+                    collapseShortDdlShorterThan: parseInt(document.getElementById('ddl_collapseShortLen').value) || 120,
+                },
+                caseExpressions: {
+                    placeExpressionOnNewLine: document.getElementById('casePlaceExprOnNewLine').checked,
+                    placeFirstWhenOnNewLine: document.getElementById('caseFirstWhenNewLine').value,
+                    whenAlignment: document.getElementById('caseWhenAlignment').value,
+                    placeThenOnNewLine: document.getElementById('casePlaceThenOnNewLine').checked,
+                    thenAlignment: document.getElementById('caseThenAlignment').value,
+                    placeElseOnNewLine: document.getElementById('casePlaceElseOnNewLine').checked,
+                    alignElseToWhen: document.getElementById('caseAlignElseToWhen').checked,
+                },
+            };
+        }
+
+        let previewDebounceTimer = null;
         function updatePreview() {
-            const kwMode = document.getElementById('reservedKeywords').value;
-            const fnMode = document.getElementById('builtInFunctions').value;
-            const dtMode = document.getElementById('builtInDataTypes').value;
-
-            let html = '';
-            for (const part of sampleCode) {
-                let text = part.text.replace(/\\\\n/g, '\\n');
-                if (part.type === 'kw') {
-                    text = applyCasing(text, kwMode);
-                    html += '<span class="kw">' + escapeHtml(text) + '</span>';
-                } else if (part.type === 'fn') {
-                    text = applyCasing(text, fnMode);
-                    html += '<span class="fn">' + escapeHtml(text) + '</span>';
-                } else if (part.type === 'dt') {
-                    text = applyCasing(text, dtMode);
-                    html += '<span class="dt">' + escapeHtml(text) + '</span>';
-                } else if (part.type === 'sv') {
-                    text = applyCasing(text, fnMode);
-                    html += '<span class="sv">' + escapeHtml(text) + '</span>';
-                } else {
-                    html += escapeHtml(text);
-                }
-            }
-            document.getElementById('previewCode').innerHTML = html;
+            if (previewDebounceTimer) clearTimeout(previewDebounceTimer);
+            previewDebounceTimer = setTimeout(function() {
+                const sql = getPreviewSql();
+                const settings = collectCurrentSettings();
+                vscode.postMessage({ cmd: 'formatPreview', sql: sql, settings: settings });
+            }, 150);
         }
+
+        // Tooltip popup logic
+        (function initTooltips() {
+            const popup = document.createElement('div');
+            popup.className = 'tip-popup';
+            popup.style.display = 'none';
+            document.body.appendChild(popup);
+
+            document.addEventListener('mouseover', function(e) {
+                const tip = e.target.closest('.tip');
+                if (!tip) return;
+                const text = tip.getAttribute('data-tip');
+                if (!text) return;
+                popup.textContent = text;
+                popup.style.display = 'block';
+
+                const rect = tip.getBoundingClientRect();
+                const popRect = popup.getBoundingClientRect();
+                // Try above first
+                let top = rect.top - popRect.height - 6;
+                if (top < 4) {
+                    // Not enough space above — show below
+                    top = rect.bottom + 6;
+                }
+                let left = rect.left + rect.width / 2 - popRect.width / 2;
+                // Keep within viewport
+                if (left < 4) left = 4;
+                if (left + popRect.width > window.innerWidth - 4) left = window.innerWidth - popRect.width - 4;
+
+                popup.style.top = top + 'px';
+                popup.style.left = left + 'px';
+            });
+
+            document.addEventListener('mouseout', function(e) {
+                const tip = e.target.closest('.tip');
+                if (tip) popup.style.display = 'none';
+            });
+        })();
+
+        function toggleEmptyLinesControls() {
+            const checked = document.getElementById('ws_preserveEmptyBetween').checked;
+            const row1 = document.getElementById('ws_emptyLinesBetweenRow');
+            const row2 = document.getElementById('ws_emptyLinesAfterBatchRow');
+            const opacity = checked ? '0.4' : '1';
+            row1.style.opacity = opacity;
+            row1.style.pointerEvents = checked ? 'none' : '';
+            row2.style.opacity = opacity;
+            row2.style.pointerEvents = checked ? 'none' : '';
+        }
+        // Initialize on load
+        toggleEmptyLinesControls();
+
+        function browseSqlFile() {
+            vscode.postMessage({ cmd: 'browseSqlFile' });
+        }
+
+        function onPreviewFileChange() {
+            const sel = document.getElementById('previewFileSelect');
+            previewSqlSource = sel.value;
+            if (previewSqlSource !== '__builtin__') {
+                // Always request fresh content from extension
+                vscode.postMessage({ cmd: 'readSqlFile', path: previewSqlSource });
+            } else {
+                updatePreview();
+            }
+        }
+
+        // refreshSqlFiles removed — files loaded via webviewReady and readSqlFile on demand
+
+        // Splitter drag logic
+        (function initSplitter() {
+            const splitter = document.getElementById('previewSplitter');
+            const panel = document.getElementById('formatPreviewPanel');
+            const contentBody = document.querySelector('.content-body');
+            let dragging = false;
+            let startY = 0;
+            let startHeight = 0;
+
+            splitter.addEventListener('mousedown', function(e) {
+                dragging = true;
+                startY = e.clientY;
+                startHeight = panel.offsetHeight;
+                splitter.classList.add('dragging');
+                document.body.style.cursor = 'ns-resize';
+                document.body.style.userSelect = 'none';
+                e.preventDefault();
+            });
+
+            document.addEventListener('mousemove', function(e) {
+                if (!dragging) return;
+                const delta = startY - e.clientY;
+                const newHeight = Math.max(80, Math.min(window.innerHeight - 200, startHeight + delta));
+                panel.style.height = newHeight + 'px';
+                previewPanelHeight = newHeight;
+                if (formatPreviewEditor) formatPreviewEditor.layout();
+            });
+
+            document.addEventListener('mouseup', function() {
+                if (!dragging) return;
+                dragging = false;
+                splitter.classList.remove('dragging');
+                document.body.style.cursor = '';
+                document.body.style.userSelect = '';
+            });
+        })();
 
         function escapeHtml(str) {
             return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -2185,16 +2661,38 @@ export class StyleFormProvider {
 
         let snippetsLoaded = false;
 
+        function navigateToSection(name) {
+            // Find the menu item for this section and click it programmatically
+            const menuItem = document.querySelector('.menu-item[onclick*="showSection(\\'' + name + '\\')"]');
+            if (menuItem) {
+                menuItem.click();
+            } else {
+                // Fallback: directly show the section
+                document.querySelectorAll('.menu-item').forEach(el => el.classList.remove('active'));
+                document.querySelectorAll('[id^="section-"]').forEach(el => el.style.display = 'none');
+                const sec = document.getElementById('section-' + name);
+                if (sec) sec.style.display = '';
+            }
+        }
+
         function showSection(name) {
             document.querySelectorAll('.menu-item').forEach(el => el.classList.remove('active'));
             event.target.classList.add('active');
             document.querySelectorAll('[id^="section-"]').forEach(el => el.style.display = 'none');
             const sec = document.getElementById('section-' + name);
             if (sec) sec.style.display = '';
-            // Show format preview only for style sections
-            const formatPreview = document.getElementById('formatPreview');
-            formatPreview.style.display = (name === 'casing' || name === 'lists') ? '' : 'none';
-            updatePreview();
+            // Show format preview for all Format sub-sections
+            const formatSections = ['styles', 'whitespace', 'casing', 'lists', 'dataDml', 'schemaDdl', 'controlFlow', 'variables', 'caseExpr'];
+            const previewPanel = document.getElementById('formatPreviewPanel');
+            if (formatSections.includes(name)) {
+                currentActiveSection = name;
+                previewPanel.classList.add('visible');
+                previewPanel.style.height = previewPanelHeight + 'px';
+                if (formatPreviewEditor) formatPreviewEditor.layout();
+                updatePreview();
+            } else {
+                previewPanel.classList.remove('visible');
+            }
             if (name === 'snippets' && !snippetsLoaded) {
                 vscode.postMessage({ cmd: 'loadSnippets' });
                 snippetsLoaded = true;
@@ -2233,7 +2731,9 @@ export class StyleFormProvider {
 
         window.addEventListener('message', (e) => {
             const msg = e.data;
-            if (msg.cmd === 'saved') {
+            if (msg.cmd === 'navigateSection') {
+                navigateToSection(msg.section);
+            } else if (msg.cmd === 'saved') {
                 // Visual feedback handled by VS Code notification
             } else if (msg.cmd === 'snippetsLoaded') {
                 window._snippets = (msg.snippets || []).sort(function(a, b) {
@@ -2269,11 +2769,79 @@ export class StyleFormProvider {
                 const sfp = document.getElementById('styleFilePath');
                 if (sfp) sfp.value = msg.styleFile || '';
                 updatePreview();
+            } else if (msg.cmd === 'previewFormatted') {
+                if (formatPreviewEditor) {
+                    const pos = formatPreviewEditor.getPosition();
+                    formatPreviewEditor.setValue(msg.formatted || '');
+                    if (pos) formatPreviewEditor.setPosition(pos);
+                }
+            } else if (msg.cmd === 'sqlFileLoaded') {
+                // Add file to dropdown and preview files map
+                previewSqlFiles[msg.path] = msg.content;
+                const sel = document.getElementById('previewFileSelect');
+                let exists = false;
+                for (let i = 0; i < sel.options.length; i++) {
+                    if (sel.options[i].value === msg.path) { exists = true; break; }
+                }
+                if (!exists) {
+                    const opt = document.createElement('option');
+                    opt.value = msg.path;
+                    opt.textContent = msg.fileName;
+                    sel.appendChild(opt);
+                }
+                // Only switch selection if this file was explicitly requested (user action)
+                if (msg.select || previewSqlSource === msg.path) {
+                    sel.value = msg.path;
+                    previewSqlSource = msg.path;
+                    updatePreview();
+                }
+            } else if (msg.cmd === 'sqlFilesRefreshed') {
+                // Update dropdown: add new files, update content of existing, remove closed files
+                const sel = document.getElementById('previewFileSelect');
+                const newPaths = new Set((msg.files || []).map(function(f) { return f.path; }));
+                // Update content map and add new options
+                (msg.files || []).forEach(function(f) {
+                    previewSqlFiles[f.path] = f.content;
+                    let exists = false;
+                    for (let i = 0; i < sel.options.length; i++) {
+                        if (sel.options[i].value === f.path) { exists = true; break; }
+                    }
+                    if (!exists) {
+                        const opt = document.createElement('option');
+                        opt.value = f.path;
+                        opt.textContent = f.fileName;
+                        sel.appendChild(opt);
+                    }
+                });
+                // Remove options for files that are no longer open (skip built-in)
+                for (let i = sel.options.length - 1; i >= 1; i--) {
+                    if (!newPaths.has(sel.options[i].value)) {
+                        delete previewSqlFiles[sel.options[i].value];
+                        sel.remove(i);
+                    }
+                }
+                // If selected file was removed, fall back to built-in and refresh
+                if (previewSqlSource !== '__builtin__' && !previewSqlFiles[previewSqlSource]) {
+                    sel.value = '__builtin__';
+                    previewSqlSource = '__builtin__';
+                    updatePreview();
+                }
             }
+        });
+
+        // Auto-trigger preview on any change in format sections
+        ['section-whitespace', 'section-dataDml', 'section-schemaDdl', 'section-controlFlow', 'section-variables', 'section-caseExpr', 'section-styles'].forEach(function(id) {
+            const sec = document.getElementById(id);
+            if (!sec) return;
+            sec.addEventListener('change', function() { updatePreview(); });
+            sec.addEventListener('input', function() { updatePreview(); });
         });
 
         // Initial preview
         updatePreview();
+
+        // Signal extension that webview is ready to receive data
+        vscode.postMessage({ cmd: 'webviewReady' });
     </script>
 
     <!-- Monaco Editor -->
@@ -2284,7 +2852,24 @@ export class StyleFormProvider {
 
         require.config({ paths: { vs: '${monacoVs}/vs' } });
         require(['vs/editor/editor.main'], function () {
-            // Preview editor (readonly)
+            // Format preview editor (readonly)
+            formatPreviewEditor = monaco.editor.create(document.getElementById('formatPreviewEditorContainer'), {
+                value: '',
+                language: 'sql',
+                theme: 'vs-dark',
+                readOnly: true,
+                minimap: { enabled: false },
+                scrollBeyondLastLine: false,
+                lineNumbers: 'on',
+                fontSize: 13,
+                automaticLayout: true,
+                wordWrap: 'on',
+                scrollbar: { vertical: 'auto', horizontal: 'auto' }
+            });
+            // Trigger initial preview
+            updatePreview();
+
+            // Snippet preview editor (readonly)
             previewEditor = monaco.editor.create(document.getElementById('snippetCodePreview'), {
                 value: '',
                 language: 'sql',
