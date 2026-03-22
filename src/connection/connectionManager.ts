@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { Connection, Request, TYPES, ColumnMetaData } from 'tedious';
+import * as mssql from 'mssql';
 
 export interface ConnectionProfile {
     name: string;
@@ -29,18 +29,15 @@ export interface BatchResult {
 }
 
 export class ConnectionManager {
-    private connection: Connection | null = null;
+    private pool: mssql.ConnectionPool | null = null;
     private activeProfile: ConnectionProfile | null = null;
     private statusBarItem: vscode.StatusBarItem;
     private _onConnectionChanged = new vscode.EventEmitter<ConnectionProfile | null>();
     public readonly onConnectionChanged = this._onConnectionChanged.event;
-    private requestQueue: (() => void)[] = [];
-    private isRequestRunning = false;
-    private pendingConnection: Connection | null = null;
     private _connectingProfileName: string | null = null;
 
     get connectingProfileName(): string | null { return this._connectingProfileName; }
-    get isConnecting(): boolean { return this.pendingConnection !== null; }
+    get isConnecting(): boolean { return this._connectingProfileName !== null; }
 
     constructor() {
         this.statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
@@ -49,52 +46,8 @@ export class ConnectionManager {
         this.statusBarItem.show();
     }
 
-    /** Wait for any running request to finish before executing */
-    private waitForTurn(): Promise<void> {
-        if (!this.isRequestRunning) {
-            this.isRequestRunning = true;
-            return Promise.resolve();
-        }
-        return new Promise(resolve => {
-            this.requestQueue.push(resolve);
-        });
-    }
-
-    private releaseRequest(): void {
-        if (this.requestQueue.length > 0) {
-            const next = this.requestQueue.shift()!;
-            next();
-        } else {
-            this.isRequestRunning = false;
-        }
-    }
-
     get isConnected(): boolean {
-        return this.connection !== null;
-    }
-
-    /** Map encrypt setting to tedious encrypt option */
-    private getEncrypt(profile: ConnectionProfile): boolean {
-        switch (profile.encrypt) {
-            case 'mandatory': return true;
-            case 'strict': return true; // tedious v18 doesn't support 'strict' as string, use true + cert validation
-            case 'optional': return false;
-            default: return false; // default = optional
-        }
-    }
-
-    /** Parse "server,port" format into separate server and port */
-    private parseServerPort(profile: ConnectionProfile): { server: string; port: number } {
-        let server = profile.server;
-        let port = profile.port || 1433;
-        // Handle "server,port" format (SSMS style)
-        if (server.includes(',')) {
-            const parts = server.split(',');
-            server = parts[0].trim();
-            const parsed = parseInt(parts[1].trim());
-            if (!isNaN(parsed)) { port = parsed; }
-        }
-        return { server, port };
+        return this.pool?.connected === true;
     }
 
     get currentProfile(): ConnectionProfile | null {
@@ -138,84 +91,89 @@ export class ConnectionManager {
         return profiles;
     }
 
-    /** Connect to a database using a profile */
-    async connect(profile: ConnectionProfile): Promise<void> {
-        // Disconnect existing connection
-        if (this.connection) {
-            await this.disconnect();
+    private buildPoolConfig(profile: ConnectionProfile): any {
+        let server = profile.server;
+        let port = profile.port ?? 1433;
+
+        // Handle "server,port" format
+        if (server.includes(',')) {
+            const parts = server.split(',');
+            server = parts[0];
+            port = parseInt(parts[1], 10) || port;
         }
 
-        return new Promise((resolve, reject) => {
-            const { server, port } = this.parseServerPort(profile);
-            const config = {
-                server,
-                authentication: {
-                    type: (profile.user ? 'default' : 'ntlm') as 'default' | 'ntlm',
-                    options: {
-                        userName: profile.user || '',
-                        password: profile.password || '',
-                    },
-                },
-                options: {
-                    database: profile.database,
-                    port,
-                    trustServerCertificate: profile.trustServerCertificate !== false,
-                    encrypt: this.getEncrypt(profile),
-                    rowCollectionOnRequestCompletion: true,
-                    connectTimeout: 30000,
-                    requestTimeout: 30000,
-                },
-            };
+        // Handle "server\\instance" — mssql needs backslash in server name
+        const config: any = {
+            server,
+            port,
+            database: profile.database || undefined,
+            options: {
+                encrypt: profile.encrypt === 'mandatory' || profile.encrypt === 'strict',
+                trustServerCertificate: profile.trustServerCertificate !== false,
+                enableArithAbort: true,
+                instanceName: undefined as string | undefined,
+            },
+            connectionTimeout: 30000,
+            requestTimeout: 0,
+            pool: { max: 5, min: 0, idleTimeoutMillis: 30000 },
+        };
 
-            const conn = new Connection(config);
-            this.pendingConnection = conn;
-            this._connectingProfileName = profile.name;
+        // Handle named instances (server\instance)
+        if (server.includes('\\')) {
+            const parts = server.split('\\');
+            config.server = parts[0];
+            config.options.instanceName = parts[1];
+            config.port = undefined; // named instances don't use port
+        }
 
-            conn.on('connect', (err) => {
-                this.pendingConnection = null;
-                this._connectingProfileName = null;
-                if (err) {
-                    this.connection = null;
-                    this.activeProfile = null;
-                    this.updateStatusBar();
-                    reject(new Error(`Connection failed: ${err.message}`));
-                } else {
-                    this.connection = conn;
-                    this.activeProfile = profile;
-                    this.updateStatusBar();
-                    this._onConnectionChanged.fire(profile);
-                    resolve();
-                }
-            });
+        if (profile.user) {
+            config.user = profile.user;
+            config.password = profile.password;
+        } else {
+            config.options.trustedConnection = true;
+        }
 
-            conn.on('error', (err) => {
-                this.pendingConnection = null;
-                this._connectingProfileName = null;
-                vscode.window.showErrorMessage(`T-SQL IntelliSense: Connection error - ${err.message}`);
-                this.connection = null;
-                this.activeProfile = null;
-                this.updateStatusBar();
-                this._onConnectionChanged.fire(null);
-            });
+        return config;
+    }
 
-            conn.connect();
-        });
+    /** Connect to a database using a profile */
+    async connect(profile: ConnectionProfile): Promise<void> {
+        if (this.pool) { await this.disconnect(); }
+        this._connectingProfileName = profile.name;
+        try {
+            const config = this.buildPoolConfig(profile);
+            const pool = new mssql.ConnectionPool(config);
+            await pool.connect();
+            this.pool = pool;
+            this.activeProfile = profile;
+            this.updateStatusBar();
+            this._onConnectionChanged.fire(profile);
+        } catch (err: any) {
+            this.pool = null;
+            this.activeProfile = null;
+            this.updateStatusBar();
+            throw new Error(`Connection failed: ${err.message}`);
+        } finally {
+            this._connectingProfileName = null;
+        }
     }
 
     /** Cancel an in-progress connection attempt */
     cancelConnect(): void {
-        if (this.pendingConnection) {
-            try { this.pendingConnection.close(); } catch { /* ignore */ }
-            this.pendingConnection = null;
+        if (this._connectingProfileName) {
             this._connectingProfileName = null;
+            if (this.pool) {
+                this.pool.close().catch(() => {});
+                this.pool = null;
+            }
         }
     }
 
     /** Disconnect from the current database */
     async disconnect(): Promise<void> {
-        if (this.connection) {
-            this.connection.close();
-            this.connection = null;
+        if (this.pool) {
+            try { await this.pool.close(); } catch { /* ignore */ }
+            this.pool = null;
             this.activeProfile = null;
             this.updateStatusBar();
             this._onConnectionChanged.fire(null);
@@ -224,51 +182,22 @@ export class ConnectionManager {
 
     /** Execute a SQL query and return results */
     async executeQuery(sql: string, params?: Record<string, { type: any; value: any }>): Promise<QueryResult> {
-        await this.waitForTurn();
-        try {
-            return await new Promise<QueryResult>((resolve, reject) => {
-                if (!this.connection) {
-                    reject(new Error('Not connected to database'));
-                    return;
-                }
+        if (!this.pool || !this.pool.connected) { throw new Error('Not connected to database'); }
 
-                const rows: Record<string, any>[] = [];
-                const columns: string[] = [];
-
-                const request = new Request(sql, (err, rowCount, resultRows) => {
-                    if (err) {
-                        reject(err);
-                    } else {
-                        resolve({ rows, columns });
-                    }
-                });
-
-                // Add parameters if provided
-                if (params) {
-                    for (const [name, param] of Object.entries(params)) {
-                        request.addParameter(name, param.type, param.value);
-                    }
-                }
-
-                request.on('columnMetadata', (columnsMetadata: ColumnMetaData[]) => {
-                    for (const col of columnsMetadata) {
-                        columns.push(col.colName);
-                    }
-                });
-
-                request.on('row', (rowColumns: any[]) => {
-                    const row: Record<string, any> = {};
-                    for (const col of rowColumns) {
-                        row[col.metadata.colName] = col.value;
-                    }
-                    rows.push(row);
-                });
-
-                this.connection.execSql(request);
-            });
-        } finally {
-            this.releaseRequest();
+        const request = this.pool.request();
+        if (params) {
+            for (const [name, param] of Object.entries(params)) {
+                request.input(name, param.type, param.value);
+            }
         }
+
+        const result = await request.query(sql);
+        const recordset = result.recordset || [];
+        const columns = recordset.columns
+            ? Object.keys(recordset.columns)
+            : (recordset.length > 0 ? Object.keys(recordset[0]) : []);
+
+        return { rows: recordset as Record<string, any>[], columns };
     }
 
     /** Execute a SQL batch (supports GO separators, captures messages) */
@@ -310,100 +239,38 @@ export class ConnectionManager {
     }
 
     private async executeSingleBatch(sql: string, messages: string[]): Promise<QueryResult[]> {
-        await this.waitForTurn();
-        try {
-            return await new Promise<QueryResult[]>((resolve, reject) => {
-                if (!this.connection) {
-                    reject(new Error('Not connected to database'));
-                    return;
-                }
+        if (!this.pool || !this.pool.connected) { throw new Error('Not connected'); }
 
-                const resultSets: QueryResult[] = [];
-                let currentColumns: string[] = [];
-                let currentRows: Record<string, any>[] = [];
+        const request = this.pool.request();
+        request.on('info', (info: any) => {
+            if (info.message) { messages.push(info.message); }
+        });
 
-                const request = new Request(sql, (err) => {
-                    if (err) {
-                        reject(err);
-                    } else {
-                        // Push last result set if it has data
-                        if (currentColumns.length > 0 || currentRows.length > 0) {
-                            resultSets.push({ rows: currentRows, columns: currentColumns });
-                        }
-                        resolve(resultSets);
-                    }
-                });
+        const result = await request.batch(sql);
+        const recordsets = result.recordsets as any[][];
 
-                request.on('columnMetadata', (columnsMetadata: ColumnMetaData[]) => {
-                    // New result set starting — save previous one if exists
-                    if (currentColumns.length > 0 || currentRows.length > 0) {
-                        resultSets.push({ rows: currentRows, columns: currentColumns });
-                    }
-                    // Start new result set
-                    currentColumns = columnsMetadata.map(c => c.colName);
-                    currentRows = [];
-                });
-
-                request.on('row', (rowColumns: any[]) => {
-                    const row: Record<string, any> = {};
-                    for (const col of rowColumns) {
-                        row[col.metadata.colName] = col.value;
-                    }
-                    currentRows.push(row);
-                });
-
-                request.on('infoMessage', (info: any) => {
-                    if (info.message) {
-                        messages.push(info.message);
-                    }
-                });
-
-                this.connection.execSql(request);
-            });
-        } finally {
-            this.releaseRequest();
+        if (recordsets.length === 0) {
+            return [{ rows: [], columns: [] }];
         }
+
+        return recordsets.map(rs => ({
+            rows: rs as Record<string, any>[],
+            columns: rs.length > 0 ? Object.keys(rs[0]) : [],
+        }));
     }
 
     /** Test a connection profile without affecting current connection state */
     async testConnection(profile: ConnectionProfile): Promise<{ success: boolean; error?: string }> {
-        return new Promise((resolve) => {
-            const { server, port } = this.parseServerPort(profile);
-            const config = {
-                server,
-                authentication: {
-                    type: (profile.user ? 'default' : 'ntlm') as 'default' | 'ntlm',
-                    options: {
-                        userName: profile.user || '',
-                        password: profile.password || '',
-                    },
-                },
-                options: {
-                    database: profile.database,
-                    port,
-                    trustServerCertificate: profile.trustServerCertificate !== false,
-                    encrypt: this.getEncrypt(profile),
-                    connectTimeout: 30000,
-                },
-            };
-
-            const testConn = new Connection(config);
-
-            testConn.on('connect', (err) => {
-                if (err) {
-                    resolve({ success: false, error: err.message });
-                } else {
-                    testConn.close();
-                    resolve({ success: true });
-                }
-            });
-
-            testConn.on('error', () => {
-                // Swallow — handled in connect callback
-            });
-
-            testConn.connect();
-        });
+        try {
+            const config = this.buildPoolConfig(profile);
+            config.connectionTimeout = 10000;
+            const pool = new mssql.ConnectionPool(config);
+            await pool.connect();
+            await pool.close();
+            return { success: true };
+        } catch (err: any) {
+            return { success: false, error: err.message };
+        }
     }
 
     /** Show Quick Pick to select a connection profile */
@@ -445,20 +312,21 @@ export class ConnectionManager {
     }
 
     /**
-     * Lightweight DB switch — executes USE [db] on current connection.
-     * No reconnect, no schema reload. Does NOT update the status bar.
+     * Lightweight DB switch — reconnects pool with new database.
+     * Does NOT update the status bar.
      */
     async softSwitchDatabase(dbName: string): Promise<void> {
-        if (!this.connection || !this.activeProfile) { return; }
+        if (!this.pool || !this.activeProfile) { return; }
         if (this.activeProfile.database.toLowerCase() === dbName.toLowerCase()) { return; }
         try {
-            const safe = dbName.replace(/\]/g, ']]');
-            await this.executeQuery(`USE [${safe}]`);
-            this.activeProfile = { ...this.activeProfile, database: dbName };
-            // Status bar is controlled by showEditorDb — don't update here
-        } catch {
-            // Silently fail — DB may not exist or no permission
-        }
+            const newProfile = { ...this.activeProfile, database: dbName };
+            await this.pool.close();
+            const config = this.buildPoolConfig(newProfile);
+            const pool = new mssql.ConnectionPool(config);
+            await pool.connect();
+            this.pool = pool;
+            this.activeProfile = newProfile;
+        } catch { /* silently fail */ }
     }
 
     showEditorDb(_dbName: string | null): void {
@@ -494,12 +362,13 @@ export class ConnectionManager {
     }
 
     dispose(): void {
-        if (this.connection) {
-            this.connection.close();
+        if (this.pool) {
+            this.pool.close().catch(() => {});
         }
         this.statusBarItem.dispose();
         this._onConnectionChanged.dispose();
     }
 }
 
+const TYPES = mssql.TYPES;
 export { TYPES };

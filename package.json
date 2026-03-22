@@ -962,10 +962,10 @@
     "package": "vsce package"
   },
   "dependencies": {
-    "mssql": "^12.2.1",
-    "tedious": "^18.6.1"
+    "mssql": "^12.2.1"
   },
   "devDependencies": {
+    "@types/mssql": "^9.1.9",
     "@types/node": "^20.0.0",
     "@types/vscode": "^1.85.0",
     "esbuild": "^0.24.0",
