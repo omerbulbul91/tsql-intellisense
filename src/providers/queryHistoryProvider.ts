@@ -67,6 +67,13 @@ class FileGroupItem extends vscode.TreeItem {
 
         this.iconPath = new vscode.ThemeIcon('file');
         this.contextValue = 'historyEntry';
+
+        // Command for click handling (single/double detected in extension.ts)
+        this.command = {
+            command: 'tsql-intellisense.historyItemClicked',
+            title: '',
+            arguments: [latest],
+        };
     }
 }
 
@@ -87,6 +94,12 @@ class HistoryEntryItem extends vscode.TreeItem {
 
         this.iconPath = new vscode.ThemeIcon('debug-stackframe-dot');
         this.contextValue = 'historyEntry';
+
+        this.command = {
+            command: 'tsql-intellisense.historyItemClicked',
+            title: '',
+            arguments: [entry],
+        };
     }
 }
 
