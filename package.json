@@ -541,7 +541,7 @@
       {
         "command": "tsql-intellisense.toggleResultsPanel",
         "key": "ctrl+r",
-        "when": "editorLangId == sql && tsqlIntellisense.active"
+        "when": "tsqlIntellisense.active"
       },
       {
         "command": "tsql-intellisense.selectInObjectExplorer",
