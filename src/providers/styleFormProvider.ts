@@ -1088,7 +1088,10 @@ export class StyleFormProvider {
                         </div>
                         <div class="snippet-search">
                             <input type="text" id="snippetSearchInput" placeholder="Search..." oninput="filterSnippets()">
-                            <span class="snippet-search-icon">&#128269;</span>
+                            <svg class="snippet-search-icon" width="14" height="14" viewBox="0 0 16 16" fill="none">
+                                <circle cx="6.5" cy="6.5" r="5" stroke="currentColor" stroke-width="1.5" fill="none"/>
+                                <line x1="10.5" y1="10.5" x2="15" y2="15" stroke="currentColor" stroke-width="1.5"/>
+                            </svg>
                         </div>
                     </div>
 
@@ -1136,8 +1139,8 @@ export class StyleFormProvider {
                         <div id="snippetModalBody" style="height:220px; border:1px solid var(--vscode-input-border, #444); border-radius:3px;"></div>
                         <div class="snippet-modal-error" id="snippetModalError"></div>
                         <div class="snippet-modal-buttons">
-                            <button class="btn btn-secondary" onclick="closeSnippetModal()">İptal</button>
-                            <button class="btn btn-secondary" onclick="saveSnippetModal()">Kaydet</button>
+                            <button class="btn btn-secondary" onclick="saveSnippetModal()" data-i18n="snippets.save">Save</button>
+                            <button class="btn btn-secondary" onclick="closeSnippetModal()" data-i18n="snippets.cancel">Cancel</button>
                         </div>
                     </div>
                 </div>
@@ -2021,7 +2024,8 @@ export class StyleFormProvider {
 
         function openSnippetNewModal() {
             snippetEditMode = false;
-            document.getElementById('snippetModalTitle').textContent = 'Yeni Snippet';
+            var dict = T[currentLang] || T.en;
+            document.getElementById('snippetModalTitle').textContent = dict['snippets.newSnippet'] || 'New Snippet';
             document.getElementById('snippetModalPrefix').value = '';
             document.getElementById('snippetModalDesc').value = '';
             if (modalEditor) modalEditor.setValue('');
@@ -2039,7 +2043,8 @@ export class StyleFormProvider {
             if (!s) return;
             snippetEditMode = true;
             snippetOriginalPrefix = s.prefix;
-            document.getElementById('snippetModalTitle').textContent = 'Snippet Düzenle';
+            var dict2 = T[currentLang] || T.en;
+            document.getElementById('snippetModalTitle').textContent = dict2['snippets.editSnippet'] || 'Edit Snippet';
             document.getElementById('snippetModalPrefix').value = s.prefix;
             document.getElementById('snippetModalDesc').value = s.description || '';
             if (modalEditor) modalEditor.setValue(s.body.replace(/\\\\n/g, '\\n'));
