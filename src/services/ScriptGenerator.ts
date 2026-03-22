@@ -54,7 +54,7 @@ export class ScriptGenerator {
         }
     }
 
-    private async getColumns(databaseName: string, schemaName: string, objectName: string): Promise<any[]> {
+    private async getColumns(databaseName: string, schemaName: string, objectName: string, profileName?: string): Promise<any[]> {
         const safeSchema = escapeSql(schemaName);
         const safeObject = escapeSql(objectName);
         const sql = `
@@ -66,7 +66,7 @@ export class ScriptGenerator {
             WHERE c.[TABLE_SCHEMA] = '${safeSchema}' AND c.[TABLE_NAME] = '${safeObject}'
             ORDER BY c.[ORDINAL_POSITION]
         `;
-        const result = await this.treeQueryService.execute(sql, databaseName);
+        const result = await this.treeQueryService.execute(sql, databaseName, profileName);
         return result.rows;
     }
 
@@ -85,7 +85,7 @@ export class ScriptGenerator {
         const qName = `[${schema}].[${objectName}]`;
 
         if (node.nodeType === NodeType.Table) {
-            const cols = await this.getColumns(node.databaseName!, schema, objectName);
+            const cols = await this.getColumns(node.databaseName!, schema, objectName, node.profileName);
             const colDefs = cols.map((col) => {
                 const type = this.formatColumnType(col);
                 const nullable = col.IS_NULLABLE === 'YES' ? 'NULL' : 'NOT NULL';
@@ -106,7 +106,7 @@ export class ScriptGenerator {
                 GROUP BY kc.[name]
             `;
             try {
-                const pkResult = await this.treeQueryService.execute(pkSql, node.databaseName!);
+                const pkResult = await this.treeQueryService.execute(pkSql, node.databaseName!, node.profileName);
                 if (pkResult.rows.length > 0) {
                     const pk = pkResult.rows[0];
                     const pkCols = pk.Columns.split(', ').map((c: string) => `[${c}]`).join(', ');
@@ -122,7 +122,7 @@ export class ScriptGenerator {
         const safeObject = escapeSql(objectName);
         const defSql = `SELECT OBJECT_DEFINITION(OBJECT_ID('${safeSchema}.${safeObject}')) AS [Definition]`;
         try {
-            const result = await this.treeQueryService.execute(defSql, node.databaseName!);
+            const result = await this.treeQueryService.execute(defSql, node.databaseName!, node.profileName);
             const def = result.rows[0]?.Definition;
             if (def) { return def; }
         } catch { /* ignore */ }
@@ -147,13 +147,13 @@ export class ScriptGenerator {
     }
 
     private async generateSelectScript(node: DatabaseTreeItem, schema: string, objectName: string): Promise<string> {
-        const cols = await this.getColumns(node.databaseName!, schema, objectName);
+        const cols = await this.getColumns(node.databaseName!, schema, objectName, node.profileName);
         const colList = cols.map((c) => `[${c.COLUMN_NAME}]`).join(',\n       ');
         return `SELECT ${colList}\nFROM [${schema}].[${objectName}];`;
     }
 
     private async generateInsertScript(node: DatabaseTreeItem, schema: string, objectName: string): Promise<string> {
-        const cols = await this.getColumns(node.databaseName!, schema, objectName);
+        const cols = await this.getColumns(node.databaseName!, schema, objectName, node.profileName);
         const nonIdentityCols = cols.filter((c) => !c.IsIdentity);
         const colList = nonIdentityCols.map((c) => `[${c.COLUMN_NAME}]`).join(', ');
         const valList = nonIdentityCols.map((c) => `/* ${c.COLUMN_NAME} */`).join(', ');
@@ -161,7 +161,7 @@ export class ScriptGenerator {
     }
 
     private async generateUpdateScript(node: DatabaseTreeItem, schema: string, objectName: string): Promise<string> {
-        const cols = await this.getColumns(node.databaseName!, schema, objectName);
+        const cols = await this.getColumns(node.databaseName!, schema, objectName, node.profileName);
         const nonIdentityCols = cols.filter((c) => !c.IsIdentity);
         const setList = nonIdentityCols.map((c) => `    [${c.COLUMN_NAME}] = /* value */`).join(',\n');
         return `UPDATE [${schema}].[${objectName}]\nSET\n${setList}\nWHERE /* condition */;`;
@@ -177,7 +177,7 @@ export class ScriptGenerator {
                 AND [PARAMETER_MODE] IS NOT NULL
             ORDER BY [ORDINAL_POSITION]
         `;
-        const result = await this.treeQueryService.execute(paramSql, node.databaseName!);
+        const result = await this.treeQueryService.execute(paramSql, node.databaseName!, node.profileName);
         const params = result.rows;
 
         if (node.nodeType === NodeType.Procedure) {
