@@ -295,13 +295,7 @@
           "group": "z_tsql@1"
         }
       ],
-      "editor/title": [
-        {
-          "command": "tsql-intellisense.runQuery",
-          "when": "editorLangId == sql && tsqlIntellisense.active",
-          "group": "navigation"
-        }
-      ],
+      "editor/title": [],
       "view/title": [
         {
           "command": "tsql-intellisense.addConnection",
