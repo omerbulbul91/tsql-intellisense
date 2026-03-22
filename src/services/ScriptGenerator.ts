@@ -1,5 +1,5 @@
 import { TreeQueryService, escapeSql } from './TreeQueryService';
-import { DatabaseTreeItem, NodeType } from '../Models/DatabaseNode';
+import { DatabaseTreeItem, NodeType } from '../models/DatabaseNode';
 
 export type ScriptAction = 'Create' | 'Alter' | 'CreateOrAlter' | 'Drop' | 'DropAndCreate' | 'Select' | 'Insert' | 'Update' | 'Delete' | 'Execute';
 
