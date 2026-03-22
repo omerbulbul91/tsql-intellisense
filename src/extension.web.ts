@@ -59,7 +59,17 @@ export function activate(context: vscode.ExtensionContext): void {
         'newSqlFile', 'setSnippetFolder',
         'addConnection', 'editConnection', 'deleteConnection',
         'treeConnect', 'selectTop100', 'openInExplorer', 'insertSpParams',
-        'newQueryFromTree', 'switchDatabase', 'filterItems', 'clearFilter',
+        'newQueryFromTree',
+        // Script As commands
+        'Script.Create', 'Script.Alter', 'Script.CreateOrAlter',
+        'Script.Drop', 'Script.DropAndCreate',
+        'Script.Select', 'Script.Insert', 'Script.Update',
+        'Script.Delete', 'Script.Execute',
+        // Tree management commands
+        'RefreshDatabases', 'FilterDatabases', 'NewDatabase',
+        'RefreshDatabase', 'NewSchema', 'RefreshFolder', 'FilterFolder',
+        'NewTable', 'NewView', 'NewScalarFunction', 'NewTableValuedFunction',
+        'NewProcedure', 'NewTrigger',
     ];
 
     for (const cmd of commands) {
