@@ -1,431 +1,1183 @@
-import * as vscode from 'vscode';
-import { ConnectionManager } from '../connection/connectionManager';
-import { SchemaCache } from '../cache/schemaCache';
+import * as vscode from "vscode";
+import { TreeQueryService, escapeSql } from "../services/TreeQueryService";
 import {
-    ConnectionItem,
-    DatabasesFolderItem,
-    DatabaseItem,
-    ProjectFolderItem,
-    ObjectFolderItem,
-    ObjectFolderType,
-    ObjectItem,
-    ObjectType,
-    ColumnItem,
+    DatabaseTreeItem,
+    NodeType,
+    FolderType,
+    ServerFolderType,
+    ColumnMetadata,
+    IndexMetadata,
     ErrorItem,
-} from './connectionTreeItems';
+} from "../models/DatabaseNode";
+import { IconManager } from "../utils/IconManager";
 
-type TreeNode = ConnectionItem | DatabasesFolderItem | DatabaseItem | ProjectFolderItem | ObjectFolderItem | ObjectItem | ColumnItem | ErrorItem;
+export class ConnectionTreeProvider implements vscode.TreeDataProvider<DatabaseTreeItem | ErrorItem> {
+    private onDidChangeTreeDataEmitter = new vscode.EventEmitter<DatabaseTreeItem | ErrorItem | undefined>();
+    public readonly onDidChangeTreeData = this.onDidChangeTreeDataEmitter.event;
 
-export type FilterTarget = 'databases' | 'tables' | 'views' | 'sps' | 'functions';
-
-interface CachedConnectionData {
-    databases: string[];
-    tables: string[];
-    views: string[];
-    sps: string[];
-    funcs: string[];
-}
-
-interface PerDbData {
-    tables: string[];
-    views: string[];
-    sps: string[];
-    funcs: string[];
-}
-
-export class ConnectionTreeProvider implements vscode.TreeDataProvider<TreeNode> {
-    private _onDidChangeTreeData = new vscode.EventEmitter<TreeNode | undefined | void>();
-    readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
-
-    private databaseList: string[] = [];
-    private filters = new Map<FilterTarget, string>();
-    private perConnectionCache = new Map<string, CachedConnectionData>();
-    /** key: "profileName::dbName" */
-    private perDbCache = new Map<string, PerDbData>();
-    /** Single registry: one instance per node id */
-    private registry = new Map<string, TreeNode>();
+    private treeQueryService: TreeQueryService;
+    private iconManager: IconManager;
+    private databaseFilter: string = "";
+    private folderFilters = new Map<string, string>();
+    private parentMap = new WeakMap<DatabaseTreeItem | ErrorItem, DatabaseTreeItem | undefined>();
 
     constructor(
-        private connectionManager: ConnectionManager,
-        private schemaCache: SchemaCache,
-        private loadDbDataFn: (profileName: string, dbName: string) => Promise<void>
-    ) {}
-
-    /** Get-or-create a node from the registry */
-    private reg<T extends TreeNode>(id: string, factory: () => T): T {
-        if (!this.registry.has(id)) { this.registry.set(id, factory()); }
-        return this.registry.get(id) as T;
+        treeQueryService: TreeQueryService,
+        extensionUri: vscode.Uri
+    ) {
+        this.treeQueryService = treeQueryService;
+        this.iconManager = new IconManager(extensionUri);
     }
 
-    // ── Public API ──────────────────────────────────────────────────────────
+    // ── Core ────────────────────────────────────────────────────────────────
 
-    setFilter(target: FilterTarget, value: string): void {
-        if (value) { this.filters.set(target, value.toLowerCase()); }
-        else { this.filters.delete(target); }
-        this._onDidChangeTreeData.fire();
-    }
-
-    clearFilter(target: FilterTarget): void {
-        this.filters.delete(target);
-        this._onDidChangeTreeData.fire();
-    }
-
-    getFilter(target: FilterTarget): string | undefined {
-        return this.filters.get(target);
-    }
-
-    setDatabaseList(databases: string[]): void {
-        this.databaseList = databases;
-    }
-
-    setCachedData(profileName: string, data: CachedConnectionData): void {
-        this.perConnectionCache.set(profileName, data);
-    }
-
-    getCachedConnectionData(profileName: string): CachedConnectionData | undefined {
-        return this.perConnectionCache.get(profileName);
-    }
-
-    setDbCache(profileName: string, dbName: string, data: PerDbData): void {
-        this.perDbCache.set(`${profileName}::${dbName}`, data);
-    }
-
-    hasDbCache(profileName: string, dbName: string): boolean {
-        return this.perDbCache.has(`${profileName}::${dbName}`);
-    }
-
-    getCachedDatabases(profileName: string): string[] {
-        return this.perConnectionCache.get(profileName)?.databases ?? [];
-    }
-
-    getActiveDatabaseList(): string[] {
-        return this.databaseList;
-    }
-
-    clearDbCache(profileName: string): void {
-        for (const key of [...this.perDbCache.keys()]) {
-            if (key.startsWith(`${profileName}::`)) { this.perDbCache.delete(key); }
+    public getTreeItem(element: DatabaseTreeItem | ErrorItem): vscode.TreeItem {
+        if (element instanceof DatabaseTreeItem) {
+            element.iconPath = this.iconManager.getIcon(element);
         }
-        // Also clear registry entries for this profile's DB nodes
-        for (const key of [...this.registry.keys()]) {
-            if (key.startsWith(`db:${profileName}::`) || key.startsWith(`folder:${profileName}::`)) {
-                this.registry.delete(key);
-            }
-        }
-    }
-
-    // ── Fire methods — never fire(undefined) except fullRefresh ─────────────
-
-    /** Update all connection icons after connect/disconnect */
-    fireAllConnections(): void {
-        const profiles = this.connectionManager.getSavedProfiles();
-        const active = this.connectionManager.currentProfile;
-        for (const p of profiles) {
-            const node = this.registry.get(`conn:${p.name}`) as ConnectionItem | undefined;
-            if (node) {
-                node.update(!!active && active.name === p.name);
-                this._onDidChangeTreeData.fire(node);
-            }
-        }
-    }
-
-    /** Refresh a profile's Databases folder (DB list changed) */
-    fireDbFolderChange(profileName: string): void {
-        const node = this.registry.get(`dbfolder:${profileName}`);
-        if (node) { this._onDidChangeTreeData.fire(node); }
-        // If node not in registry, tree hasn't been expanded yet — getChildren will load on expand
-    }
-
-    /** Refresh a single DB node (object counts changed) */
-    fireDbChange(profileName: string, dbName: string): void {
-        const node = this.registry.get(`db:${profileName}::${dbName}`);
-        if (node) { this._onDidChangeTreeData.fire(node); }
-    }
-
-    /** Full reset — only for explicit "Refresh All" user action */
-    fullRefresh(): void {
-        this.registry.clear();
-        this._onDidChangeTreeData.fire();
-    }
-
-    /** @deprecated Use fullRefresh() for explicit refresh, fireAllConnections() for connect/disconnect */
-    refresh(): void {
-        this.fullRefresh();
-    }
-
-    /** Create an ObjectItem for use with treeView.reveal() */
-    createObjectItem(name: string, type: ObjectType, profileName: string, dbName: string): ObjectItem {
-        const hasTrig = type === 'table' ? this.schemaCache.hasTriggers(name) : false;
-        return new ObjectItem(name, type, hasTrig, false, profileName, dbName);
-    }
-
-    // ── TreeDataProvider ────────────────────────────────────────────────────
-
-    getTreeItem(element: TreeNode): vscode.TreeItem {
         return element;
     }
 
-    getParent(element: TreeNode): vscode.ProviderResult<TreeNode> {
-        if (element instanceof ConnectionItem) { return undefined; }
-        if (element instanceof DatabasesFolderItem) {
-            const profiles = this.connectionManager.getSavedProfiles();
-            const p = profiles.find(x => x.name === element.parentProfileName);
-            if (!p) { return undefined; }
-            const active = this.connectionManager.currentProfile;
-            return this.reg(`conn:${p.name}`, () => new ConnectionItem(p.name, p.server, p.database, !!active && active.name === p.name));
+    public async getChildren(element?: DatabaseTreeItem): Promise<(DatabaseTreeItem | ErrorItem)[]> {
+        if (!element) {
+            return this.getConnectionNodes();
         }
-        if (element instanceof DatabaseItem) {
-            return this.reg(`dbfolder:${element.parentProfileName}`, () => new DatabasesFolderItem(element.parentProfileName));
-        }
-        if (element instanceof ObjectFolderItem) {
-            const profileKey = element.profileName;
-            const profileName = profileKey.includes('::') ? profileKey.split('::')[0] : profileKey;
-            const dbName = element.dbName ?? (profileKey.includes('::') ? profileKey.split('::')[1] : '');
-            return this.reg(`db:${profileName}::${dbName}`, () => new DatabaseItem(dbName, false, profileName));
-        }
-        if (element instanceof ObjectItem) {
-            if (!element.profileName || !element.dbName) { return undefined; }
-            const folderTypeMap: Record<string, ObjectFolderType> = {
-                table: 'tables', view: 'views', sp: 'sps', func: 'functions'
-            };
-            const folderType = folderTypeMap[element.objectType] ?? 'tables';
-            const dbKey = `${element.profileName}::${element.dbName}`;
-            return this.reg(`folder:${dbKey}::${folderType}`, () => new ObjectFolderItem(folderType, 0, dbKey, element.dbName));
-        }
-        return undefined;
-    }
-
-    async getChildren(element?: TreeNode): Promise<TreeNode[]> {
-        if (!element) { return this.getRootChildren(); }
-        if (element instanceof ConnectionItem) { return this.getConnectionChildren(element); }
-        if (element instanceof DatabasesFolderItem) { return this.getDatabasesFolderChildren(element); }
-        if (element instanceof DatabaseItem) { return this.getDatabaseChildren(element); }
-        if (element instanceof ObjectFolderItem) { return this.getObjectFolderChildren(element); }
-        if (element instanceof ObjectItem) { return this.getObjectChildren(element); }
-        return [];
-    }
-
-    private getRootChildren(): TreeNode[] {
-        const profiles = this.connectionManager.getSavedProfiles();
-        const active = this.connectionManager.currentProfile;
-        return profiles.map(p => {
-            const isActive = !!active && p.name === active.name;
-            const node = this.reg(`conn:${p.name}`, () => new ConnectionItem(p.name, p.server, p.database, isActive));
-            node.update(isActive);
-            return node;
-        });
-    }
-
-    private getConnectionChildren(item: ConnectionItem): TreeNode[] {
-        const active = this.connectionManager.currentProfile;
-        const isActive = !!active && active.name === item.profileName;
-        const cached = this.perConnectionCache.get(item.profileName);
-
-        // No connection, no cache — show "Click to connect"
-        if (!isActive && !cached) {
-            const profiles = this.connectionManager.getSavedProfiles();
-            const profile = profiles.find(p => p.name === item.profileName);
-            const dbProjects = profile?.databaseProjects;
-            if (dbProjects && Object.keys(dbProjects).length > 0) {
-                const folder = this.reg(`dbfolder:${item.profileName}`, () => new DatabasesFolderItem(item.profileName));
-                folder.updateDescription(Object.keys(dbProjects).length, 'projects');
-                return [folder];
+        try {
+            switch (element.nodeType) {
+                case NodeType.Connection:
+                    if (this.treeQueryService.currentProfileName !== element.profileName) {
+                        await this.treeQueryService.connect(element.profileName!);
+                        element.contextValue = "ConnectionConnected";
+                    }
+                    return this.getServerFolders(element);
+                case NodeType.ServerFolder:
+                    return this.getServerFolderChildren(element);
+                case NodeType.Database:
+                    return this.getDatabaseChildren(element);
+                case NodeType.Schema:
+                    return this.getSchemaFolders(element);
+                case NodeType.Folder:
+                    return this.getFolderChildren(element);
+                case NodeType.Table:
+                    return this.getTableChildren(element);
+                case NodeType.View:
+                    return this.getViewChildren(element);
+                case NodeType.Procedure:
+                case NodeType.Function:
+                    return this.getRoutineChildren(element);
+                default:
+                    return [];
             }
-            return [new ErrorItem('Click to connect', false)];
+        } catch (err: any) {
+            return [new ErrorItem(err.message)];
         }
-
-        const folder = this.reg(`dbfolder:${item.profileName}`, () => new DatabasesFolderItem(item.profileName));
-        if (isActive) {
-            folder.updateDescription(this.databaseList.length);
-        } else if (cached) {
-            folder.updateDescription(cached.databases.length, 'cached');
-        }
-        return [folder];
     }
 
-    private getDatabasesFolderChildren(folder: DatabasesFolderItem): TreeNode[] {
-        const active = this.connectionManager.currentProfile;
-        const isActive = !!active && active.name === folder.parentProfileName;
-
-        if (isActive) {
-            const connectedDb = active.database;
-            const dbFilter = this.filters.get('databases');
-            const dbProjects = active.databaseProjects || {};
-            const getProjectPath = (dbName: string): string | undefined =>
-                dbProjects[dbName] || dbProjects[dbName.toLowerCase()] || undefined;
-
-            // Update folder description with filter info
-            folder.description = dbFilter
-                ? `(${this.databaseList.length}) 🔍 ${this.filters.get('databases')}`
-                : `(${this.databaseList.length})`;
-
-            let dbs = this.databaseList.length > 0 ? this.databaseList : [connectedDb];
-            if (dbFilter) { dbs = dbs.filter(name => name.toLowerCase().includes(dbFilter)); }
-
-            return dbs.map(dbName => {
-                const id = `db:${folder.parentProfileName}::${dbName}`;
-                return this.reg(id, () => new DatabaseItem(dbName, false, folder.parentProfileName, getProjectPath(dbName)));
-            });
-        }
-
-        // Offline — use cache or databaseProjects
-        const cached = this.perConnectionCache.get(folder.parentProfileName);
-        if (cached && cached.databases.length > 0) {
-            const profiles = this.connectionManager.getSavedProfiles();
-            const profile = profiles.find(p => p.name === folder.parentProfileName);
-            const dbProjects = profile?.databaseProjects || {};
-            return cached.databases.map(dbName => {
-                const id = `db:${folder.parentProfileName}::${dbName}`;
-                return this.reg(id, () => new DatabaseItem(dbName, false, folder.parentProfileName,
-                    dbProjects[dbName] || dbProjects[dbName.toLowerCase()], true));
-            });
-        }
-
-        const profiles = this.connectionManager.getSavedProfiles();
-        const profile = profiles.find(p => p.name === folder.parentProfileName);
-        const dbProjects = profile?.databaseProjects;
-        if (dbProjects && Object.keys(dbProjects).length > 0) {
-            return Object.keys(dbProjects).map(dbName => {
-                const id = `db:${folder.parentProfileName}::${dbName}`;
-                return this.reg(id, () => new DatabaseItem(dbName, false, folder.parentProfileName, dbProjects[dbName], true));
-            });
-        }
-        return [];
+    public getParent(element: DatabaseTreeItem | ErrorItem): vscode.ProviderResult<DatabaseTreeItem | undefined> {
+        return this.parentMap.get(element);
     }
 
-    private async getDatabaseChildren(item: DatabaseItem): Promise<TreeNode[]> {
-        const dbKey = `${item.parentProfileName}::${item.dbName}`;
-        const active = this.connectionManager.currentProfile;
+    public refresh(node?: DatabaseTreeItem): void {
+        this.onDidChangeTreeDataEmitter.fire(node);
+    }
 
-        if (!this.perDbCache.has(dbKey)) {
-            if (active?.name !== item.parentProfileName) {
-                // No cache + inactive server → connect first, then load
-                const profiles = this.connectionManager.getSavedProfiles();
-                const profile = profiles.find(p => p.name === item.parentProfileName);
-                if (!profile) { return [new ErrorItem('Profile not found', true)]; }
-                try {
-                    await this.connectionManager.connect(profile);
-                } catch (err: any) {
-                    return [new ErrorItem(`Connection failed: ${err.message}`, true)];
-                }
-            }
-            // VS Code shows spinner automatically for async getChildren
-            await this.loadDbDataFn(item.parentProfileName, item.dbName);
+    public fullRefresh(): void {
+        this.onDidChangeTreeDataEmitter.fire(undefined);
+    }
+
+    public dispose(): void {
+        this.onDidChangeTreeDataEmitter.dispose();
+    }
+
+    // ── Filtering ───────────────────────────────────────────────────────────
+
+    public setDatabaseFilter(filter: string): void {
+        this.databaseFilter = filter;
+    }
+
+    public getDatabaseFilter(): string {
+        return this.databaseFilter;
+    }
+
+    private getFolderFilterKey(element: DatabaseTreeItem): string {
+        return `${element.connectionId}|${element.databaseName}|${element.schemaName}|${element.folderType}`;
+    }
+
+    public setFolderFilter(element: DatabaseTreeItem, filter: string): void {
+        const key = this.getFolderFilterKey(element);
+        if (filter) {
+            this.folderFilters.set(key, filter);
+        } else {
+            this.folderFilters.delete(key);
         }
+    }
 
-        const dbData = this.perDbCache.get(dbKey);
-        if (!dbData) { return []; }
+    public getFolderFilter(element: DatabaseTreeItem): string {
+        return this.folderFilters.get(this.getFolderFilterKey(element)) || "";
+    }
 
-        const children: TreeNode[] = [];
-        if (item.projectPath) { children.push(new ProjectFolderItem(item.projectPath)); }
+    private applyFolderFilter(rows: any[], nameField: string, element: DatabaseTreeItem): any[] {
+        const filter = this.folderFilters.get(this.getFolderFilterKey(element));
+        if (!filter) { return rows; }
+        const filterLower = filter.toLowerCase();
+        return rows.filter((row) => (row[nameField] as string).toLowerCase().includes(filterLower));
+    }
 
-        const folderDefs: [ObjectFolderType, string[]][] = [
-            ['tables', dbData.tables],
-            ['views',  dbData.views],
-            ['sps',    dbData.sps],
-            ['functions', dbData.funcs],
-        ];
-        for (const [type, names] of folderDefs) {
-            const fid = `folder:${dbKey}::${type}`;
-            const f = this.reg(fid, () => new ObjectFolderItem(type, names.length, dbKey, item.dbName));
-            f.updateCount(names.length);
-            children.push(f);
+    // ── Helper: track parent ────────────────────────────────────────────────
+
+    private trackParent<T extends DatabaseTreeItem | ErrorItem>(children: T[], parent: DatabaseTreeItem | undefined): T[] {
+        for (const child of children) {
+            this.parentMap.set(child, parent);
         }
         return children;
     }
 
-    private getObjectFolderChildren(folder: ObjectFolderItem): TreeNode[] {
-        const active = this.connectionManager.currentProfile;
+    // ── Connection level ────────────────────────────────────────────────────
 
-        if (folder.profileName && folder.profileName.includes('::')) {
-            const [profileName] = folder.profileName.split('::');
-            const isActiveServer = !!active && active.name === profileName;
-            const dbData = this.perDbCache.get(folder.profileName);
-            if (!dbData) { return [new ErrorItem('No data', false)]; }
+    private getConnectionNodes(): (DatabaseTreeItem | ErrorItem)[] {
+        const profiles = this.treeQueryService.getProfiles();
+        return profiles.map((p) => {
+            const isConnected = this.treeQueryService.currentProfileName === p.name;
+            const node = new DatabaseTreeItem(
+                p.name,
+                NodeType.Connection,
+                p.name,
+                vscode.TreeItemCollapsibleState.Collapsed,
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                p.name
+            );
+            node.description = p.server;
+            node.contextValue = isConnected ? "ConnectionConnected" : "ConnectionDisconnected";
+            this.parentMap.set(node, undefined);
+            return node;
+        });
+    }
 
-            const filterText = this.filters.get(folder.folderType);
-            const typeMap: Record<ObjectFolderType, { names: string[]; type: ObjectType }> = {
-                tables:    { names: dbData.tables, type: 'table' },
-                views:     { names: dbData.views,  type: 'view'  },
-                sps:       { names: dbData.sps,    type: 'sp'    },
-                functions: { names: dbData.funcs,  type: 'func'  },
-            };
-            const { names, type } = typeMap[folder.folderType];
-            const filtered = filterText ? names.filter(n => n.toLowerCase().includes(filterText)) : names;
-            folder.updateDescription(names.length, filtered.length, filterText);
-            const dbName = folder.dbName ?? '';
-            const schemaDbMatch = this.schemaCache.loadedDbName?.toLowerCase() === dbName.toLowerCase();
-            const forceNonExpandable = !isActiveServer || !schemaDbMatch;
-            return filtered.sort((a, b) => a.localeCompare(b)).map(name => {
-                const hasTrig = (type === 'table' && isActiveServer) ? this.schemaCache.hasTriggers(name) : false;
-                return new ObjectItem(name, type, hasTrig, forceNonExpandable, profileName, dbName);
-            });
+    private getServerFolders(parent: DatabaseTreeItem): DatabaseTreeItem[] {
+        const connectionId = parent.connectionId;
+        const profileName = parent.profileName;
+        const nodes = [ServerFolderType.Databases, ServerFolderType.Security, ServerFolderType.ServerObjects].map((type) => {
+            const node = new DatabaseTreeItem(
+                type,
+                NodeType.ServerFolder,
+                connectionId,
+                vscode.TreeItemCollapsibleState.Collapsed,
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                profileName
+            );
+            node.contextValue = type === ServerFolderType.Databases ? "ServerFolderDatabases" : "ServerFolder";
+            return node;
+        });
+        return this.trackParent(nodes, parent);
+    }
+
+    private async getServerFolderChildren(element: DatabaseTreeItem): Promise<(DatabaseTreeItem | ErrorItem)[]> {
+        switch (element.label) {
+            case ServerFolderType.Databases:
+                return this.getDatabaseNodes(element);
+            case ServerFolderType.Security:
+                return this.getSecurityChildren(element);
+            case ServerFolderType.ServerObjects:
+                return this.getServerObjectsChildren(element);
+            default:
+                return [];
+        }
+    }
+
+    // ── Security / Server Objects ───────────────────────────────────────────
+
+    private async getSecurityChildren(parent: DatabaseTreeItem): Promise<DatabaseTreeItem[]> {
+        const connectionId = parent.connectionId;
+        const profileName = parent.profileName;
+
+        // Logins
+        const loginResults = await this.treeQueryService.execute(
+            "SELECT [name], [type_desc], [is_disabled] FROM sys.server_principals WHERE [type] IN ('S','U','G') ORDER BY [name]"
+        );
+        const loginFolder = new DatabaseTreeItem(
+            "Logins",
+            NodeType.Folder,
+            connectionId,
+            loginResults.rows.length > 0
+                ? vscode.TreeItemCollapsibleState.Collapsed
+                : vscode.TreeItemCollapsibleState.None,
+            undefined, undefined, undefined, undefined, undefined, undefined, profileName
+        );
+        loginFolder.contextValue = "SecurityLogins";
+
+        // Server Roles
+        const roleResults = await this.treeQueryService.execute(
+            "SELECT [name] FROM sys.server_principals WHERE [type] = 'R' ORDER BY [name]"
+        );
+        const roleFolder = new DatabaseTreeItem(
+            "Server Roles",
+            NodeType.Folder,
+            connectionId,
+            roleResults.rows.length > 0
+                ? vscode.TreeItemCollapsibleState.Collapsed
+                : vscode.TreeItemCollapsibleState.None,
+            undefined, undefined, undefined, undefined, undefined, undefined, profileName
+        );
+        roleFolder.contextValue = "SecurityServerRoles";
+
+        // Credentials
+        const credResults = await this.treeQueryService.execute(
+            "SELECT [name] FROM sys.credentials ORDER BY [name]"
+        );
+        const credFolder = new DatabaseTreeItem(
+            "Credentials",
+            NodeType.Folder,
+            connectionId,
+            credResults.rows.length > 0
+                ? vscode.TreeItemCollapsibleState.Collapsed
+                : vscode.TreeItemCollapsibleState.None,
+            undefined, undefined, undefined, undefined, undefined, undefined, profileName
+        );
+        credFolder.contextValue = "SecurityCredentials";
+
+        // Audits
+        const auditResults = await this.treeQueryService.execute(
+            "SELECT [name] FROM sys.server_audits ORDER BY [name]"
+        );
+        const auditFolder = new DatabaseTreeItem(
+            "Audits",
+            NodeType.Folder,
+            connectionId,
+            auditResults.rows.length > 0
+                ? vscode.TreeItemCollapsibleState.Collapsed
+                : vscode.TreeItemCollapsibleState.None,
+            undefined, undefined, undefined, undefined, undefined, undefined, profileName
+        );
+        auditFolder.contextValue = "SecurityAudits";
+
+        // Server Audit Specifications
+        const auditSpecResults = await this.treeQueryService.execute(
+            "SELECT [name] FROM sys.server_audit_specifications ORDER BY [name]"
+        );
+        const auditSpecFolder = new DatabaseTreeItem(
+            "Server Audit Specifications",
+            NodeType.Folder,
+            connectionId,
+            auditSpecResults.rows.length > 0
+                ? vscode.TreeItemCollapsibleState.Collapsed
+                : vscode.TreeItemCollapsibleState.None,
+            undefined, undefined, undefined, undefined, undefined, undefined, profileName
+        );
+        auditSpecFolder.contextValue = "SecurityAuditSpecs";
+
+        const folders = [loginFolder, roleFolder, credFolder, auditFolder, auditSpecFolder];
+        return this.trackParent(folders, parent);
+    }
+
+    private async getServerObjectsChildren(parent: DatabaseTreeItem): Promise<DatabaseTreeItem[]> {
+        const connectionId = parent.connectionId;
+        const profileName = parent.profileName;
+
+        // Endpoints
+        const endpointResults = await this.treeQueryService.execute(
+            "SELECT [name] FROM sys.endpoints ORDER BY [name]"
+        );
+        const endpointFolder = new DatabaseTreeItem(
+            "Endpoints",
+            NodeType.Folder,
+            connectionId,
+            endpointResults.rows.length > 0
+                ? vscode.TreeItemCollapsibleState.Collapsed
+                : vscode.TreeItemCollapsibleState.None,
+            undefined, undefined, undefined, undefined, undefined, undefined, profileName
+        );
+        endpointFolder.contextValue = "ServerEndpoints";
+
+        // Linked Servers
+        const linkedResults = await this.treeQueryService.execute(
+            "SELECT [name] FROM sys.servers WHERE is_linked = 1 ORDER BY [name]"
+        );
+        const linkedFolder = new DatabaseTreeItem(
+            "Linked Servers",
+            NodeType.Folder,
+            connectionId,
+            linkedResults.rows.length > 0
+                ? vscode.TreeItemCollapsibleState.Collapsed
+                : vscode.TreeItemCollapsibleState.None,
+            undefined, undefined, undefined, undefined, undefined, undefined, profileName
+        );
+        linkedFolder.contextValue = "ServerLinkedServers";
+
+        // Server Triggers
+        const triggerResults = await this.treeQueryService.execute(
+            "SELECT [name] FROM sys.server_triggers ORDER BY [name]"
+        );
+        const triggerFolder = new DatabaseTreeItem(
+            "Triggers",
+            NodeType.Folder,
+            connectionId,
+            triggerResults.rows.length > 0
+                ? vscode.TreeItemCollapsibleState.Collapsed
+                : vscode.TreeItemCollapsibleState.None,
+            undefined, undefined, undefined, undefined, undefined, undefined, profileName
+        );
+        triggerFolder.contextValue = "ServerTriggers";
+
+        const folders = [endpointFolder, linkedFolder, triggerFolder];
+        return this.trackParent(folders, parent);
+    }
+
+    private async getServerSubFolderItems(parent: DatabaseTreeItem): Promise<DatabaseTreeItem[]> {
+        const connectionId = parent.connectionId;
+        const profileName = parent.profileName;
+        const contextValue = parent.contextValue || "";
+        let sql = "";
+        switch (contextValue) {
+            case "SecurityLogins":
+                sql = "SELECT [name], [type_desc], [is_disabled] FROM sys.server_principals WHERE [type] IN ('S','U','G') ORDER BY [name]";
+                break;
+            case "SecurityServerRoles":
+                sql = "SELECT [name] FROM sys.server_principals WHERE [type] = 'R' ORDER BY [name]";
+                break;
+            case "SecurityCredentials":
+                sql = "SELECT [name] FROM sys.credentials ORDER BY [name]";
+                break;
+            case "SecurityAudits":
+                sql = "SELECT [name] FROM sys.server_audits ORDER BY [name]";
+                break;
+            case "SecurityAuditSpecs":
+                sql = "SELECT [name] FROM sys.server_audit_specifications ORDER BY [name]";
+                break;
+            case "ServerEndpoints":
+                sql = "SELECT [name] FROM sys.endpoints ORDER BY [name]";
+                break;
+            case "ServerLinkedServers":
+                sql = "SELECT [name] FROM sys.servers WHERE is_linked = 1 ORDER BY [name]";
+                break;
+            case "ServerTriggers":
+                sql = "SELECT [name] FROM sys.server_triggers ORDER BY [name]";
+                break;
+            default:
+                return [];
         }
 
-        // Fallback: schemaCache path (should not normally be reached with new design)
-        if (!this.schemaCache.isLoaded) {
-            return [new ErrorItem('Schema loading...', false)];
+        const results = await this.treeQueryService.execute(sql);
+        const nodes = results.rows.map((row) => {
+            const label = contextValue === "SecurityLogins" && row.is_disabled
+                ? `${row.name} (disabled)`
+                : row.name;
+            return new DatabaseTreeItem(
+                label,
+                NodeType.Folder,
+                connectionId,
+                vscode.TreeItemCollapsibleState.None,
+                undefined, undefined, undefined, undefined, undefined, undefined, profileName
+            );
+        });
+        return this.trackParent(nodes, parent);
+    }
+
+    // ── Database level ──────────────────────────────────────────────────────
+
+    private async getDatabaseNodes(parent: DatabaseTreeItem): Promise<DatabaseTreeItem[]> {
+        const connectionId = parent.connectionId;
+        const profileName = parent.profileName;
+        const results = await this.treeQueryService.execute(
+            "SELECT [name], [state], [state_desc] FROM sys.databases ORDER BY [name]"
+        );
+        let rows = results.rows;
+        if (this.databaseFilter) {
+            const filterLower = this.databaseFilter.toLowerCase();
+            rows = rows.filter((row) => (row.name as string).toLowerCase().includes(filterLower));
         }
-        const filterText = this.filters.get(folder.folderType);
-        const applyFilter = (items: { name: string }[]) =>
-            filterText ? items.filter(o => o.name.toLowerCase().includes(filterText)) : items;
-        const pName = folder.profileName;
-        const dbName = folder.dbName ?? active?.database ?? '';
-        const typeMap: Record<ObjectFolderType, () => TreeNode[]> = {
-            tables: () => {
-                const all = this.schemaCache.getTablesAndViews().filter(o => o.type === 'TABLE');
-                const items = applyFilter(all);
-                folder.updateDescription(all.length, items.length, filterText);
-                return items.sort((a, b) => a.name.localeCompare(b.name))
-                    .map(o => new ObjectItem(o.name, 'table', this.schemaCache.hasTriggers(o.name), false, pName, dbName));
-            },
-            views: () => {
-                const all = this.schemaCache.getTablesAndViews().filter(o => o.type === 'VIEW');
-                const items = applyFilter(all);
-                folder.updateDescription(all.length, items.length, filterText);
-                return items.sort((a, b) => a.name.localeCompare(b.name))
-                    .map(o => new ObjectItem(o.name, 'view', false, false, pName, dbName));
-            },
-            sps: () => {
-                const all = this.schemaCache.getProcedures();
-                const items = applyFilter(all);
-                folder.updateDescription(all.length, items.length, filterText);
-                return items.sort((a, b) => a.name.localeCompare(b.name))
-                    .map(o => new ObjectItem(o.name, 'sp', false, false, pName, dbName));
-            },
-            functions: () => {
-                const all = this.schemaCache.getFunctions();
-                const items = applyFilter(all);
-                folder.updateDescription(all.length, items.length, filterText);
-                return items.sort((a, b) => a.name.localeCompare(b.name))
-                    .map(o => new ObjectItem(o.name, 'func', false, false, pName, dbName));
-            },
+        const nodes = rows.map((row) => {
+            const isOnline = row.state === 0;
+            const node = new DatabaseTreeItem(
+                row.name,
+                NodeType.Database,
+                connectionId,
+                isOnline
+                    ? vscode.TreeItemCollapsibleState.Collapsed
+                    : vscode.TreeItemCollapsibleState.None,
+                row.name,
+                undefined, undefined, undefined, undefined, undefined, profileName
+            );
+            if (!isOnline) {
+                node.contextValue = "DatabaseOffline";
+                node.description = `(${row.state_desc})`;
+            }
+            return node;
+        });
+        return this.trackParent(nodes, parent);
+    }
+
+    private async getDatabaseChildren(element: DatabaseTreeItem): Promise<(DatabaseTreeItem | ErrorItem)[]> {
+        const connectionId = element.connectionId;
+        const databaseName = element.databaseName!;
+        const profileName = element.profileName;
+        const children: (DatabaseTreeItem | ErrorItem)[] = [];
+
+        // Add ProjectFolderItem if project path exists for this DB
+        const projectPath = this.getProjectPath(profileName!, databaseName);
+        if (projectPath) {
+            const projectNode = new DatabaseTreeItem(
+                `Project: ${projectPath}`,
+                NodeType.Folder,
+                connectionId,
+                vscode.TreeItemCollapsibleState.None,
+                databaseName,
+                undefined, undefined, undefined, undefined, undefined,
+                profileName, projectPath
+            );
+            projectNode.contextValue = "ProjectFolder";
+            this.parentMap.set(projectNode, element);
+            children.push(projectNode);
+        }
+
+        // Add schema nodes
+        const schemas = await this.getSchemaNodes(element);
+        children.push(...schemas);
+
+        return children;
+    }
+
+    private getProjectPath(profileName: string, dbName: string): string | null {
+        const profile = this.treeQueryService.getProfiles().find(p => p.name === profileName);
+        if (!profile) { return null; }
+        if (profile.databaseProjects) {
+            const path = profile.databaseProjects[dbName] || profile.databaseProjects[dbName.toLowerCase()];
+            if (path) { return path; }
+        }
+        if (profile.projectPath && profile.database.toLowerCase() === dbName.toLowerCase()) {
+            return profile.projectPath;
+        }
+        return null;
+    }
+
+    private async getSchemaNodes(parent: DatabaseTreeItem): Promise<DatabaseTreeItem[]> {
+        const connectionId = parent.connectionId;
+        const databaseName = parent.databaseName!;
+        const profileName = parent.profileName;
+        const sql = `
+            SELECT s.[name] AS SchemaName,
+                   COUNT(*) AS ObjectCount
+            FROM sys.objects o
+            INNER JOIN sys.schemas s ON o.schema_id = s.schema_id
+            WHERE o.[type] IN ('U','V','P','FN','IF','TF','TR')
+              AND o.is_ms_shipped = 0
+            GROUP BY s.[name]
+            ORDER BY s.[name]
+        `;
+        const results = await this.treeQueryService.execute(sql, databaseName);
+        const nodes = results.rows.map((row) => {
+            const node = new DatabaseTreeItem(
+                row.SchemaName,
+                NodeType.Schema,
+                connectionId,
+                vscode.TreeItemCollapsibleState.Collapsed,
+                databaseName,
+                row.SchemaName,
+                undefined, undefined, undefined, undefined, profileName
+            );
+            node.description = `(${row.ObjectCount})`;
+            return node;
+        });
+        return this.trackParent(nodes, parent);
+    }
+
+    private async getSchemaFolders(element: DatabaseTreeItem): Promise<DatabaseTreeItem[]> {
+        const connectionId = element.connectionId;
+        const databaseName = element.databaseName!;
+        const schemaName = element.schemaName!;
+        const profileName = element.profileName;
+
+        const countSql = `
+            SELECT
+                (SELECT COUNT(*) FROM [INFORMATION_SCHEMA].[TABLES]
+                 WHERE [TABLE_SCHEMA] = '${escapeSql(schemaName)}' AND [TABLE_TYPE] = 'BASE TABLE') AS TableCount,
+                (SELECT COUNT(*) FROM [INFORMATION_SCHEMA].[TABLES]
+                 WHERE [TABLE_SCHEMA] = '${escapeSql(schemaName)}' AND [TABLE_TYPE] = 'VIEW') AS ViewCount,
+                (SELECT COUNT(*) FROM [INFORMATION_SCHEMA].[ROUTINES]
+                 WHERE [ROUTINE_SCHEMA] = '${escapeSql(schemaName)}' AND [ROUTINE_TYPE] = 'FUNCTION') AS FunctionCount,
+                (SELECT COUNT(*) FROM [INFORMATION_SCHEMA].[ROUTINES]
+                 WHERE [ROUTINE_SCHEMA] = '${escapeSql(schemaName)}' AND [ROUTINE_TYPE] = 'PROCEDURE') AS ProcedureCount,
+                (SELECT COUNT(*) FROM sys.triggers t
+                 INNER JOIN sys.objects o ON t.parent_id = o.object_id
+                 INNER JOIN sys.schemas s ON o.schema_id = s.schema_id
+                 WHERE s.[name] = '${escapeSql(schemaName)}' AND t.parent_class = 1) AS TriggerCount
+        `;
+        const results = await this.treeQueryService.execute(countSql, databaseName);
+        const counts = results.rows[0];
+        const folders: DatabaseTreeItem[] = [];
+
+        const addFolder = (type: FolderType, count: number) => {
+            if (count === 0) { return; }
+            const node = new DatabaseTreeItem(
+                type,
+                NodeType.Folder,
+                connectionId,
+                vscode.TreeItemCollapsibleState.Collapsed,
+                databaseName,
+                schemaName,
+                type,
+                undefined, undefined, undefined, profileName
+            );
+            node.description = `(${count})`;
+            node.contextValue = `SchemaFolder${type}`;
+            folders.push(node);
         };
-        const builder = typeMap[folder.folderType];
-        return builder ? builder() : [];
+
+        addFolder(FolderType.Tables, counts.TableCount);
+        addFolder(FolderType.Views, counts.ViewCount);
+        addFolder(FolderType.Functions, counts.FunctionCount);
+        addFolder(FolderType.Procedures, counts.ProcedureCount);
+        addFolder(FolderType.Triggers, counts.TriggerCount);
+
+        return this.trackParent(folders, element);
     }
 
-    private async getObjectChildren(item: ObjectItem): Promise<TreeNode[]> {
-        if (item.objectType !== 'table' && item.objectType !== 'view') { return []; }
-        try {
-            const columns = await this.schemaCache.getColumns(item.objectName);
-            if (columns.length === 0) { return [new ErrorItem('No columns found', false)]; }
-            const indexes = this.schemaCache.getIndexes(item.objectName);
-            const pk = indexes.find(idx => idx.isPrimaryKey);
-            const pkCols = new Set(pk ? pk.columns.split(',').map(c => c.trim().replace(/\[|\]/g, '')) : []);
-            const fks = this.schemaCache.getForeignKeysForTable(item.objectName);
-            const fkCols = new Set(fks.map(fk => fk.parentColumn));
-            return columns.map(col => {
-                let typeStr = col.dataType;
-                if (col.maxLength && col.maxLength > 0) { typeStr += `(${col.maxLength})`; }
-                return new ColumnItem(col.name, typeStr, col.isNullable, pkCols.has(col.name), fkCols.has(col.name));
-            });
-        } catch (err: any) {
-            return [new ErrorItem(`Failed to load columns: ${err.message}`)];
+    // ── Object level ────────────────────────────────────────────────────────
+
+    private async getFolderChildren(element: DatabaseTreeItem): Promise<(DatabaseTreeItem | ErrorItem)[]> {
+        const connectionId = element.connectionId;
+
+        // Security / Server Objects sub-folders
+        const ctx = element.contextValue || "";
+        if (ctx.startsWith("Security") || ctx.startsWith("Server")) {
+            return this.getServerSubFolderItems(element);
+        }
+
+        const databaseName = element.databaseName!;
+        const schemaName = element.schemaName;
+
+        switch (element.folderType) {
+            case FolderType.Tables:
+                return this.getTableNodes(connectionId, databaseName, schemaName!, element);
+            case FolderType.Views:
+                return this.getViewNodes(connectionId, databaseName, schemaName!, element);
+            case FolderType.Functions:
+                return this.getFunctionNodes(connectionId, databaseName, schemaName!, element);
+            case FolderType.Procedures:
+                return this.getProcedureNodes(connectionId, databaseName, schemaName!, element);
+            case FolderType.Triggers:
+                return this.getDmlTriggerNodes(connectionId, databaseName, schemaName!, element);
+            case FolderType.TableValuedFunctions:
+            case FolderType.ScalarFunctions:
+            case FolderType.AggregateFunctions:
+            case FolderType.SystemFunctions:
+                return this.getFunctionSubNodes(connectionId, databaseName, schemaName!, element.folderType!, element);
+            case FolderType.Columns:
+                return this.getColumnNodes(connectionId, databaseName, schemaName!, element.objectName!, element);
+            case FolderType.Keys:
+                return this.getKeyNodes(connectionId, databaseName, schemaName!, element.objectName!, element);
+            case FolderType.Constraints:
+                return this.getConstraintNodes(connectionId, databaseName, schemaName!, element.objectName!, element);
+            case FolderType.Indexes:
+                return this.getIndexNodes(connectionId, databaseName, schemaName!, element.objectName!, element);
+            case FolderType.Statistics:
+                return this.getStatisticsNodes(connectionId, databaseName, schemaName!, element.objectName!, element);
+            case FolderType.Parameters:
+                return this.getParameterNodes(connectionId, databaseName, schemaName!, element.objectName!, element);
+            default:
+                return [];
         }
     }
 
-    dispose(): void {
-        this._onDidChangeTreeData.dispose();
+    private async getTableNodes(
+        connectionId: string, databaseName: string, schemaName: string, parent: DatabaseTreeItem
+    ): Promise<DatabaseTreeItem[]> {
+        const profileName = parent.profileName;
+        const sql = `
+            SELECT t.[TABLE_NAME],
+                   (SELECT COUNT(*) FROM [INFORMATION_SCHEMA].[COLUMNS] c
+                    WHERE c.[TABLE_SCHEMA] = t.[TABLE_SCHEMA] AND c.[TABLE_NAME] = t.[TABLE_NAME]) AS ColumnCount
+            FROM [INFORMATION_SCHEMA].[TABLES] t
+            WHERE t.[TABLE_SCHEMA] = '${escapeSql(schemaName)}' AND t.[TABLE_TYPE] = 'BASE TABLE'
+            ORDER BY t.[TABLE_NAME]
+        `;
+        const results = await this.treeQueryService.execute(sql, databaseName);
+        const nodes = this.applyFolderFilter(results.rows, "TABLE_NAME", parent).map((row) => {
+            const node = new DatabaseTreeItem(
+                row.TABLE_NAME,
+                NodeType.Table,
+                connectionId,
+                vscode.TreeItemCollapsibleState.Collapsed,
+                databaseName,
+                schemaName,
+                undefined,
+                row.TABLE_NAME,
+                undefined, undefined, profileName
+            );
+            node.description = `(${row.ColumnCount})`;
+            return node;
+        });
+        return this.trackParent(nodes, parent);
+    }
+
+    private async getViewNodes(
+        connectionId: string, databaseName: string, schemaName: string, parent: DatabaseTreeItem
+    ): Promise<DatabaseTreeItem[]> {
+        const profileName = parent.profileName;
+        const sql = `
+            SELECT [TABLE_NAME] FROM [INFORMATION_SCHEMA].[TABLES]
+            WHERE [TABLE_SCHEMA] = '${escapeSql(schemaName)}' AND [TABLE_TYPE] = 'VIEW'
+            ORDER BY [TABLE_NAME]
+        `;
+        const results = await this.treeQueryService.execute(sql, databaseName);
+        const nodes = this.applyFolderFilter(results.rows, "TABLE_NAME", parent).map((row) =>
+            new DatabaseTreeItem(
+                row.TABLE_NAME,
+                NodeType.View,
+                connectionId,
+                vscode.TreeItemCollapsibleState.Collapsed,
+                databaseName,
+                schemaName,
+                undefined,
+                row.TABLE_NAME,
+                undefined, undefined, profileName
+            )
+        );
+        return this.trackParent(nodes, parent);
+    }
+
+    private async getFunctionNodes(
+        connectionId: string, databaseName: string, schemaName: string, parent: DatabaseTreeItem
+    ): Promise<DatabaseTreeItem[]> {
+        const profileName = parent.profileName;
+        const countSql = `
+            SELECT
+                (SELECT COUNT(*) FROM sys.objects o
+                 INNER JOIN sys.schemas s ON o.schema_id = s.schema_id
+                 WHERE s.[name] = '${escapeSql(schemaName)}' AND o.[type] = 'IF' AND o.is_ms_shipped = 0) +
+                (SELECT COUNT(*) FROM sys.objects o
+                 INNER JOIN sys.schemas s ON o.schema_id = s.schema_id
+                 WHERE s.[name] = '${escapeSql(schemaName)}' AND o.[type] = 'TF' AND o.is_ms_shipped = 0) AS TableValuedCount,
+                (SELECT COUNT(*) FROM sys.objects o
+                 INNER JOIN sys.schemas s ON o.schema_id = s.schema_id
+                 WHERE s.[name] = '${escapeSql(schemaName)}' AND o.[type] = 'FN' AND o.is_ms_shipped = 0) AS ScalarCount,
+                (SELECT COUNT(*) FROM sys.objects o
+                 INNER JOIN sys.schemas s ON o.schema_id = s.schema_id
+                 WHERE s.[name] = '${escapeSql(schemaName)}' AND o.[type] = 'AF' AND o.is_ms_shipped = 0) AS AggregateCount,
+                (SELECT COUNT(*) FROM sys.objects o
+                 INNER JOIN sys.schemas s ON o.schema_id = s.schema_id
+                 WHERE s.[name] = '${escapeSql(schemaName)}' AND o.[type] IN ('FN','IF','TF') AND o.is_ms_shipped = 1) AS SystemCount
+        `;
+        const results = await this.treeQueryService.execute(countSql, databaseName);
+        const c = results.rows[0];
+        const folders: DatabaseTreeItem[] = [];
+
+        const addFolder = (type: FolderType, count: number) => {
+            const node = new DatabaseTreeItem(
+                type, NodeType.Folder, connectionId,
+                count > 0 ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None,
+                databaseName, schemaName, type,
+                undefined, undefined, undefined, profileName
+            );
+            node.description = `(${count})`;
+            node.contextValue = `FuncFolder${type === FolderType.TableValuedFunctions ? "TV" : type === FolderType.ScalarFunctions ? "SC" : type === FolderType.AggregateFunctions ? "AG" : "SY"}`;
+            folders.push(node);
+        };
+
+        addFolder(FolderType.TableValuedFunctions, c.TableValuedCount);
+        addFolder(FolderType.ScalarFunctions, c.ScalarCount);
+        addFolder(FolderType.AggregateFunctions, c.AggregateCount);
+        addFolder(FolderType.SystemFunctions, c.SystemCount);
+
+        return this.trackParent(folders, parent);
+    }
+
+    private async getFunctionSubNodes(
+        connectionId: string, databaseName: string, schemaName: string, subType: FolderType, parent: DatabaseTreeItem
+    ): Promise<DatabaseTreeItem[]> {
+        const profileName = parent.profileName;
+        let typeFilter: string;
+        let isSystem = false;
+        switch (subType) {
+            case FolderType.TableValuedFunctions:
+                typeFilter = "o.[type] IN ('IF','TF') AND o.is_ms_shipped = 0";
+                break;
+            case FolderType.ScalarFunctions:
+                typeFilter = "o.[type] = 'FN' AND o.is_ms_shipped = 0";
+                break;
+            case FolderType.AggregateFunctions:
+                typeFilter = "o.[type] = 'AF' AND o.is_ms_shipped = 0";
+                break;
+            case FolderType.SystemFunctions:
+                typeFilter = "o.[type] IN ('FN','IF','TF') AND o.is_ms_shipped = 1";
+                isSystem = true;
+                break;
+            default:
+                return [];
+        }
+        const sql = `
+            SELECT o.[name] AS ROUTINE_NAME
+            FROM sys.objects o
+            INNER JOIN sys.schemas s ON o.schema_id = s.schema_id
+            WHERE s.[name] = '${escapeSql(schemaName)}' AND ${typeFilter}
+            ORDER BY o.[name]
+        `;
+        const results = await this.treeQueryService.execute(sql, databaseName);
+        const nodes = this.applyFolderFilter(results.rows, "ROUTINE_NAME", parent).map((row) =>
+            new DatabaseTreeItem(
+                row.ROUTINE_NAME,
+                NodeType.Function,
+                connectionId,
+                isSystem ? vscode.TreeItemCollapsibleState.None : vscode.TreeItemCollapsibleState.Collapsed,
+                databaseName,
+                schemaName,
+                undefined,
+                row.ROUTINE_NAME,
+                undefined, undefined, profileName
+            )
+        );
+        return this.trackParent(nodes, parent);
+    }
+
+    private async getProcedureNodes(
+        connectionId: string, databaseName: string, schemaName: string, parent: DatabaseTreeItem
+    ): Promise<DatabaseTreeItem[]> {
+        const profileName = parent.profileName;
+        const sql = `
+            SELECT [ROUTINE_NAME] FROM [INFORMATION_SCHEMA].[ROUTINES]
+            WHERE [ROUTINE_SCHEMA] = '${escapeSql(schemaName)}' AND [ROUTINE_TYPE] = 'PROCEDURE'
+            ORDER BY [ROUTINE_NAME]
+        `;
+        const results = await this.treeQueryService.execute(sql, databaseName);
+        const nodes = this.applyFolderFilter(results.rows, "ROUTINE_NAME", parent).map((row) =>
+            new DatabaseTreeItem(
+                row.ROUTINE_NAME,
+                NodeType.Procedure,
+                connectionId,
+                vscode.TreeItemCollapsibleState.Collapsed,
+                databaseName,
+                schemaName,
+                undefined,
+                row.ROUTINE_NAME,
+                undefined, undefined, profileName
+            )
+        );
+        return this.trackParent(nodes, parent);
+    }
+
+    private async getDmlTriggerNodes(
+        connectionId: string, databaseName: string, schemaName: string, parent: DatabaseTreeItem
+    ): Promise<DatabaseTreeItem[]> {
+        const profileName = parent.profileName;
+        const sql = `
+            SELECT t.[name] AS TriggerName
+            FROM sys.triggers t
+            INNER JOIN sys.objects o ON t.parent_id = o.object_id
+            INNER JOIN sys.schemas s ON o.schema_id = s.schema_id
+            WHERE s.[name] = '${escapeSql(schemaName)}' AND t.parent_class = 1
+            ORDER BY t.[name]
+        `;
+        const results = await this.treeQueryService.execute(sql, databaseName);
+        const nodes = this.applyFolderFilter(results.rows, "TriggerName", parent).map((row) =>
+            new DatabaseTreeItem(
+                row.TriggerName,
+                NodeType.Trigger,
+                connectionId,
+                vscode.TreeItemCollapsibleState.None,
+                databaseName,
+                schemaName,
+                undefined, undefined, undefined, undefined, profileName
+            )
+        );
+        return this.trackParent(nodes, parent);
+    }
+
+    // ── Leaf level ──────────────────────────────────────────────────────────
+
+    private async getTableChildren(element: DatabaseTreeItem): Promise<DatabaseTreeItem[]> {
+        const connectionId = element.connectionId;
+        const databaseName = element.databaseName!;
+        const schemaName = element.schemaName!;
+        const tableName = element.objectName!;
+        const profileName = element.profileName;
+
+        const countSql = `
+            SELECT
+                (SELECT COUNT(*) FROM [INFORMATION_SCHEMA].[COLUMNS]
+                 WHERE [TABLE_SCHEMA] = '${escapeSql(schemaName)}' AND [TABLE_NAME] = '${escapeSql(tableName)}') AS ColumnCount,
+                (SELECT COUNT(*) FROM sys.key_constraints kc
+                 INNER JOIN sys.objects o ON kc.parent_object_id = o.object_id
+                 INNER JOIN sys.schemas s ON o.schema_id = s.schema_id
+                 WHERE s.[name] = '${escapeSql(schemaName)}' AND o.[name] = '${escapeSql(tableName)}') +
+                (SELECT COUNT(*) FROM sys.foreign_keys fk
+                 INNER JOIN sys.objects o ON fk.parent_object_id = o.object_id
+                 INNER JOIN sys.schemas s ON o.schema_id = s.schema_id
+                 WHERE s.[name] = '${escapeSql(schemaName)}' AND o.[name] = '${escapeSql(tableName)}') AS KeyCount,
+                (SELECT COUNT(*) FROM sys.check_constraints cc
+                 INNER JOIN sys.objects o ON cc.parent_object_id = o.object_id
+                 INNER JOIN sys.schemas s ON o.schema_id = s.schema_id
+                 WHERE s.[name] = '${escapeSql(schemaName)}' AND o.[name] = '${escapeSql(tableName)}') +
+                (SELECT COUNT(*) FROM sys.default_constraints dc
+                 INNER JOIN sys.objects o ON dc.parent_object_id = o.object_id
+                 INNER JOIN sys.schemas s ON o.schema_id = s.schema_id
+                 WHERE s.[name] = '${escapeSql(schemaName)}' AND o.[name] = '${escapeSql(tableName)}') AS ConstraintCount,
+                (SELECT COUNT(*) FROM sys.triggers t
+                 INNER JOIN sys.objects o ON t.parent_id = o.object_id
+                 INNER JOIN sys.schemas s ON o.schema_id = s.schema_id
+                 WHERE s.[name] = '${escapeSql(schemaName)}' AND o.[name] = '${escapeSql(tableName)}' AND t.parent_class = 1) AS TriggerCount,
+                (SELECT COUNT(*) FROM sys.indexes i
+                 INNER JOIN sys.objects o ON i.object_id = o.object_id
+                 INNER JOIN sys.schemas s ON o.schema_id = s.schema_id
+                 WHERE s.[name] = '${escapeSql(schemaName)}' AND o.[name] = '${escapeSql(tableName)}' AND i.[name] IS NOT NULL) AS IndexCount,
+                (SELECT COUNT(*) FROM sys.stats st
+                 INNER JOIN sys.objects o ON st.object_id = o.object_id
+                 INNER JOIN sys.schemas s ON o.schema_id = s.schema_id
+                 WHERE s.[name] = '${escapeSql(schemaName)}' AND o.[name] = '${escapeSql(tableName)}') AS StatCount
+        `;
+        const results = await this.treeQueryService.execute(countSql, databaseName);
+        const c = results.rows[0];
+        const folders: DatabaseTreeItem[] = [];
+
+        const addFolder = (type: FolderType, count: number) => {
+            const node = new DatabaseTreeItem(
+                type, NodeType.Folder, connectionId,
+                count > 0 ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None,
+                databaseName, schemaName, type, tableName,
+                undefined, undefined, profileName
+            );
+            node.description = `(${count})`;
+            folders.push(node);
+        };
+
+        addFolder(FolderType.Columns, c.ColumnCount);
+        addFolder(FolderType.Keys, c.KeyCount);
+        addFolder(FolderType.Constraints, c.ConstraintCount);
+        addFolder(FolderType.Triggers, c.TriggerCount);
+        addFolder(FolderType.Indexes, c.IndexCount);
+        addFolder(FolderType.Statistics, c.StatCount);
+
+        return this.trackParent(folders, element);
+    }
+
+    private async getViewChildren(element: DatabaseTreeItem): Promise<DatabaseTreeItem[]> {
+        const connectionId = element.connectionId;
+        const databaseName = element.databaseName!;
+        const schemaName = element.schemaName!;
+        const viewName = element.objectName!;
+        const profileName = element.profileName;
+
+        const countSql = `
+            SELECT
+                (SELECT COUNT(*) FROM [INFORMATION_SCHEMA].[COLUMNS]
+                 WHERE [TABLE_SCHEMA] = '${escapeSql(schemaName)}' AND [TABLE_NAME] = '${escapeSql(viewName)}') AS ColumnCount,
+                (SELECT COUNT(*) FROM sys.triggers t
+                 INNER JOIN sys.objects o ON t.parent_id = o.object_id
+                 INNER JOIN sys.schemas s ON o.schema_id = s.schema_id
+                 WHERE s.[name] = '${escapeSql(schemaName)}' AND o.[name] = '${escapeSql(viewName)}' AND t.parent_class = 1) AS TriggerCount,
+                (SELECT COUNT(*) FROM sys.indexes i
+                 INNER JOIN sys.objects o ON i.object_id = o.object_id
+                 INNER JOIN sys.schemas s ON o.schema_id = s.schema_id
+                 WHERE s.[name] = '${escapeSql(schemaName)}' AND o.[name] = '${escapeSql(viewName)}' AND i.[name] IS NOT NULL) AS IndexCount,
+                (SELECT COUNT(*) FROM sys.stats st
+                 INNER JOIN sys.objects o ON st.object_id = o.object_id
+                 INNER JOIN sys.schemas s ON o.schema_id = s.schema_id
+                 WHERE s.[name] = '${escapeSql(schemaName)}' AND o.[name] = '${escapeSql(viewName)}') AS StatCount
+        `;
+        const results = await this.treeQueryService.execute(countSql, databaseName);
+        const c = results.rows[0];
+        const folders: DatabaseTreeItem[] = [];
+
+        const addFolder = (type: FolderType, count: number) => {
+            const node = new DatabaseTreeItem(
+                type, NodeType.Folder, connectionId,
+                count > 0 ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None,
+                databaseName, schemaName, type, viewName,
+                undefined, undefined, profileName
+            );
+            node.description = `(${count})`;
+            folders.push(node);
+        };
+
+        addFolder(FolderType.Columns, c.ColumnCount);
+        addFolder(FolderType.Triggers, c.TriggerCount);
+        addFolder(FolderType.Indexes, c.IndexCount);
+        addFolder(FolderType.Statistics, c.StatCount);
+
+        return this.trackParent(folders, element);
+    }
+
+    private async getColumnNodes(
+        connectionId: string, databaseName: string, schemaName: string, tableName: string, parent: DatabaseTreeItem
+    ): Promise<DatabaseTreeItem[]> {
+        const profileName = parent.profileName;
+        const sql = `
+            SELECT
+                c.[COLUMN_NAME],
+                c.[DATA_TYPE],
+                c.[CHARACTER_MAXIMUM_LENGTH],
+                c.[IS_NULLABLE],
+                CASE WHEN pk.[COLUMN_NAME] IS NOT NULL THEN 1 ELSE 0 END AS IsPrimaryKey
+            FROM [INFORMATION_SCHEMA].[COLUMNS] c
+            LEFT JOIN (
+                SELECT ku.[COLUMN_NAME]
+                FROM [INFORMATION_SCHEMA].[TABLE_CONSTRAINTS] tc
+                INNER JOIN [INFORMATION_SCHEMA].[KEY_COLUMN_USAGE] ku
+                    ON tc.[CONSTRAINT_NAME] = ku.[CONSTRAINT_NAME]
+                WHERE tc.[TABLE_SCHEMA] = '${escapeSql(schemaName)}'
+                    AND tc.[TABLE_NAME] = '${escapeSql(tableName)}'
+                    AND tc.[CONSTRAINT_TYPE] = 'PRIMARY KEY'
+            ) pk ON c.[COLUMN_NAME] = pk.[COLUMN_NAME]
+            WHERE c.[TABLE_SCHEMA] = '${escapeSql(schemaName)}' AND c.[TABLE_NAME] = '${escapeSql(tableName)}'
+            ORDER BY c.[ORDINAL_POSITION]
+        `;
+        const results = await this.treeQueryService.execute(sql, databaseName);
+        const nodes = results.rows.map((row) => {
+            const dataType = row.CHARACTER_MAXIMUM_LENGTH
+                ? `${row.DATA_TYPE}(${row.CHARACTER_MAXIMUM_LENGTH})`
+                : row.DATA_TYPE;
+            const pkPrefix = row.IsPrimaryKey ? "\u{1F511} " : "";
+            const metadata: ColumnMetadata = {
+                name: row.COLUMN_NAME,
+                dataType: dataType,
+                maxLength: row.CHARACTER_MAXIMUM_LENGTH,
+                isNullable: row.IS_NULLABLE === "YES",
+                isPrimaryKey: row.IsPrimaryKey === 1,
+            };
+            return new DatabaseTreeItem(
+                `${pkPrefix}${row.COLUMN_NAME} (${dataType})`,
+                NodeType.Column,
+                connectionId,
+                vscode.TreeItemCollapsibleState.None,
+                databaseName,
+                schemaName,
+                undefined,
+                tableName,
+                metadata,
+                undefined, profileName
+            );
+        });
+        return this.trackParent(nodes, parent);
+    }
+
+    private async getIndexNodes(
+        connectionId: string, databaseName: string, schemaName: string, tableName: string, parent: DatabaseTreeItem
+    ): Promise<DatabaseTreeItem[]> {
+        const profileName = parent.profileName;
+        const sql = `
+            SELECT
+                i.[name] AS IndexName,
+                i.[type_desc] AS IndexType,
+                i.[is_unique] AS IsUnique,
+                i.[is_primary_key] AS IsPrimaryKey
+            FROM sys.indexes i
+            INNER JOIN sys.objects o ON i.[object_id] = o.[object_id]
+            INNER JOIN sys.schemas s ON o.[schema_id] = s.[schema_id]
+            WHERE s.[name] = '${escapeSql(schemaName)}'
+                AND o.[name] = '${escapeSql(tableName)}'
+                AND i.[name] IS NOT NULL
+            ORDER BY i.[name]
+        `;
+        const results = await this.treeQueryService.execute(sql, databaseName);
+        const nodes = results.rows.map((row) => {
+            const suffix = row.IsPrimaryKey ? " (PRIMARY)" : row.IsUnique ? " (UNIQUE)" : "";
+            const metadata: IndexMetadata = {
+                name: row.IndexName,
+                type: row.IndexType,
+                isUnique: row.IsUnique,
+                isPrimaryKey: row.IsPrimaryKey,
+            };
+            return new DatabaseTreeItem(
+                `${row.IndexName}${suffix}`,
+                NodeType.Index,
+                connectionId,
+                vscode.TreeItemCollapsibleState.None,
+                databaseName,
+                schemaName,
+                undefined,
+                tableName,
+                undefined,
+                metadata, profileName
+            );
+        });
+        return this.trackParent(nodes, parent);
+    }
+
+    private async getKeyNodes(
+        connectionId: string, databaseName: string, schemaName: string, tableName: string, parent: DatabaseTreeItem
+    ): Promise<DatabaseTreeItem[]> {
+        const profileName = parent.profileName;
+        const sql = `
+            SELECT kc.[name] AS KeyName, kc.[type_desc] AS KeyType
+            FROM sys.key_constraints kc
+            INNER JOIN sys.objects o ON kc.parent_object_id = o.object_id
+            INNER JOIN sys.schemas s ON o.schema_id = s.schema_id
+            WHERE s.[name] = '${escapeSql(schemaName)}' AND o.[name] = '${escapeSql(tableName)}'
+            UNION ALL
+            SELECT fk.[name] AS KeyName, 'FOREIGN_KEY_CONSTRAINT' AS KeyType
+            FROM sys.foreign_keys fk
+            INNER JOIN sys.objects o ON fk.parent_object_id = o.object_id
+            INNER JOIN sys.schemas s ON o.schema_id = s.schema_id
+            WHERE s.[name] = '${escapeSql(schemaName)}' AND o.[name] = '${escapeSql(tableName)}'
+            ORDER BY KeyName
+        `;
+        const results = await this.treeQueryService.execute(sql, databaseName);
+        const nodes = results.rows.map((row) => {
+            const typeLabel = row.KeyType === "PRIMARY_KEY_CONSTRAINT" ? "PK"
+                : row.KeyType === "UNIQUE_CONSTRAINT" ? "UQ" : "FK";
+            return new DatabaseTreeItem(
+                `${row.KeyName} (${typeLabel})`,
+                NodeType.Folder, connectionId,
+                vscode.TreeItemCollapsibleState.None,
+                databaseName, schemaName, undefined, tableName,
+                undefined, undefined, profileName
+            );
+        });
+        return this.trackParent(nodes, parent);
+    }
+
+    private async getConstraintNodes(
+        connectionId: string, databaseName: string, schemaName: string, tableName: string, parent: DatabaseTreeItem
+    ): Promise<DatabaseTreeItem[]> {
+        const profileName = parent.profileName;
+        const sql = `
+            SELECT cc.[name] AS ConstraintName, 'CHECK' AS ConstraintType, cc.[definition] AS Detail
+            FROM sys.check_constraints cc
+            INNER JOIN sys.objects o ON cc.parent_object_id = o.object_id
+            INNER JOIN sys.schemas s ON o.schema_id = s.schema_id
+            WHERE s.[name] = '${escapeSql(schemaName)}' AND o.[name] = '${escapeSql(tableName)}'
+            UNION ALL
+            SELECT dc.[name] AS ConstraintName, 'DEFAULT' AS ConstraintType, dc.[definition] AS Detail
+            FROM sys.default_constraints dc
+            INNER JOIN sys.objects o ON dc.parent_object_id = o.object_id
+            INNER JOIN sys.schemas s ON o.schema_id = s.schema_id
+            WHERE s.[name] = '${escapeSql(schemaName)}' AND o.[name] = '${escapeSql(tableName)}'
+            ORDER BY ConstraintName
+        `;
+        const results = await this.treeQueryService.execute(sql, databaseName);
+        const nodes = results.rows.map((row) => {
+            const typeLabel = row.ConstraintType === "CHECK" ? "CK" : "DF";
+            const node = new DatabaseTreeItem(
+                `${row.ConstraintName} (${typeLabel})`,
+                NodeType.Folder, connectionId,
+                vscode.TreeItemCollapsibleState.None,
+                databaseName, schemaName, undefined, tableName,
+                undefined, undefined, profileName
+            );
+            node.tooltip = row.Detail;
+            return node;
+        });
+        return this.trackParent(nodes, parent);
+    }
+
+    private async getStatisticsNodes(
+        connectionId: string, databaseName: string, schemaName: string, objectName: string, parent: DatabaseTreeItem
+    ): Promise<DatabaseTreeItem[]> {
+        const profileName = parent.profileName;
+        const sql = `
+            SELECT st.[name] AS StatName, st.auto_created AS AutoCreated
+            FROM sys.stats st
+            INNER JOIN sys.objects o ON st.object_id = o.object_id
+            INNER JOIN sys.schemas s ON o.schema_id = s.schema_id
+            WHERE s.[name] = '${escapeSql(schemaName)}' AND o.[name] = '${escapeSql(objectName)}'
+            ORDER BY st.[name]
+        `;
+        const results = await this.treeQueryService.execute(sql, databaseName);
+        const nodes = results.rows.map((row) => {
+            const node = new DatabaseTreeItem(
+                row.StatName,
+                NodeType.Folder, connectionId,
+                vscode.TreeItemCollapsibleState.None,
+                databaseName, schemaName, undefined, objectName,
+                undefined, undefined, profileName
+            );
+            if (row.AutoCreated) { node.description = "(Auto)"; }
+            return node;
+        });
+        return this.trackParent(nodes, parent);
+    }
+
+    private async getRoutineChildren(element: DatabaseTreeItem): Promise<DatabaseTreeItem[]> {
+        const connectionId = element.connectionId;
+        const databaseName = element.databaseName!;
+        const schemaName = element.schemaName!;
+        const routineName = element.objectName!;
+        const profileName = element.profileName;
+
+        const sql = `
+            SELECT COUNT(*) AS ParamCount
+            FROM [INFORMATION_SCHEMA].[PARAMETERS]
+            WHERE [SPECIFIC_SCHEMA] = '${escapeSql(schemaName)}' AND [SPECIFIC_NAME] = '${escapeSql(routineName)}'
+                AND [PARAMETER_MODE] IS NOT NULL
+        `;
+        const results = await this.treeQueryService.execute(sql, databaseName);
+        const paramCount = results.rows[0]?.ParamCount || 0;
+
+        const paramFolder = new DatabaseTreeItem(
+            FolderType.Parameters, NodeType.Folder, connectionId,
+            paramCount > 0 ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None,
+            databaseName, schemaName, FolderType.Parameters, routineName,
+            undefined, undefined, profileName
+        );
+        paramFolder.description = `(${paramCount})`;
+        this.parentMap.set(paramFolder, element);
+
+        // For functions, also show return type
+        if (element.nodeType === NodeType.Function) {
+            const retSql = `
+                SELECT [DATA_TYPE] FROM [INFORMATION_SCHEMA].[PARAMETERS]
+                WHERE [SPECIFIC_SCHEMA] = '${escapeSql(schemaName)}' AND [SPECIFIC_NAME] = '${escapeSql(routineName)}'
+                    AND [PARAMETER_MODE] IS NULL AND [IS_RESULT] = 'YES'
+            `;
+            try {
+                const retResults = await this.treeQueryService.execute(retSql, databaseName);
+                if (retResults.rows.length > 0) {
+                    const retNode = new DatabaseTreeItem(
+                        `Returns ${retResults.rows[0].DATA_TYPE}`,
+                        NodeType.Folder, connectionId,
+                        vscode.TreeItemCollapsibleState.None,
+                        databaseName, schemaName,
+                        undefined, undefined, undefined, undefined, profileName
+                    );
+                    this.parentMap.set(retNode, element);
+                    return [paramFolder, retNode];
+                }
+            } catch { /* ignore */ }
+        }
+
+        return [paramFolder];
+    }
+
+    private async getParameterNodes(
+        connectionId: string, databaseName: string, schemaName: string, routineName: string, parent: DatabaseTreeItem
+    ): Promise<DatabaseTreeItem[]> {
+        const profileName = parent.profileName;
+        const sql = `
+            SELECT
+                [PARAMETER_NAME],
+                [DATA_TYPE],
+                [CHARACTER_MAXIMUM_LENGTH],
+                [PARAMETER_MODE]
+            FROM [INFORMATION_SCHEMA].[PARAMETERS]
+            WHERE [SPECIFIC_SCHEMA] = '${escapeSql(schemaName)}' AND [SPECIFIC_NAME] = '${escapeSql(routineName)}'
+                AND [PARAMETER_MODE] IS NOT NULL
+            ORDER BY [ORDINAL_POSITION]
+        `;
+        const results = await this.treeQueryService.execute(sql, databaseName);
+        const nodes = results.rows.map((row) => {
+            const dataType = row.CHARACTER_MAXIMUM_LENGTH
+                ? `${row.DATA_TYPE}(${row.CHARACTER_MAXIMUM_LENGTH})`
+                : row.DATA_TYPE;
+            const mode = row.PARAMETER_MODE === "INOUT" ? "OUTPUT" : "";
+            const label = mode
+                ? `${row.PARAMETER_NAME} (${dataType}, ${mode})`
+                : `${row.PARAMETER_NAME} (${dataType})`;
+            return new DatabaseTreeItem(
+                label,
+                NodeType.Folder, connectionId,
+                vscode.TreeItemCollapsibleState.None,
+                databaseName, schemaName, undefined, routineName,
+                undefined, undefined, profileName
+            );
+        });
+        return this.trackParent(nodes, parent);
     }
 }
