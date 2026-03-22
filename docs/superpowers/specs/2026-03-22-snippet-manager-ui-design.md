@@ -161,13 +161,12 @@ public getSnippetFolder(): string { ... }
 - **Klasör boş:** "Bu klasörde snippet bulunamadı. New butonuna tıklayarak yeni snippet oluşturun."
 - **Klasör erişilemez:** "Snippet klasörüne erişilemiyor: {path}. Klasör yolunu kontrol edin."
 
-### Monaco Editor Integration
+### Code Editor
 
-Webview içinde Monaco Editor kullanımı:
-- Monaco Editor extension bundle'a dahil edilir (`node_modules/monaco-editor/min`) — CSP uyumluluğu ve offline çalışma için CDN yerine bundled tercih edilir
-- İki instance: biri preview (readonly), biri modal (editable)
-- Dil: `sql`
-- Tema: `vs-dark`
+İlk sürümde basit yaklaşım (Monaco bundling karmaşıklığından kaçınmak için):
+- **Preview (readonly):** `<pre><code>` bloğu, monospace font, SQL keyword'leri CSS ile renklendirilmiş
+- **Modal (editable):** `<textarea>`, monospace font, SQL editing
+- İleride Monaco Editor entegrasyonu ayrı bir task olarak eklenebilir
 
 ### Webview State
 
@@ -222,7 +221,6 @@ Command palette ve/veya context menu'den erişilebilir:
 
 ## Dependencies
 
-- `monaco-editor` (bundled)
 - Mevcut `SnippetProvider` (completion cache refresh + raw snippet data için)
 - VS Code `WebviewPanel` API
 - Node.js `fs` modülü (dosya CRUD)
