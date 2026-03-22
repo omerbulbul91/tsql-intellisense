@@ -54,6 +54,8 @@ export class QueryRunner implements vscode.WebviewViewProvider {
                 this.exportCsv(msg.data);
             } else if (msg.type === 'exportJson') {
                 this.exportJson(msg.data);
+            } else if (msg.type === 'openInExcel') {
+                this.openInExcel(msg.data);
             }
         });
 
@@ -310,6 +312,7 @@ export class QueryRunner implements vscode.WebviewViewProvider {
         text-overflow: ellipsis;
     }
     tr:hover td { background: var(--vscode-list-hoverBackground); }
+    tr.selected td { background: var(--vscode-list-activeSelectionBackground); color: var(--vscode-list-activeSelectionForeground); }
     td.null-val { color: var(--vscode-descriptionForeground); font-style: italic; }
     .messages {
         padding: 6px 8px;
@@ -319,6 +322,38 @@ export class QueryRunner implements vscode.WebviewViewProvider {
         border-top: 1px solid var(--vscode-editorWidget-border);
         max-height: 120px;
         overflow-y: auto;
+    }
+    .context-menu {
+        position: fixed;
+        background: var(--vscode-menu-background, #252526);
+        border: 1px solid var(--vscode-menu-border, #454545);
+        border-radius: 4px;
+        padding: 4px 0;
+        min-width: 180px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+        z-index: 1000;
+        font-size: 12px;
+    }
+    .context-menu-item {
+        padding: 4px 24px;
+        cursor: pointer;
+        display: flex;
+        justify-content: space-between;
+        color: var(--vscode-menu-foreground, #ccc);
+    }
+    .context-menu-item:hover {
+        background: var(--vscode-menu-selectionBackground, #094771);
+        color: var(--vscode-menu-selectionForeground, #fff);
+    }
+    .context-menu-item .shortcut {
+        margin-left: 24px;
+        opacity: 0.7;
+        font-size: 11px;
+    }
+    .context-menu-separator {
+        height: 1px;
+        background: var(--vscode-menu-separatorBackground, #454545);
+        margin: 4px 0;
     }
     .error {
         color: var(--vscode-errorForeground);
@@ -405,6 +440,140 @@ export class QueryRunner implements vscode.WebviewViewProvider {
         const rs = resultSets[Math.max(0, currentTab)];
         if (!rs) return;
         vscode.postMessage({ type: 'exportJson', data: JSON.stringify(rs.rows, null, 2) });
+    }
+
+    // ── Selection ──────────────────────────────────────────────
+    let selectedRows = new Set();
+
+    document.addEventListener('click', (e) => {
+        const row = e.target.closest('tbody tr');
+        if (!row) { selectedRows.clear(); refreshSelection(); return; }
+        if (e.ctrlKey) {
+            if (selectedRows.has(row)) { selectedRows.delete(row); } else { selectedRows.add(row); }
+        } else if (e.shiftKey && selectedRows.size > 0) {
+            const allRows = Array.from(row.parentElement.rows);
+            const last = allRows.indexOf(Array.from(selectedRows).pop());
+            const curr = allRows.indexOf(row);
+            const [start, end] = last < curr ? [last, curr] : [curr, last];
+            for (let i = start; i <= end; i++) { selectedRows.add(allRows[i]); }
+        } else {
+            selectedRows.clear();
+            selectedRows.add(row);
+        }
+        refreshSelection();
+    });
+
+    function refreshSelection() {
+        document.querySelectorAll('tbody tr').forEach(r => r.classList.toggle('selected', selectedRows.has(r)));
+    }
+
+    function getSelectedData(withHeaders) {
+        const rs = resultSets[Math.max(0, currentTab)];
+        if (!rs) return '';
+        const rows = selectedRows.size > 0 ? Array.from(selectedRows) : Array.from(document.querySelectorAll('[data-tab="' + Math.max(0, currentTab) + '"] tbody tr'));
+        const lines = [];
+        if (withHeaders) { lines.push(rs.columns.join('\\t')); }
+        rows.forEach(row => {
+            lines.push(Array.from(row.cells).map(c => c.textContent || '').join('\\t'));
+        });
+        return lines.join('\\n');
+    }
+
+    // ── Context Menu ───────────────────────────────────────────
+    let contextMenu = null;
+
+    document.addEventListener('contextmenu', (e) => {
+        const row = e.target.closest('tbody tr');
+        if (!row) return;
+        e.preventDefault();
+        if (!selectedRows.has(row) && !e.ctrlKey) {
+            selectedRows.clear();
+            selectedRows.add(row);
+            refreshSelection();
+        }
+        showContextMenu(e.clientX, e.clientY);
+    });
+
+    document.addEventListener('click', (e) => {
+        if (contextMenu && !contextMenu.contains(e.target)) { hideContextMenu(); }
+    });
+
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') { hideContextMenu(); }
+        if ((e.ctrlKey || e.metaKey) && e.key === 'c') { e.preventDefault(); doCopy(false); }
+        if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'C') { e.preventDefault(); doCopy(true); }
+        if ((e.ctrlKey || e.metaKey) && e.key === 'a') {
+            e.preventDefault();
+            const tbody = document.querySelector('[data-tab="' + Math.max(0, currentTab) + '"] tbody');
+            if (tbody) { selectedRows = new Set(Array.from(tbody.rows)); refreshSelection(); }
+        }
+    });
+
+    function showContextMenu(x, y) {
+        hideContextMenu();
+        contextMenu = document.createElement('div');
+        contextMenu.className = 'context-menu';
+        const items = [
+            { label: 'Copy', shortcut: 'Ctrl+C', action: () => doCopy(false) },
+            { label: 'Copy with Headers', shortcut: 'Ctrl+Shift+C', action: () => doCopy(true) },
+            { separator: true },
+            { label: 'Select All', shortcut: 'Ctrl+A', action: () => {
+                const tbody = document.querySelector('[data-tab="' + Math.max(0, currentTab) + '"] tbody');
+                if (tbody) { selectedRows = new Set(Array.from(tbody.rows)); refreshSelection(); }
+            }},
+            { separator: true },
+            { label: 'Script as INSERT', action: () => scriptAsInsert() },
+            { label: 'Open in Excel', action: () => openInExcel() },
+        ];
+        items.forEach(item => {
+            if (item.separator) {
+                const sep = document.createElement('div');
+                sep.className = 'context-menu-separator';
+                contextMenu.appendChild(sep);
+                return;
+            }
+            const div = document.createElement('div');
+            div.className = 'context-menu-item';
+            div.innerHTML = '<span>' + item.label + '</span>' + (item.shortcut ? '<span class="shortcut">' + item.shortcut + '</span>' : '');
+            div.addEventListener('click', () => { hideContextMenu(); item.action(); });
+            contextMenu.appendChild(div);
+        });
+        // Position
+        contextMenu.style.left = Math.min(x, window.innerWidth - 200) + 'px';
+        contextMenu.style.top = Math.min(y, window.innerHeight - 200) + 'px';
+        document.body.appendChild(contextMenu);
+    }
+
+    function hideContextMenu() {
+        if (contextMenu) { contextMenu.remove(); contextMenu = null; }
+    }
+
+    function doCopy(withHeaders) {
+        const text = getSelectedData(withHeaders);
+        navigator.clipboard.writeText(text);
+    }
+
+    function scriptAsInsert() {
+        const rs = resultSets[Math.max(0, currentTab)];
+        if (!rs) return;
+        const rows = selectedRows.size > 0 ? Array.from(selectedRows) : Array.from(document.querySelectorAll('[data-tab="' + Math.max(0, currentTab) + '"] tbody tr'));
+        const cols = rs.columns;
+        const lines = rows.map(row => {
+            const vals = Array.from(row.cells).map((c, i) => {
+                const v = c.textContent;
+                if (v === 'NULL') return 'NULL';
+                const num = Number(v);
+                if (!isNaN(num) && v.trim() !== '') return v;
+                return "N'" + v.replace(/'/g, "''") + "'";
+            });
+            return 'INSERT INTO [TableName] (' + cols.map(c => '[' + c + ']').join(', ') + ') VALUES (' + vals.join(', ') + ');';
+        });
+        navigator.clipboard.writeText(lines.join('\\n'));
+    }
+
+    function openInExcel() {
+        const data = getSelectedData(true);
+        vscode.postMessage({ type: 'openInExcel', data: data });
     }
 </script>
 </body>
@@ -603,6 +772,25 @@ export class QueryRunner implements vscode.WebviewViewProvider {
             await vscode.workspace.fs.writeFile(uri, Buffer.from(data, 'utf-8'));
             vscode.window.showInformationMessage(`Exported to ${uri.fsPath}`);
         }
+    }
+
+    private async openInExcel(data: string): Promise<void> {
+        const os = require('os');
+        const path = require('path');
+        const fs = require('fs');
+        const tmpFile = path.join(os.tmpdir(), `tsql_result_${Date.now()}.csv`);
+        // Convert tab-separated to CSV
+        const csvData = data.split('\n').map(line =>
+            line.split('\t').map(cell => {
+                if (cell.includes(',') || cell.includes('"') || cell.includes('\n')) {
+                    return '"' + cell.replace(/"/g, '""') + '"';
+                }
+                return cell;
+            }).join(',')
+        ).join('\n');
+        fs.writeFileSync(tmpFile, '\uFEFF' + csvData, 'utf-8'); // BOM for Excel UTF-8
+        const uri = vscode.Uri.file(tmpFile);
+        await vscode.env.openExternal(uri);
     }
 
     dispose(): void {
