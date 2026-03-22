@@ -270,6 +270,16 @@
         "command": "tsql-intellisense.NewTrigger",
         "title": "%command.NewTrigger%",
         "icon": "$(add)"
+      },
+      {
+        "command": "tsql-intellisense.backupDatabase",
+        "title": "Backup Database...",
+        "icon": "$(archive)"
+      },
+      {
+        "command": "tsql-intellisense.restoreDatabase",
+        "title": "Restore Database...",
+        "icon": "$(history)"
       }
     ],
     "menus": {
@@ -372,6 +382,16 @@
         {
           "command": "tsql-intellisense.loadDatabaseSchema",
           "when": "viewItem == Database"
+        },
+        {
+          "command": "tsql-intellisense.backupDatabase",
+          "when": "viewItem == Database",
+          "group": "3_backup@1"
+        },
+        {
+          "command": "tsql-intellisense.restoreDatabase",
+          "when": "viewItem == Database",
+          "group": "3_backup@2"
         },
         {
           "command": "tsql-intellisense.RefreshFolder",
