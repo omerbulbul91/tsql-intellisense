@@ -313,7 +313,7 @@ function applyBlockIndentation(text: string, ws: WhitespaceOptions, cf: ControlF
     }
 
     // ── Post-process: insert empty lines between statements at same depth ──
-    if (ws.emptyLinesBetweenStatements > 0) {
+    {
         const finalResult: string[] = [];
         let prevNonEmptyDepth = -1;
         let prevNonEmptyIsOpener = true; // treat start of file as opener
@@ -348,6 +348,12 @@ function applyBlockIndentation(text: string, ws: WhitespaceOptions, cf: ControlF
                     shouldAddBlankLine = true;
                 }
             } else {
+                // Top-level: blank line between same-depth statement starters
+                if (SAME_DEPTH_STARTERS.has(firstWord)
+                    && prevNonEmptyDepth === 0
+                    && !prevNonEmptyIsOpener) {
+                    shouldAddBlankLine = true;
+                }
                 // Top-level: blank line before standalone BEGIN (SP body start)
                 if ((upperTrimmed === 'BEGIN' || isOpener)
                     && prevNonEmptyDepth === 0
@@ -356,7 +362,11 @@ function applyBlockIndentation(text: string, ws: WhitespaceOptions, cf: ControlF
                 }
             }
 
-            if (shouldAddBlankLine) {
+            if (shouldAddBlankLine && ws.emptyLinesBetweenStatements > 0) {
+                // Remove existing trailing blank lines before inserting the desired count
+                while (finalResult.length > 0 && finalResult[finalResult.length - 1].trim() === '') {
+                    finalResult.pop();
+                }
                 for (let j = 0; j < ws.emptyLinesBetweenStatements; j++) {
                     finalResult.push('');
                 }

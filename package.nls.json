@@ -66,6 +66,8 @@
   "viewsContainer.queryResults": "Query Results",
   "view.connections": "Connections",
   "view.queryResults": "Query Results",
+  "view.queryHistory": "Query History",
+  "view.queryHistoryWelcome": "No Queries Available",
 
   "config.title": "T-SQL IntelliSense",
   "config.connections": "Saved database connections",
@@ -97,6 +99,17 @@
   "config.styleFile": "Path to Redgate SQL Prompt style file (.json)",
   "config.styleOverrides": "Manual casing settings (saved from Formatting Styles panel)",
   "config.openOptionsPanel": "For language settings, style file import, and visual formatting options: **[Open SQL Prompt Options](command:tsql-intellisense.openStyleSettings)**",
+
+  "command.refreshQueryHistory": "Refresh Query History",
+  "command.clearQueryHistory": "Clear Query History",
+  "command.deleteHistoryEntry": "Delete History Entry",
+  "command.openQueryHistorySettings": "Query History Settings",
+  "command.openConnectionSettings": "Connection Settings",
+
+  "config.queryHistory.enabled": "Enable query history tracking",
+  "config.queryHistory.maxQuerySize": "Maximum query size in bytes to save in history (queries exceeding this are not saved)",
+  "config.queryHistory.maxEntries": "Maximum number of history entries to keep",
+  "config.queryHistory.retentionDays": "Automatically delete history entries older than this many days (0 to keep forever)",
 
   "config.group.suggestions": "Suggestions",
   "config.group.insertedCode": "Inserted Code",

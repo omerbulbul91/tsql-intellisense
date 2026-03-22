@@ -66,6 +66,8 @@
   "viewsContainer.queryResults": "Sorgu Sonuçları",
   "view.connections": "Bağlantılar",
   "view.queryResults": "Sorgu Sonuçları",
+  "view.queryHistory": "Sorgu Geçmişi",
+  "view.queryHistoryWelcome": "Sorgu Geçmişi Yok",
 
   "config.title": "T-SQL IntelliSense",
   "config.connections": "Kayıtlı veritabanı bağlantıları",
@@ -97,6 +99,17 @@
   "config.styleFile": "Redgate SQL Prompt stil dosyası (.json) yolu",
   "config.styleOverrides": "Manuel casing ayarları (Formatting Styles panelinden kaydedilir)",
   "config.openOptionsPanel": "Dil ayarları, stil dosyası içe aktarma ve görsel formatlama seçenekleri için: **[SQL Prompt Options'ı Aç](command:tsql-intellisense.openStyleSettings)**",
+
+  "command.refreshQueryHistory": "Sorgu Geçmişini Yenile",
+  "command.clearQueryHistory": "Sorgu Geçmişini Temizle",
+  "command.deleteHistoryEntry": "Geçmiş Kaydını Sil",
+  "command.openQueryHistorySettings": "Sorgu Geçmişi Ayarları",
+  "command.openConnectionSettings": "Bağlantı Ayarları",
+
+  "config.queryHistory.enabled": "Sorgu geçmişi takibini etkinleştir",
+  "config.queryHistory.maxQuerySize": "Geçmişe kaydedilecek maksimum sorgu boyutu (bayt). Bu boyutu aşan sorgular kaydedilmez",
+  "config.queryHistory.maxEntries": "Saklanacak maksimum geçmiş kayıt sayısı",
+  "config.queryHistory.retentionDays": "Bu gün sayısından eski geçmiş kayıtlarını otomatik sil (0 = sonsuza kadar sakla)",
 
   "config.group.suggestions": "Öneriler",
   "config.group.insertedCode": "Eklenen Kod",

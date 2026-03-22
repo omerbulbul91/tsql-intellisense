@@ -21,6 +21,7 @@ import { StyleLoader } from './formatter/styleLoader';
 import { FormatterProvider } from './providers/formatterProvider';
 import { StyleFormProvider } from './providers/styleFormProvider';
 import { TranslationEditor } from './providers/translationEditor';
+import { QueryHistoryProvider, QueryHistoryEntry } from './providers/queryHistoryProvider';
 
 let connectionManager: ConnectionManager;
 let schemaCacheManager: SchemaCacheManager;
@@ -52,7 +53,7 @@ export function activate(context: vscode.ExtensionContext) {
         }
     }) as SchemaCache;
     alterProcProvider = new AlterProcProvider(connectionManager, schemaCache);
-    queryRunner = new QueryRunner(connectionManager);
+    queryRunner = new QueryRunner(connectionManager, context.extensionUri);
 
     // Register sidebar tree view
     const treeQueryService = new TreeQueryService(connectionManager);
@@ -89,6 +90,69 @@ export function activate(context: vscode.ExtensionContext) {
         showCollapseAll: true,
     });
     context.subscriptions.push(treeView);
+
+    // Register Query History view
+    const historyProvider = new QueryHistoryProvider(context.globalState);
+    const historyView = vscode.window.createTreeView('tsqlQueryHistory', {
+        treeDataProvider: historyProvider,
+        showCollapseAll: true,
+    });
+    context.subscriptions.push(historyView);
+
+    // Single-click / double-click detection for history tree
+    let historyLastClickTime = 0;
+    let historyLastClickId = '';
+    let historyClickTimer: ReturnType<typeof setTimeout> | null = null;
+
+    async function openHistoryFile(entry: QueryHistoryEntry, preview: boolean): Promise<void> {
+        try {
+            const uri = vscode.Uri.file(entry.filePath);
+            const doc = await vscode.workspace.openTextDocument(uri);
+            await vscode.window.showTextDocument(doc, { preview });
+            queryRunner.setDocumentDatabase(doc.uri, {
+                profileName: entry.connectionName,
+                dbName: entry.databaseName,
+            });
+            const profile = connectionManager.getSavedProfiles().find(p => p.name === entry.connectionName);
+            if (profile) {
+                if (!connectionManager.isConnected || connectionManager.currentProfile?.name !== entry.connectionName) {
+                    await connectionManager.connect({ ...profile, database: entry.databaseName });
+                } else if (connectionManager.currentProfile?.database?.toLowerCase() !== entry.databaseName.toLowerCase()) {
+                    await connectionManager.softSwitchDatabase(entry.databaseName);
+                }
+            }
+        } catch {
+            const doc = await vscode.workspace.openTextDocument({ language: 'sql', content: entry.sql });
+            await vscode.window.showTextDocument(doc, { preview });
+            queryRunner.setDocumentDatabase(doc.uri, {
+                profileName: entry.connectionName,
+                dbName: entry.databaseName,
+            });
+        }
+    }
+
+    historyView.onDidChangeSelection(e => {
+        const item = e.selection[0] as any;
+        if (!item?.entry) { return; }
+        const entry = item.entry as QueryHistoryEntry;
+
+        const now = Date.now();
+        const isDoubleClick = (now - historyLastClickTime < 400) && historyLastClickId === entry.id;
+        historyLastClickTime = now;
+        historyLastClickId = entry.id;
+
+        if (historyClickTimer) { clearTimeout(historyClickTimer); historyClickTimer = null; }
+
+        if (isDoubleClick) {
+            // Double click → pin (permanent tab)
+            openHistoryFile(entry, false);
+        } else {
+            // Single click → preview (wait to rule out double click)
+            historyClickTimer = setTimeout(() => {
+                openHistoryFile(entry, true);
+            }, 400);
+        }
+    });
 
     // Register query results panel in bottom area
     context.subscriptions.push(
@@ -828,6 +892,52 @@ export function activate(context: vscode.ExtensionContext) {
 
         return lines.join('\n');
     }
+
+    // Query History: record on run, only if content changed since last history entry
+    const lastHistorySql = new Map<string, string>();
+    queryRunner.onQueryExecuted(({ sql }) => {
+        const editor = vscode.window.activeTextEditor;
+        const profile = connectionManager.currentProfile;
+        if (!profile || !editor) { return; }
+        const filePath = editor.document.uri.fsPath || editor.document.uri.toString();
+        // Skip if SQL content hasn't changed since last history entry
+        if (lastHistorySql.get(filePath) === sql) { return; }
+        lastHistorySql.set(filePath, sql);
+        const docDb = queryRunner.getDocumentDatabase(editor.document.uri);
+        const dbName = docDb?.dbName ?? profile.database;
+        const fileName = filePath ? require('path').basename(filePath) : 'Untitled';
+        historyProvider.addEntry({
+            fileName,
+            filePath,
+            sql,
+            connectionName: profile.name,
+            databaseName: dbName,
+        });
+    });
+
+    // Query History commands
+    context.subscriptions.push(
+        vscode.commands.registerCommand('tsql-intellisense.refreshQueryHistory', () => {
+            historyProvider.refresh();
+        }),
+        vscode.commands.registerCommand('tsql-intellisense.clearQueryHistory', () => {
+            historyProvider.clearAll();
+        }),
+        vscode.commands.registerCommand('tsql-intellisense.openQueryHistorySettings', () => {
+            StyleFormProvider.show(context, styleLoader, 'history');
+        }),
+        vscode.commands.registerCommand('tsql-intellisense.openConnectionSettings', () => {
+            StyleFormProvider.show(context, styleLoader, 'connections');
+        }),
+        vscode.commands.registerCommand('tsql-intellisense.deleteHistoryEntry', (item: any) => {
+            if (item?.entry?.id) {
+                historyProvider.deleteEntry(item.entry.id);
+            }
+        }),
+        vscode.commands.registerCommand('tsql-intellisense.openHistoryEntry', async (entry: QueryHistoryEntry) => {
+            await openHistoryFile(entry, true);
+        })
+    );
 
     // Project Sync: auto-update SQL project files after DDL execution
     const projectSync = new ProjectSync(connectionManager, schemaCache); // uses initial cache; ProjectSync reacts to onSchemaLoaded events

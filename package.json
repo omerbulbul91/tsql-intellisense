@@ -341,6 +341,36 @@
         "title": "Restore Database...",
         "icon": "$(history)",
         "category": "T-SQL"
+      },
+      {
+        "command": "tsql-intellisense.refreshQueryHistory",
+        "title": "%command.refreshQueryHistory%",
+        "icon": "$(refresh)",
+        "category": "T-SQL"
+      },
+      {
+        "command": "tsql-intellisense.clearQueryHistory",
+        "title": "%command.clearQueryHistory%",
+        "icon": "$(clear-all)",
+        "category": "T-SQL"
+      },
+      {
+        "command": "tsql-intellisense.openQueryHistorySettings",
+        "title": "%command.openQueryHistorySettings%",
+        "icon": "$(gear)",
+        "category": "T-SQL"
+      },
+      {
+        "command": "tsql-intellisense.openConnectionSettings",
+        "title": "%command.openConnectionSettings%",
+        "icon": "$(gear)",
+        "category": "T-SQL"
+      },
+      {
+        "command": "tsql-intellisense.deleteHistoryEntry",
+        "title": "%command.deleteHistoryEntry%",
+        "icon": "$(trash)",
+        "category": "T-SQL"
       }
     ],
     "menus": {
@@ -379,8 +409,23 @@
           "group": "navigation"
         },
         {
-          "command": "tsql-intellisense.openStyleSettings",
+          "command": "tsql-intellisense.openConnectionSettings",
           "when": "view == tsqlConnections",
+          "group": "navigation"
+        },
+        {
+          "command": "tsql-intellisense.refreshQueryHistory",
+          "when": "view == tsqlQueryHistory",
+          "group": "navigation"
+        },
+        {
+          "command": "tsql-intellisense.clearQueryHistory",
+          "when": "view == tsqlQueryHistory",
+          "group": "navigation"
+        },
+        {
+          "command": "tsql-intellisense.openQueryHistorySettings",
+          "when": "view == tsqlQueryHistory",
           "group": "navigation"
         }
       ],
@@ -389,11 +434,6 @@
           "command": "tsql-intellisense.newQueryFromTree",
           "when": "viewItem =~ /^Connection/",
           "group": "inline@1"
-        },
-        {
-          "command": "tsql-intellisense.editConnection",
-          "when": "viewItem =~ /^Connection/",
-          "group": "inline@2"
         },
         {
           "command": "tsql-intellisense.treeConnect",
@@ -531,6 +571,11 @@
         {
           "command": "tsql-intellisense.openProjectFile",
           "when": "viewItem == Table || viewItem == View || viewItem == Procedure || viewItem == Function"
+        },
+        {
+          "command": "tsql-intellisense.deleteHistoryEntry",
+          "when": "viewItem == historyEntry",
+          "group": "inline"
         }
       ],
       "tsql-intellisense.ScriptAs": [
@@ -660,6 +705,10 @@
         {
           "id": "tsqlConnections",
           "name": "%view.connections%"
+        },
+        {
+          "id": "tsqlQueryHistory",
+          "name": "%view.queryHistory%"
         }
       ],
       "tsql-results-panel": [
@@ -670,6 +719,12 @@
         }
       ]
     },
+    "viewsWelcome": [
+      {
+        "view": "tsqlQueryHistory",
+        "contents": "%view.queryHistoryWelcome%"
+      }
+    ],
     "snippets": [
       {
         "language": "sql",
@@ -986,6 +1041,26 @@
       {
         "title": "%config.group.queries%",
         "properties": {
+          "tsql-intellisense.queryHistory.enabled": {
+            "type": "boolean",
+            "default": true,
+            "description": "%config.queryHistory.enabled%"
+          },
+          "tsql-intellisense.queryHistory.maxQuerySize": {
+            "type": "number",
+            "default": 1048576,
+            "description": "%config.queryHistory.maxQuerySize%"
+          },
+          "tsql-intellisense.queryHistory.maxEntries": {
+            "type": "number",
+            "default": 100,
+            "description": "%config.queryHistory.maxEntries%"
+          },
+          "tsql-intellisense.queryHistory.retentionDays": {
+            "type": "number",
+            "default": 7,
+            "description": "%config.queryHistory.retentionDays%"
+          },
           "tsql-intellisense.resultDisplayMode": {
             "type": "string",
             "enum": [
@@ -1043,7 +1118,8 @@
   },
   "dependencies": {
     "monaco-editor": "^0.55.1",
-    "mssql": "^12.2.1"
+    "mssql": "^12.2.1",
+    "tabulator-tables": "^6.4.0"
   },
   "devDependencies": {
     "@types/mssql": "^9.1.9",
