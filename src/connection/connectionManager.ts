@@ -305,8 +305,24 @@ export class ConnectionManager {
     }
 
     /** Build display column names from mssql column metadata, handling unnamed columns */
-    private buildColumnNames(colMeta: any[] | undefined): string[] {
-        if (!colMeta || colMeta.length === 0) { return []; }
+    private buildColumnNames(colMeta: any[] | any | undefined): string[] {
+        if (!colMeta) { return []; }
+
+        // mssql columns can be an array of {name, index, ...} objects
+        // OR an object keyed by column name: { "ColName": { index: 0, name: "ColName", ... } }
+        let metaArray: any[];
+        if (Array.isArray(colMeta)) {
+            metaArray = colMeta;
+        } else if (typeof colMeta === 'object') {
+            // Object format: keys are column names, values have index property
+            metaArray = Object.entries(colMeta)
+                .map(([key, val]: [string, any]) => ({ name: key, index: val?.index ?? 0, ...val }))
+                .sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
+        } else {
+            return [];
+        }
+
+        if (metaArray.length === 0) { return []; }
         const columns: string[] = [];
         let unnamedCount = 0;
         for (const col of colMeta) {
