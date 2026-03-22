@@ -30,140 +30,171 @@
     "commands": [
       {
         "command": "tsql-intellisense.connect",
-        "title": "%command.connect%"
+        "title": "%command.connect%",
+        "category": "T-SQL"
       },
       {
         "command": "tsql-intellisense.disconnect",
-        "title": "%command.disconnect%"
+        "title": "%command.disconnect%",
+        "category": "T-SQL"
       },
       {
         "command": "tsql-intellisense.refreshSchema",
         "title": "%command.refreshSchema%",
-        "icon": "$(sync)"
+        "icon": "$(sync)",
+        "category": "T-SQL"
       },
       {
         "command": "tsql-intellisense.refreshDocumentCache",
         "title": "%command.refreshDocumentCache%",
-        "icon": "$(sync)"
+        "icon": "$(sync)",
+        "category": "T-SQL"
       },
       {
         "command": "tsql-intellisense.alterProc",
-        "title": "%command.alterProc%"
+        "title": "%command.alterProc%",
+        "category": "T-SQL"
       },
       {
         "command": "tsql-intellisense.runQuery",
         "title": "%command.runQuery%",
-        "icon": "$(play)"
+        "icon": "$(play)",
+        "category": "T-SQL"
       },
       {
         "command": "tsql-intellisense.copyTableScript",
-        "title": "%command.copyTableScript%"
+        "title": "%command.copyTableScript%",
+        "category": "T-SQL"
       },
       {
         "command": "tsql-intellisense.openTableScript",
-        "title": "%command.openTableScript%"
+        "title": "%command.openTableScript%",
+        "category": "T-SQL"
       },
       {
         "command": "tsql-intellisense.setProjectPath",
-        "title": "%command.setProjectPath%"
+        "title": "%command.setProjectPath%",
+        "category": "T-SQL"
       },
       {
         "command": "tsql-intellisense.queryShortcut0",
-        "title": "%command.queryShortcut0%"
+        "title": "%command.queryShortcut0%",
+        "category": "T-SQL"
       },
       {
         "command": "tsql-intellisense.queryShortcut1",
-        "title": "%command.queryShortcut1%"
+        "title": "%command.queryShortcut1%",
+        "category": "T-SQL"
       },
       {
         "command": "tsql-intellisense.queryShortcut2",
-        "title": "%command.queryShortcut2%"
+        "title": "%command.queryShortcut2%",
+        "category": "T-SQL"
       },
       {
         "command": "tsql-intellisense.queryShortcut3",
-        "title": "%command.queryShortcut3%"
+        "title": "%command.queryShortcut3%",
+        "category": "T-SQL"
       },
       {
         "command": "tsql-intellisense.newSqlFile",
-        "title": "%command.newSqlFile%"
+        "title": "%command.newSqlFile%",
+        "category": "T-SQL"
       },
       {
         "command": "tsql-intellisense.setSnippetFolder",
-        "title": "%command.setSnippetFolder%"
+        "title": "%command.setSnippetFolder%",
+        "category": "T-SQL"
       },
       {
         "command": "tsql-intellisense.formatSql",
-        "title": "%command.formatSql%"
+        "title": "%command.formatSql%",
+        "category": "T-SQL"
       },
       {
         "command": "tsql-intellisense.setStyleFile",
-        "title": "%command.setStyleFile%"
+        "title": "%command.setStyleFile%",
+        "category": "T-SQL"
       },
       {
         "command": "tsql-intellisense.openStyleSettings",
         "title": "%command.openStyleSettings%",
-        "icon": "$(gear)"
+        "icon": "$(gear)",
+        "category": "T-SQL"
       },
       {
         "command": "tsql-intellisense.addConnection",
         "title": "%command.addConnection%",
-        "icon": "$(add)"
+        "icon": "$(add)",
+        "category": "T-SQL"
       },
       {
         "command": "tsql-intellisense.editConnection",
         "title": "%command.editConnection%",
-        "icon": "$(edit)"
+        "icon": "$(edit)",
+        "category": "T-SQL"
       },
       {
         "command": "tsql-intellisense.deleteConnection",
         "title": "%command.deleteConnection%",
-        "icon": "$(trash)"
+        "icon": "$(trash)",
+        "category": "T-SQL"
       },
       {
         "command": "tsql-intellisense.treeConnect",
         "title": "%command.treeConnect%",
-        "icon": "$(plug)"
+        "icon": "$(plug)",
+        "category": "T-SQL"
       },
       {
         "command": "tsql-intellisense.selectTop100",
-        "title": "%command.selectTop100%"
+        "title": "%command.selectTop100%",
+        "category": "T-SQL"
       },
       {
         "command": "tsql-intellisense.openInExplorer",
         "title": "%command.openInExplorer%",
-        "icon": "$(folder-opened)"
+        "icon": "$(folder-opened)",
+        "category": "T-SQL"
       },
       {
         "command": "tsql-intellisense.insertSpParams",
-        "title": "%command.insertSpParams%"
+        "title": "%command.insertSpParams%",
+        "category": "T-SQL"
       },
       {
         "command": "tsql-intellisense.newQueryFromTree",
         "title": "%command.newQueryFromTree%",
-        "icon": "$(new-file)"
+        "icon": "$(new-file)",
+        "category": "T-SQL"
       },
       {
         "command": "tsql-intellisense.loadDatabaseSchema",
         "title": "%command.loadDatabaseSchema%",
-        "icon": "$(sync)"
+        "icon": "$(sync)",
+        "category": "T-SQL"
       },
       {
         "command": "tsql-intellisense.toggleResultsPanel",
-        "title": "%command.toggleResultsPanel%"
+        "title": "%command.toggleResultsPanel%",
+        "category": "T-SQL"
       },
       {
         "command": "tsql-intellisense.selectInObjectExplorer",
-        "title": "%command.selectInObjectExplorer%"
+        "title": "%command.selectInObjectExplorer%",
+        "category": "T-SQL"
       },
       {
         "command": "tsql-intellisense.openProjectFile",
         "title": "%command.openProjectFile%",
-        "icon": "$(go-to-file)"
+        "icon": "$(go-to-file)",
+        "category": "T-SQL"
       },
       {
         "command": "tsql-intellisense.editTranslations",
         "title": "%command.editTranslations%",
-        "icon": "$(globe)"
+        "icon": "$(globe)",
+        "category": "T-SQL"
       },
       {
         "command": "tsql-intellisense.Script.Create",
@@ -172,114 +203,138 @@
       },
       {
         "command": "tsql-intellisense.Script.Alter",
-        "title": "%command.Script.Alter%"
+        "title": "%command.Script.Alter%",
+        "category": "T-SQL"
       },
       {
         "command": "tsql-intellisense.Script.CreateOrAlter",
-        "title": "%command.Script.CreateOrAlter%"
+        "title": "%command.Script.CreateOrAlter%",
+        "category": "T-SQL"
       },
       {
         "command": "tsql-intellisense.Script.Drop",
-        "title": "%command.Script.Drop%"
+        "title": "%command.Script.Drop%",
+        "category": "T-SQL"
       },
       {
         "command": "tsql-intellisense.Script.DropAndCreate",
-        "title": "%command.Script.DropAndCreate%"
+        "title": "%command.Script.DropAndCreate%",
+        "category": "T-SQL"
       },
       {
         "command": "tsql-intellisense.Script.Select",
-        "title": "%command.Script.Select%"
+        "title": "%command.Script.Select%",
+        "category": "T-SQL"
       },
       {
         "command": "tsql-intellisense.Script.Insert",
-        "title": "%command.Script.Insert%"
+        "title": "%command.Script.Insert%",
+        "category": "T-SQL"
       },
       {
         "command": "tsql-intellisense.Script.Update",
-        "title": "%command.Script.Update%"
+        "title": "%command.Script.Update%",
+        "category": "T-SQL"
       },
       {
         "command": "tsql-intellisense.Script.Delete",
-        "title": "%command.Script.Delete%"
+        "title": "%command.Script.Delete%",
+        "category": "T-SQL"
       },
       {
         "command": "tsql-intellisense.Script.Execute",
-        "title": "%command.Script.Execute%"
+        "title": "%command.Script.Execute%",
+        "category": "T-SQL"
       },
       {
         "command": "tsql-intellisense.RefreshDatabases",
         "title": "%command.RefreshDatabases%",
-        "icon": "$(refresh)"
+        "icon": "$(refresh)",
+        "category": "T-SQL"
       },
       {
         "command": "tsql-intellisense.FilterDatabases",
         "title": "%command.FilterDatabases%",
-        "icon": "$(filter)"
+        "icon": "$(filter)",
+        "category": "T-SQL"
       },
       {
         "command": "tsql-intellisense.NewDatabase",
         "title": "%command.NewDatabase%",
-        "icon": "$(add)"
+        "icon": "$(add)",
+        "category": "T-SQL"
       },
       {
         "command": "tsql-intellisense.RefreshDatabase",
         "title": "%command.RefreshDatabase%",
-        "icon": "$(refresh)"
+        "icon": "$(refresh)",
+        "category": "T-SQL"
       },
       {
         "command": "tsql-intellisense.NewSchema",
         "title": "%command.NewSchema%",
-        "icon": "$(add)"
+        "icon": "$(add)",
+        "category": "T-SQL"
       },
       {
         "command": "tsql-intellisense.RefreshFolder",
         "title": "%command.RefreshFolder%",
-        "icon": "$(refresh)"
+        "icon": "$(refresh)",
+        "category": "T-SQL"
       },
       {
         "command": "tsql-intellisense.FilterFolder",
         "title": "%command.FilterFolder%",
-        "icon": "$(filter)"
+        "icon": "$(filter)",
+        "category": "T-SQL"
       },
       {
         "command": "tsql-intellisense.NewTable",
         "title": "%command.NewTable%",
-        "icon": "$(add)"
+        "icon": "$(add)",
+        "category": "T-SQL"
       },
       {
         "command": "tsql-intellisense.NewView",
         "title": "%command.NewView%",
-        "icon": "$(add)"
+        "icon": "$(add)",
+        "category": "T-SQL"
       },
       {
         "command": "tsql-intellisense.NewScalarFunction",
         "title": "%command.NewScalarFunction%",
-        "icon": "$(add)"
+        "icon": "$(add)",
+        "category": "T-SQL"
       },
       {
         "command": "tsql-intellisense.NewTableValuedFunction",
         "title": "%command.NewTableValuedFunction%",
-        "icon": "$(add)"
+        "icon": "$(add)",
+        "category": "T-SQL"
       },
       {
         "command": "tsql-intellisense.NewProcedure",
         "title": "%command.NewProcedure%",
-        "icon": "$(add)"
+        "icon": "$(add)",
+        "category": "T-SQL"
       },
       {
         "command": "tsql-intellisense.NewTrigger",
         "title": "%command.NewTrigger%",
-        "icon": "$(add)"
+        "icon": "$(add)",
+        "category": "T-SQL"
       },
       {
         "command": "tsql-intellisense.backupDatabase",
         "title": "Backup Database...",
-        "icon": "$(archive)"
+        "icon": "$(archive)",
+        "category": "T-SQL"
       },
       {
         "command": "tsql-intellisense.restoreDatabase",
         "title": "Restore Database...",
-        "icon": "$(history)"
+        "icon": "$(history)",
+        "category": "T-SQL"
       }
     ],
     "menus": {
