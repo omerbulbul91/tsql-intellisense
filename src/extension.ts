@@ -33,12 +33,23 @@ export function activate(context: vscode.ExtensionContext) {
     // Initialize core components
     connectionManager = new ConnectionManager();
     schemaCacheManager = new SchemaCacheManager();
-    const schemaCache = schemaCacheManager.getOrCreate(
+    const initialCache = schemaCacheManager.getOrCreate(
         connectionManager.currentProfile?.name ?? '__default__',
         connectionManager.currentProfile?.database ?? '__default__',
         connectionManager
     );
-    schemaCacheManager.active = schemaCache;
+    schemaCacheManager.active = initialCache;
+
+    // Proxy that always delegates to schemaCacheManager.active
+    // This way all providers always use the current active cache
+    const schemaCache = new Proxy(initialCache, {
+        get(_target, prop, receiver) {
+            const active = schemaCacheManager.active;
+            if (!active) { return undefined; }
+            const val = (active as any)[prop];
+            return typeof val === 'function' ? val.bind(active) : val;
+        }
+    }) as SchemaCache;
     alterProcProvider = new AlterProcProvider(connectionManager, schemaCache);
     queryRunner = new QueryRunner(connectionManager);
 
