@@ -79,14 +79,37 @@ export class QueryRunner implements vscode.WebviewViewProvider {
         const docDb = this.documentDbMap.get(editor.document.uri.toString());
 
         if (!this.connectionManager.isConnected) {
-            const action = await vscode.window.showWarningMessage(
-                'T-SQL IntelliSense: Not connected to a database',
-                'Connect'
-            );
-            if (action === 'Connect') {
-                await this.connectionManager.promptConnect();
+            // Try to connect using file's association
+            if (docDb) {
+                const profile = this.connectionManager.getSavedProfiles().find(p => p.name === docDb.profileName);
+                if (profile) {
+                    try {
+                        await this.connectionManager.connect({ ...profile, database: docDb.dbName });
+                    } catch {
+                        const action = await vscode.window.showWarningMessage(
+                            'T-SQL IntelliSense: Not connected to a database', 'Connect');
+                        if (action === 'Connect') { await this.connectionManager.promptConnect(); }
+                        return;
+                    }
+                }
+            } else {
+                const action = await vscode.window.showWarningMessage(
+                    'T-SQL IntelliSense: Not connected to a database', 'Connect');
+                if (action === 'Connect') { await this.connectionManager.promptConnect(); }
+                return;
             }
-            return;
+        }
+
+        // Ensure we're on the correct server + database for this file
+        if (docDb) {
+            if (this.connectionManager.currentProfile?.name !== docDb.profileName) {
+                const profile = this.connectionManager.getSavedProfiles().find(p => p.name === docDb.profileName);
+                if (profile) {
+                    await this.connectionManager.connect({ ...profile, database: docDb.dbName });
+                }
+            } else if (this.connectionManager.currentProfile?.database?.toLowerCase() !== docDb.dbName.toLowerCase()) {
+                await this.connectionManager.softSwitchDatabase(docDb.dbName);
+            }
         }
 
         // docDb === null means server-level query → ask which DB
