@@ -129,14 +129,29 @@ export class QueryRunner implements vscode.WebviewViewProvider {
             return;
         }
 
-        // Show progress
-        const result = await vscode.window.withProgress(
+        // Show progress — retry once on connection failure
+        let result = await vscode.window.withProgress(
             {
                 location: vscode.ProgressLocation.Notification,
                 title: 'Executing query...',
                 cancellable: false,
             },
-            () => this.connectionManager.executeBatch(sql)
+            async () => {
+                try {
+                    return await this.connectionManager.executeBatch(sql);
+                } catch (err: any) {
+                    // Connection may have dropped — reconnect and retry
+                    const docDb2 = this.documentDbMap.get(editor.document.uri.toString());
+                    if (docDb2) {
+                        const profile = this.connectionManager.getSavedProfiles().find(p => p.name === docDb2.profileName);
+                        if (profile) {
+                            await this.connectionManager.connect({ ...profile, database: docDb2.dbName });
+                            return await this.connectionManager.executeBatch(sql);
+                        }
+                    }
+                    throw err;
+                }
+            }
         );
 
         this.lastResult = result;

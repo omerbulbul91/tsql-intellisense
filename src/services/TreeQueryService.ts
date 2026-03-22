@@ -59,7 +59,7 @@ export class TreeQueryService {
             pool: {
                 max: 5,
                 min: 0,
-                idleTimeoutMillis: 30000,
+                idleTimeoutMillis: 600000,
             },
         };
 
