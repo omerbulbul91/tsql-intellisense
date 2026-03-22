@@ -237,14 +237,16 @@ export class ConnectionManager {
     private async executeSingleBatch(sql: string, messages: string[]): Promise<QueryResult[]> {
         if (!this.pool || !this.pool.connected) { throw new Error('Not connected'); }
 
+        // Use query() instead of batch() for arrayRowMode compatibility
+        // GO splitting is already handled by executeBatch()
         const request = this.pool.request();
         (request as any).arrayRowMode = true;
         request.on('info', (info: any) => {
             if (info.message) { messages.push(info.message); }
         });
 
-        const result = await request.batch(sql);
-        return this.normalizeArrayBatchResult(result);
+        const result = await request.query(sql);
+        return this.normalizeArrayQueryResults(result);
     }
 
     /**
@@ -266,18 +268,31 @@ export class ConnectionManager {
         return { rows, columns };
     }
 
-    /** Convert batch result (multiple recordsets) from array mode to named records */
-    private normalizeArrayBatchResult(result: any): QueryResult[] {
-        const recordsets = result.recordsets as any[][];
-        const columnSets = result.columns as any[];
-
-        if (!recordsets || recordsets.length === 0) {
-            return [{ rows: [], columns: [] }];
+    /**
+     * Convert query() result with arrayRowMode=true into QueryResult[].
+     * With arrayRowMode, rows are arrays, columns metadata is in result.columns.
+     * For multiple recordsets, we run a separate query per batch (GO-split already done).
+     * So typically we have a single recordset here, but handle multiple just in case.
+     */
+    private normalizeArrayQueryResults(result: any): QueryResult[] {
+        // Single recordset — the common case
+        if (!result.recordsets || result.recordsets.length <= 1) {
+            return [this.normalizeArrayResult(result)];
         }
 
-        return recordsets.map((rs, idx) => {
-            const colMeta = columnSets?.[idx];
-            const columns = this.buildColumnNames(colMeta);
+        // Multiple recordsets — each needs its own column metadata.
+        // mssql with arrayRowMode doesn't provide per-recordset columns easily,
+        // so fall back to building columns from the first row of each recordset.
+        return result.recordsets.map((rs: any[][]) => {
+            if (!rs || rs.length === 0) {
+                return { rows: [], columns: [] };
+            }
+            // Without column metadata, generate generic column names
+            const colCount = rs[0].length;
+            const columns: string[] = [];
+            for (let i = 0; i < colCount; i++) {
+                columns.push(`Column${i + 1}`);
+            }
             const rows = rs.map((row: any[]) => {
                 const obj: Record<string, any> = {};
                 for (let i = 0; i < columns.length; i++) {
