@@ -346,6 +346,7 @@ export class StyleFormProvider {
     ): string {
         const monacoBase = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'node_modules', 'monaco-editor', 'min'));
         const monacoVs = monacoBase.toString();
+        const cspSource = webview.cspSource;
         // Merge built-in + custom translations for the webview
         const allTranslations: Record<string, Record<string, string>> = { ...styleFormTranslations };
         for (const [code, dict] of Object.entries(customTranslations)) {
@@ -380,7 +381,7 @@ export class StyleFormProvider {
 <html lang="${lang}">
 <head>
     <meta charset="UTF-8">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline' ${monacoVs}/; script-src 'unsafe-inline' ${monacoVs}/; font-src ${monacoVs}/; worker-src blob:;">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline' ${cspSource}; script-src 'unsafe-inline' ${cspSource}; font-src ${cspSource}; worker-src blob:;">
     <title>Formatting Styles</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -2187,7 +2188,7 @@ export class StyleFormProvider {
     </script>
 
     <!-- Monaco Editor -->
-    <script src="${monacoVs}/loader.js"></script>
+    <script src="${monacoVs}/vs/loader.js"></script>
     <script>
         let previewEditor = null;
         let modalEditor = null;
