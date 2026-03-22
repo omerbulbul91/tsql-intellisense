@@ -256,7 +256,10 @@ export class ConnectionManager {
      * giving unnamed columns labels like "(No column name)".
      */
     private normalizeArrayResult(result: any): QueryResult {
-        const columns = this.buildColumnNames(result.columns);
+        // result.columns is [[col1, col2, ...]] (array of arrays, one per recordset)
+        // Take the first recordset's columns
+        const rawCols = Array.isArray(result.columns?.[0]) ? result.columns[0] : result.columns;
+        const columns = this.buildColumnNames(rawCols);
         const arrayRows = result.recordset || [];
         const rows = arrayRows.map((row: any[]) => {
             const obj: Record<string, any> = {};
@@ -280,19 +283,13 @@ export class ConnectionManager {
             return [this.normalizeArrayResult(result)];
         }
 
-        // Multiple recordsets — each needs its own column metadata.
-        // mssql with arrayRowMode doesn't provide per-recordset columns easily,
-        // so fall back to building columns from the first row of each recordset.
-        return result.recordsets.map((rs: any[][]) => {
+        // Multiple recordsets — result.columns is [[cols0], [cols1], ...]
+        return result.recordsets.map((rs: any[][], idx: number) => {
             if (!rs || rs.length === 0) {
                 return { rows: [], columns: [] };
             }
-            // Without column metadata, generate generic column names
-            const colCount = rs[0].length;
-            const columns: string[] = [];
-            for (let i = 0; i < colCount; i++) {
-                columns.push(`Column${i + 1}`);
-            }
+            const rawCols = result.columns?.[idx];
+            const columns = this.buildColumnNames(rawCols);
             const rows = rs.map((row: any[]) => {
                 const obj: Record<string, any> = {};
                 for (let i = 0; i < columns.length; i++) {
