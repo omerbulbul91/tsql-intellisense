@@ -4,13 +4,27 @@ import { ConnectionManager, BatchResult, QueryResult } from '../connection/conne
 export class QueryRunner implements vscode.WebviewViewProvider {
     private webviewView: vscode.WebviewView | null = null;
     private lastResult: BatchResult | null = null;
+    /** Per-document query results — keyed by document URI string */
+    private documentResults = new Map<string, BatchResult>();
     private _onQueryExecuted = new vscode.EventEmitter<{ sql: string; result: BatchResult }>();
     public readonly onQueryExecuted = this._onQueryExecuted.event;
 
     /** Tracks which database each document belongs to (URI → {profileName, dbName}) */
     private documentDbMap = new Map<string, { profileName: string; dbName: string } | null>();
 
-    constructor(private connectionManager: ConnectionManager) {}
+    constructor(private connectionManager: ConnectionManager) {
+        // Switch query results when active editor changes
+        vscode.window.onDidChangeActiveTextEditor((editor) => {
+            if (!editor || !this.webviewView) { return; }
+            const key = editor.document.uri.toString();
+            const result = this.documentResults.get(key);
+            if (result) {
+                this.webviewView.webview.html = this.buildHtml(result);
+            } else {
+                this.webviewView.webview.html = this.buildEmptyHtml();
+            }
+        });
+    }
 
     /** Associate a document with a specific database (or null for server-level) */
     setDocumentDatabase(uri: vscode.Uri, info: { profileName: string; dbName: string } | null): void {
@@ -101,6 +115,7 @@ export class QueryRunner implements vscode.WebviewViewProvider {
         );
 
         this.lastResult = result;
+        this.documentResults.set(editor.document.uri.toString(), result);
         this.showResults(result);
         if (!result.error) {
             this._onQueryExecuted.fire({ sql, result });
@@ -166,6 +181,8 @@ export class QueryRunner implements vscode.WebviewViewProvider {
         );
 
         this.lastResult = result;
+        const editor = vscode.window.activeTextEditor;
+        if (editor) { this.documentResults.set(editor.document.uri.toString(), result); }
         this.showResults(result);
         if (!result.error) {
             this._onQueryExecuted.fire({ sql, result });
