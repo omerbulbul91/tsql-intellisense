@@ -262,19 +262,22 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(
         vscode.window.onDidChangeActiveTextEditor(editor => {
             if (!editor || editor.document.languageId !== 'sql') { return; }
-            const docDb = queryRunner.getDocumentDatabase(editor.document.uri);
+            let docDb = queryRunner.getDocumentDatabase(editor.document.uri);
             if (!docDb) {
-                // First time this doc becomes active — associate with current DB
-                const current = connectionManager.currentProfile;
-                if (current) {
-                    queryRunner.setDocumentDatabase(editor.document.uri, {
-                        profileName: current.name,
-                        dbName: current.database,
-                    });
+                // Try to parse from connection header comment
+                const firstLine = editor.document.lineAt(0).text;
+                const header = parseConnectionHeader(firstLine);
+                if (header) {
+                    docDb = { profileName: header.profileName, dbName: header.database };
+                    queryRunner.setDocumentDatabase(editor.document.uri, docDb);
+                } else {
+                    // No header, no association — associate with current DB
+                    const current = connectionManager.currentProfile;
+                    if (current) {
+                        docDb = { profileName: current.name, dbName: current.database };
+                        queryRunner.setDocumentDatabase(editor.document.uri, docDb);
+                    }
                 }
-            } else {
-                // Switch DB context for IntelliSense — doesn't affect tree or status bar
-                connectionManager.softSwitchDatabase(docDb.dbName).catch(() => {});
             }
             codeLensProvider.refresh();
         })
@@ -1691,13 +1694,16 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.commands.executeCommand('setContext', 'tsqlIntellisense.connected', !!profile);
         if (profile) {
             context.globalState.update('lastConnectionName', profile.name);
-            // Update active document's association
+            // Only set document association if the document has NO existing association
             const editor = vscode.window.activeTextEditor;
             if (editor && editor.document.languageId === 'sql') {
-                queryRunner.setDocumentDatabase(editor.document.uri, {
-                    profileName: profile.name,
-                    dbName: profile.database,
-                });
+                const existing = queryRunner.getDocumentDatabase(editor.document.uri);
+                if (!existing) {
+                    queryRunner.setDocumentDatabase(editor.document.uri, {
+                        profileName: profile.name,
+                        dbName: profile.database,
+                    });
+                }
             }
         } else {
             schemaCacheManager.active?.stopAutoRefresh();
