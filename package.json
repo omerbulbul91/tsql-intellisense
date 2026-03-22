@@ -107,6 +107,12 @@
         "category": "T-SQL"
       },
       {
+        "command": "tsql-intellisense.openSnippetManager",
+        "title": "Snippet Manager",
+        "icon": "$(symbol-snippet)",
+        "category": "T-SQL"
+      },
+      {
         "command": "tsql-intellisense.formatSql",
         "title": "%command.formatSql%",
         "category": "T-SQL"
