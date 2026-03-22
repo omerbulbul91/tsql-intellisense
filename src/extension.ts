@@ -1087,22 +1087,20 @@ export function activate(context: vscode.ExtensionContext) {
             });
             if (!pickedConn) { return; }
 
-            // Step 2: Pick database for selected connection
+            // Step 2: Pick database — connect via TreeQueryService pool if needed
             let dbNames: string[] = [];
-            if (pickedConn.isActive) {
-                // Active connection: try live query
-                try {
-                    const result = await connectionManager.executeQuery(
-                        `SELECT name FROM sys.databases WHERE state_desc = 'ONLINE' ORDER BY name`
-                    );
-                    dbNames = result.rows.map(r => r['name'] as string);
-                } catch {
-                    // Fallback: show just the profile's configured default DB
-                    const profile = savedProfiles.find((p: any) => p.name === pickedConn.profileName);
-                    if (profile?.database) { dbNames = [profile.database]; }
+            try {
+                if (!treeQueryService.isConnected(pickedConn.profileName)) {
+                    await treeQueryService.connect(pickedConn.profileName);
                 }
-            } else {
-                // Non-active connection: show just the profile's configured default DB
+                const result = await treeQueryService.execute(
+                    `SELECT name FROM sys.databases WHERE state_desc = 'ONLINE' ORDER BY name`,
+                    undefined,
+                    pickedConn.profileName
+                );
+                dbNames = result.rows.map(r => r['name'] as string);
+            } catch {
+                // Fallback: show just the profile's configured default DB
                 const profile = savedProfiles.find((p: any) => p.name === pickedConn.profileName);
                 if (profile?.database) { dbNames = [profile.database]; }
             }
