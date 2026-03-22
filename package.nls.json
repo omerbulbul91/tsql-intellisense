@@ -82,6 +82,7 @@
   "config.connections.databaseProjects": "Per-database project paths: { \"DbName\": \"c:\\\\path\\\\to\\\\project\" }",
   "config.autoRefreshMinutes": "Auto-refresh schema cache interval in minutes (0 to disable)",
   "config.resultDisplayMode": "How to display multiple result sets: 'tabs' (switch between tabs) or 'stacked' (all visible, vertically)",
+  "config.gridLibrary": "Grid library for query results: 'tabulator', 'ag-grid', or 'handsontable'",
   "config.queryShortcuts": "SSMS-style query shortcuts. Use @WORD as placeholder for the word under cursor.",
   "config.queryShortcuts.key": "Shortcut key label (for display only)",
   "config.queryShortcuts.query": "SQL query to execute. @WORD = word under cursor",

@@ -1070,6 +1070,16 @@
             "default": "stacked",
             "description": "%config.resultDisplayMode%"
           },
+          "tsql-intellisense.gridLibrary": {
+            "type": "string",
+            "enum": [
+              "tabulator",
+              "ag-grid",
+              "handsontable"
+            ],
+            "default": "tabulator",
+            "description": "%config.gridLibrary%"
+          },
           "tsql-intellisense.queryShortcuts": {
             "type": "array",
             "description": "%config.queryShortcuts%",
@@ -1119,7 +1129,9 @@
   "dependencies": {
     "monaco-editor": "^0.55.1",
     "mssql": "^12.2.1",
-    "tabulator-tables": "^6.4.0"
+    "tabulator-tables": "^6.4.0",
+    "ag-grid-community": "^33.0.0",
+    "handsontable": "^14.6.1"
   },
   "devDependencies": {
     "@types/mssql": "^9.1.9",

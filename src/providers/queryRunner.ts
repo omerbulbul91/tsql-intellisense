@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { ConnectionManager, BatchResult, QueryResult } from '../connection/connectionManager';
+import { createGridRenderer } from './grids/gridRenderer';
 
 export class QueryRunner implements vscode.WebviewViewProvider {
     private webviewView: vscode.WebviewView | null = null;
@@ -46,12 +47,22 @@ export class QueryRunner implements vscode.WebviewViewProvider {
 
         const localRoots: vscode.Uri[] = [];
         if (this.extensionUri) {
+            // Allow all grid libraries' assets
             localRoots.push(vscode.Uri.joinPath(this.extensionUri, 'node_modules', 'tabulator-tables'));
+            localRoots.push(vscode.Uri.joinPath(this.extensionUri, 'node_modules', 'ag-grid-community'));
+            localRoots.push(vscode.Uri.joinPath(this.extensionUri, 'node_modules', 'handsontable'));
         }
         webviewView.webview.options = {
             enableScripts: true,
             localResourceRoots: localRoots.length > 0 ? localRoots : undefined,
         };
+
+        // Handle messages from webview
+        webviewView.webview.onDidReceiveMessage((msg) => {
+            if (msg.type === 'openInExcel') {
+                this.openInExcel(msg.data);
+            }
+        });
 
         // Show last result if available
         if (this.lastResult) {
@@ -246,31 +257,29 @@ export class QueryRunner implements vscode.WebviewViewProvider {
 <body>Run a query (F5) to see results here</body></html>`;
     }
 
-    private getTabulatorUris(webview: vscode.Webview): { js: vscode.Uri; css: vscode.Uri } | null {
-        if (!this.extensionUri) { return null; }
-        const base = vscode.Uri.joinPath(this.extensionUri, 'node_modules', 'tabulator-tables', 'dist');
-        return {
-            js: webview.asWebviewUri(vscode.Uri.joinPath(base, 'js', 'tabulator.min.js')),
-            css: webview.asWebviewUri(vscode.Uri.joinPath(base, 'css', 'tabulator_midnight.min.css')),
-        };
-    }
-
     private buildHtml(result: BatchResult): string {
-        if (!this.webviewView) { return this.buildEmptyHtml(); }
-        const uris = this.getTabulatorUris(this.webviewView.webview);
+        if (!this.webviewView || !this.extensionUri) { return this.buildEmptyHtml(); }
 
         const config = vscode.workspace.getConfiguration('tsql-intellisense');
         const displayMode = config.get<string>('resultDisplayMode', 'tabs');
+        const gridLibrary = config.get<string>('gridLibrary', 'tabulator');
         const messagesHtml = this.buildMessages(result);
-        const resultSetsJson = JSON.stringify(result.resultSets.map(rs => ({ columns: rs.columns, rows: rs.rows })));
         const isStacked = displayMode === 'stacked' && result.resultSets.length > 1;
+
+        const renderer = createGridRenderer(gridLibrary);
+        const grid = renderer.render(
+            this.webviewView.webview,
+            this.extensionUri,
+            result.resultSets.map(rs => ({ columns: rs.columns, rows: rs.rows })),
+            isStacked,
+        );
 
         return `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-${uris ? `<link rel="stylesheet" href="${uris.css}">` : ''}
+${grid.headHtml}
 <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body {
@@ -345,23 +354,42 @@ ${uris ? `<link rel="stylesheet" href="${uris.css}">` : ''}
     }
     /* ── Grid containers ─────────────────────────── */
     .grid-wrapper { flex: 1; overflow: hidden; }
-    .grid-container { width: 100%; height: 100%; }
-    .stacked-wrapper { flex: 1; overflow: auto; }
-    .stacked-section { margin-bottom: 4px; }
+    .grid-container { width: 100%; height: 100%; overflow: auto; }
+    .stacked-wrapper { flex: 1; overflow: auto; display: flex; flex-direction: column; }
+    .stacked-section { flex: 1; min-height: 100px; display: flex; flex-direction: column; overflow: hidden; }
     .stacked-header {
-        padding: 4px 8px; font-size: 11px; font-weight: bold;
+        display: flex; align-items: center; gap: 6px;
+        padding: 2px 8px; font-size: 11px;
         background: var(--vscode-editorWidget-background);
-        border-bottom: 2px solid var(--vscode-focusBorder);
-        color: var(--vscode-foreground);
+        border-bottom: 1px solid var(--vscode-editorWidget-border);
+        color: var(--vscode-foreground); flex-shrink: 0;
     }
-    .stacked-grid { width: 100%; }
-    /* ── Status bar ──────────────────────────────── */
-    .status-bar {
-        display: flex; align-items: center; gap: 12px; padding: 2px 8px;
-        background: var(--vscode-editorWidget-background);
-        border-top: 1px solid var(--vscode-editorWidget-border);
-        flex-shrink: 0; font-size: 11px;
-        color: var(--vscode-descriptionForeground);
+    .stacked-header .sh-title { font-weight: bold; white-space: nowrap; }
+    .stacked-header input[type="text"] {
+        flex: 1; max-width: 180px; padding: 1px 5px; font-size: 10px;
+        background: var(--vscode-input-background);
+        color: var(--vscode-input-foreground);
+        border: 1px solid var(--vscode-input-border, transparent);
+        border-radius: 2px; outline: none;
+    }
+    .stacked-header input[type="text"]:focus { border-color: var(--vscode-focusBorder); }
+    .stacked-header input[type="text"]::placeholder { color: var(--vscode-input-placeholderForeground); }
+    .stacked-header button {
+        padding: 1px 6px; font-size: 10px; cursor: pointer;
+        background: var(--vscode-button-secondaryBackground);
+        color: var(--vscode-button-secondaryForeground);
+        border: none; border-radius: 2px; white-space: nowrap;
+    }
+    .stacked-header button:hover { background: var(--vscode-button-secondaryHoverBackground); }
+    .stacked-grid { width: 100%; flex: 1; overflow: auto; }
+    /* ── Splitter ────────────────────────────────── */
+    .stacked-splitter {
+        height: 3px; cursor: row-resize; flex-shrink: 0;
+        background: var(--vscode-focusBorder);
+        opacity: 0.4; transition: opacity 0.15s;
+    }
+    .stacked-splitter:hover, .stacked-splitter.active {
+        opacity: 1;
     }
     /* ── Messages / Error ────────────────────────── */
     .messages {
@@ -375,145 +403,43 @@ ${uris ? `<link rel="stylesheet" href="${uris.css}">` : ''}
         background: var(--vscode-inputValidation-errorBackground);
         padding: 6px 8px; border-left: 3px solid var(--vscode-inputValidation-errorBorder);
     }
-    /* ── Tabulator VS Code theme overrides ────────── */
-    .tabulator {
-        background: var(--vscode-editor-background) !important;
-        border: none !important;
-        font-family: var(--vscode-font-family, 'Segoe UI', sans-serif) !important;
-        font-size: 12px !important;
-        color: var(--vscode-foreground) !important;
+    /* ── Context menu (common) ───────────────────── */
+    .grid-context-menu {
+        position: fixed; z-index: 2000;
+        background: rgba(43, 43, 43, 0.95);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 8px;
+        padding: 4px;
+        min-width: 220px;
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5), 0 1px 3px rgba(0, 0, 0, 0.3);
     }
-    .tabulator .tabulator-header {
-        background: var(--vscode-editorWidget-background) !important;
-        border-bottom: 2px solid var(--vscode-editorWidget-border) !important;
-        color: var(--vscode-foreground) !important;
-    }
-    .tabulator .tabulator-header .tabulator-col {
-        background: var(--vscode-editorWidget-background) !important;
-        border-right: 1px solid var(--vscode-editorWidget-border) !important;
-    }
-    .tabulator .tabulator-header .tabulator-col:hover {
-        background: var(--vscode-list-hoverBackground) !important;
-    }
-    .tabulator .tabulator-header .tabulator-col .tabulator-col-content {
-        padding: 4px 8px !important;
-    }
-    .tabulator .tabulator-header .tabulator-col .tabulator-header-filter input {
-        background: var(--vscode-input-background) !important;
-        color: var(--vscode-input-foreground) !important;
-        border: 1px solid var(--vscode-input-border, transparent) !important;
-        border-radius: 2px !important;
-        padding: 1px 4px !important;
-        font-size: 11px !important;
-        outline: none !important;
-    }
-    .tabulator .tabulator-header .tabulator-col .tabulator-header-filter input:focus {
-        border-color: var(--vscode-focusBorder) !important;
-    }
-    .tabulator .tabulator-header .tabulator-col .tabulator-header-filter input::placeholder {
-        color: var(--vscode-input-placeholderForeground) !important;
-    }
-    .tabulator .tabulator-tableholder {
-        background: var(--vscode-editor-background) !important;
-    }
-    .tabulator-row {
-        border-bottom: 1px solid var(--vscode-editorWidget-border) !important;
-        background: var(--vscode-editor-background) !important;
-        color: var(--vscode-foreground) !important;
-    }
-    .tabulator-row:hover {
-        background: var(--vscode-list-hoverBackground) !important;
-    }
-    .tabulator-row.tabulator-selected {
-        background: var(--vscode-list-activeSelectionBackground) !important;
-        color: var(--vscode-list-activeSelectionForeground) !important;
-    }
-    .tabulator-row .tabulator-cell {
-        border-right: 1px solid var(--vscode-editorWidget-border) !important;
-        padding: 2px 8px !important;
-    }
-    .tabulator-row .tabulator-cell.cell-selected {
-        background: rgba(0, 120, 212, 0.15) !important;
-    }
-    .tabulator-row .tabulator-cell.cell-active {
-        outline: 2px solid var(--vscode-focusBorder) !important;
-        outline-offset: -2px;
-    }
-    .tabulator-row .tabulator-cell.null-val {
-        color: var(--vscode-descriptionForeground) !important;
-        font-style: italic;
-    }
-    .tabulator .tabulator-footer {
-        background: var(--vscode-editorWidget-background) !important;
-        border-top: 1px solid var(--vscode-editorWidget-border) !important;
-        color: var(--vscode-descriptionForeground) !important;
-    }
-    /* checkbox styling */
-    .tabulator-row .tabulator-cell input[type="checkbox"] {
-        accent-color: var(--vscode-focusBorder);
+    .grid-context-menu .ctx-item {
+        padding: 5px 12px;
+        font-size: 12.5px;
+        color: #e0e0e0;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
         cursor: pointer;
+        border-radius: 5px;
+        margin: 1px 0;
     }
-    /* ── Header menu (funnel) icon ───────────────── */
-    .tabulator .tabulator-header .tabulator-col .tabulator-header-popup-button {
-        color: var(--vscode-descriptionForeground) !important;
-        opacity: 0.5;
-        padding: 0 2px !important;
-        font-size: 10px !important;
+    .grid-context-menu .ctx-item:hover {
+        background: rgba(255, 255, 255, 0.1);
+        color: #fff;
     }
-    .tabulator .tabulator-header .tabulator-col .tabulator-header-popup-button:hover {
-        opacity: 1;
+    .grid-context-menu .ctx-sep {
+        height: 1px;
+        background: rgba(255, 255, 255, 0.08);
+        margin: 4px 8px;
     }
-    .tabulator .tabulator-header .tabulator-col.has-filter .tabulator-header-popup-button {
-        opacity: 1;
-        color: var(--vscode-focusBorder) !important;
-    }
-    /* ── Header menu popup ───────────────────────── */
-    .tabulator-popup {
-        background: var(--vscode-menu-background, #252526) !important;
-        border: 1px solid var(--vscode-menu-border, #454545) !important;
-        border-radius: 4px !important;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.4) !important;
-        padding: 6px !important;
-    }
-    .tabulator-popup .filter-popup {
-        display: flex; flex-direction: column; gap: 4px; min-width: 160px;
-    }
-    .tabulator-popup .filter-popup input {
-        padding: 3px 6px; font-size: 11px;
-        background: var(--vscode-input-background);
-        color: var(--vscode-input-foreground);
-        border: 1px solid var(--vscode-input-border, transparent);
-        border-radius: 2px; outline: none;
-    }
-    .tabulator-popup .filter-popup input:focus {
-        border-color: var(--vscode-focusBorder);
-    }
-    .tabulator-popup .filter-popup input::placeholder {
-        color: var(--vscode-input-placeholderForeground);
-    }
-    .tabulator-popup .filter-popup .filter-actions {
-        display: flex; gap: 4px;
-    }
-    .tabulator-popup .filter-popup .filter-actions button {
-        flex: 1; padding: 2px 6px; font-size: 10px; cursor: pointer;
-        background: var(--vscode-button-secondaryBackground);
-        color: var(--vscode-button-secondaryForeground);
-        border: none; border-radius: 2px;
-    }
-    .tabulator-popup .filter-popup .filter-actions button:hover {
-        background: var(--vscode-button-secondaryHoverBackground);
-    }
-    .tabulator-popup .filter-popup .filter-actions button.primary {
-        background: var(--vscode-button-background);
-        color: var(--vscode-button-foreground);
-    }
-    .tabulator-popup .filter-popup .filter-actions button.primary:hover {
-        background: var(--vscode-button-hoverBackground);
-    }
+    ${grid.themeStyles}
 </style>
 </head>
 <body>
-    ${result.resultSets.length > 0 ? `
+    ${result.resultSets.length > 0 && !isStacked ? `
     <div class="toolbar">
         <label>Filter:</label>
         <input type="text" id="quickFilter" placeholder="Filter any column..." oninput="onQuickFilter(this.value)">
@@ -534,12 +460,18 @@ ${uris ? `<link rel="stylesheet" href="${uris.css}">` : ''}
     ${isStacked ? `
         <div class="stacked-wrapper">
             ${result.resultSets.map((rs, i) => `
+                ${i > 0 ? '<div class="stacked-splitter" data-index="' + i + '"></div>' : ''}
                 <div class="stacked-section">
-                    <div class="stacked-header">Result ${i + 1} (${rs.rows.length} rows)</div>
+                    <div class="stacked-header">
+                        <span class="sh-title">Result ${i + 1} (${rs.rows.length} rows | ${(result.elapsed / 1000).toFixed(2)}s)</span>
+                        <input type="text" placeholder="Filter..." oninput="onStackedFilter(${i}, this.value)">
+                        <button onclick="toggleStackedColumnChooser(event, ${i})">Columns</button>
+                        <button onclick="exportStackedCsv(${i})">CSV</button>
+                    </div>
                     <div id="grid-${i}" class="stacked-grid"></div>
                 </div>
             `).join('')}
-            ${messagesHtml ? `<div class="stacked-section"><div class="stacked-header">Messages</div>${messagesHtml}</div>` : ''}
+            ${messagesHtml ? `<div class="stacked-section" style="flex:0;min-height:auto"><div class="stacked-header"><span class="sh-title">Messages</span></div>${messagesHtml}</div>` : ''}
         </div>
     ` : `
         ${result.resultSets.map((_, i) => `
@@ -552,172 +484,78 @@ ${uris ? `<link rel="stylesheet" href="${uris.css}">` : ''}
         </div>
     `}
     ${!isStacked && result.resultSets.length <= 1 ? messagesHtml : ''}
-    <div class="status-bar">
-        <span id="status-info">${this.buildInfoText(result)}</span>
-    </div>
-${uris ? `<script src="${uris.js}"></script>` : ''}
+<script>const vscodeApi = acquireVsCodeApi();</script>
+${grid.initScript}
 <script>
-    const vscodeApi = acquireVsCodeApi();
-    const resultSets = ${resultSetsJson};
-    const tables = [];
     const isStacked = ${isStacked};
-    const totalRows = ${result.resultSets.reduce((s, rs) => s + rs.rows.length, 0)};
-    const elapsed = '${(result.elapsed / 1000).toFixed(2)}s';
 
-    resultSets.forEach((rs, i) => {
-        if (rs.columns.length === 0) return;
-        const el = document.getElementById('grid-' + i);
-        if (!el) return;
-
-        ${isStacked ? `
-        const rowH = 28, headerH = 56;
-        el.style.height = Math.min(headerH + rs.rows.length * rowH, 400) + 'px';
-        ` : ''}
-
-        const columns = [
-            { formatter: "rowSelection", titleFormatter: "rowSelection", headerSort: false, resizable: false, width: 30, hozAlign: "center" },
-            ...rs.columns.map(col => ({
-                title: col,
-                field: col,
-                sorter: "string",
-                resizable: true,
-                headerPopup: function(e, column) {
-                    return buildFilterMenu(column);
-                },
-                headerPopupIcon: "<svg width='10' height='10' viewBox='0 0 24 24' fill='currentColor'><path d='M3 4h18l-7 8v5l-4 2v-7z'/></svg>",
-                formatter: function(cell) {
-                    const v = cell.getValue();
-                    if (v === null || v === undefined) {
-                        cell.getElement().classList.add('null-val');
-                        return 'NULL';
-                    }
-                    return v;
-                },
-            })),
-        ];
-
-        const table = new Tabulator(el, {
-            data: rs.rows,
-            columns: columns,
-            layout: "fitDataFill",
-            height: isStacked ? undefined : "100%",
-            selectable: true,
-            selectableRangeMode: "click",
-            clipboard: true,
-            clipboardCopyRowRange: "selected",
-            clipboardCopyConfig: { columnHeaders: true },
-            headerSortTristate: true,
-            movableColumns: false,
-            resizableColumnFit: true,
-            rowHeight: 25,
-            headerHeight: 28,
-            dataFiltered: function(filters, rows) {
-                updateStatus(rows.length);
-            },
-        });
-
-        tables.push(table);
+    // ── Common: Keyboard shortcuts ──────────────────
+    document.addEventListener('keydown', (e) => {
+        const idx = Math.max(0, typeof currentTab !== 'undefined' ? currentTab : 0);
+        if ((e.ctrlKey || e.metaKey) && e.key === 'c' && !e.shiftKey) {
+            e.preventDefault();
+            if (gridApi && gridApi.copy) gridApi.copy(idx, false);
+        }
+        if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'C') {
+            e.preventDefault();
+            if (gridApi && gridApi.copy) gridApi.copy(idx, true);
+        }
+        if ((e.ctrlKey || e.metaKey) && e.key === 'a') {
+            e.preventDefault();
+            if (gridApi && gridApi.selectAllRows) gridApi.selectAllRows(idx);
+        }
     });
 
-    // ── Column Filter Menu (funnel) ───────────────────
-    const columnFilters = {};
-    function buildFilterMenu(column) {
-        const field = column.getField();
-        const container = document.createElement('div');
-        container.className = 'filter-popup';
-        const input = document.createElement('input');
-        input.type = 'text';
-        input.placeholder = 'Filter ' + field + '...';
-        input.value = columnFilters[field] || '';
-        input.addEventListener('keydown', (e) => { if (e.key === 'Enter') applyBtn.click(); });
-        const actions = document.createElement('div');
-        actions.className = 'filter-actions';
-        const applyBtn = document.createElement('button');
-        applyBtn.className = 'primary';
-        applyBtn.textContent = 'Apply';
-        applyBtn.onclick = () => {
-            const val = input.value.trim();
-            const table = column.getTable();
-            const colEl = column.getElement();
-            if (val) {
-                columnFilters[field] = val;
-                table.addFilter(field, "like", val);
-                colEl.classList.add('has-filter');
-            } else {
-                delete columnFilters[field];
-                table.removeFilter(field, "like", columnFilters[field]);
-                table.clearFilter();
-                // re-apply remaining filters
-                Object.entries(columnFilters).forEach(([f, v]) => table.addFilter(f, "like", v));
-                colEl.classList.remove('has-filter');
-            }
-        };
-        const clearBtn = document.createElement('button');
-        clearBtn.textContent = 'Clear';
-        clearBtn.onclick = () => {
-            input.value = '';
-            delete columnFilters[field];
-            const table = column.getTable();
-            table.removeFilter(field, "like");
-            column.getElement().classList.remove('has-filter');
-        };
-        actions.appendChild(applyBtn);
-        actions.appendChild(clearBtn);
-        container.appendChild(input);
-        container.appendChild(actions);
-        setTimeout(() => input.focus(), 50);
-        return container;
-    }
-
-    // ── Quick Filter ────────────────────────────────
+    // ── Common: Quick Filter ────────────────────────
     function onQuickFilter(value) {
-        tables.forEach(table => {
-            if (!value) {
-                table.clearFilter();
-                return;
-            }
-            const rs = resultSets[tables.indexOf(table)];
-            if (!rs) return;
-            const filters = rs.columns.map(col => ({
-                field: col,
-                type: "like",
-                value: value,
-            }));
-            table.setFilter([filters]);
-        });
+        if (!gridApi) return;
+        const count = gridApi.getTableCount ? gridApi.getTableCount() : 0;
+        for (let i = 0; i < count; i++) {
+            gridApi.setQuickFilter(i, value);
+        }
     }
 
-    // ── Column Chooser ──────────────────────────────
+    // ── Common: Column Chooser ──────────────────────
     let chooserEl = null;
     function toggleColumnChooser(event) {
         if (chooserEl) { chooserEl.remove(); chooserEl = null; return; }
-        const table = tables[Math.max(0, currentTab || 0)];
-        if (!table) return;
-        const cols = table.getColumns().filter(c => c.getField());
+        if (!gridApi) return;
+        const idx = Math.max(0, typeof currentTab !== 'undefined' ? currentTab : 0);
+        buildChooserPopup(event, idx);
+    }
+    function toggleStackedColumnChooser(event, idx) {
+        if (chooserEl) { chooserEl.remove(); chooserEl = null; return; }
+        if (!gridApi) return;
+        buildChooserPopup(event, idx);
+    }
+    function buildChooserPopup(event, idx) {
+        const cols = gridApi.getColumns ? gridApi.getColumns(idx) : [];
+        if (cols.length === 0) return;
         chooserEl = document.createElement('div');
         chooserEl.className = 'col-chooser';
         cols.forEach(col => {
+            const field = col.field || col;
+            const title = col.title || col.field || col;
             const lbl = document.createElement('label');
             const cb = document.createElement('input');
             cb.type = 'checkbox';
-            cb.checked = col.isVisible();
-            cb.onchange = () => col.isVisible() ? col.hide() : col.show();
+            cb.checked = gridApi.isColumnVisible ? gridApi.isColumnVisible(idx, field) : true;
+            cb.onchange = () => { if (gridApi.toggleColumnVisibility) gridApi.toggleColumnVisibility(idx, field); };
             lbl.appendChild(cb);
-            lbl.appendChild(document.createTextNode(col.getDefinition().title || col.getField()));
+            lbl.appendChild(document.createTextNode(title));
             chooserEl.appendChild(lbl);
         });
         const actions = document.createElement('div');
         actions.className = 'col-chooser-actions';
         const showAll = document.createElement('button');
         showAll.textContent = 'Show All';
-        showAll.onclick = () => { cols.forEach(c => c.show()); chooserEl.querySelectorAll('input').forEach(cb => cb.checked = true); };
+        showAll.onclick = () => { if (gridApi.showAllColumns) gridApi.showAllColumns(idx); chooserEl.querySelectorAll('input').forEach(cb => cb.checked = true); };
         const hideAll = document.createElement('button');
         hideAll.textContent = 'Hide All';
-        hideAll.onclick = () => { cols.forEach(c => c.hide()); chooserEl.querySelectorAll('input').forEach(cb => cb.checked = false); };
+        hideAll.onclick = () => { if (gridApi.hideAllColumns) gridApi.hideAllColumns(idx); chooserEl.querySelectorAll('input').forEach(cb => cb.checked = false); };
         actions.appendChild(showAll);
         actions.appendChild(hideAll);
         chooserEl.appendChild(actions);
-
         const btn = event.target;
         const rect = btn.getBoundingClientRect();
         chooserEl.style.top = rect.bottom + 2 + 'px';
@@ -725,86 +563,128 @@ ${uris ? `<script src="${uris.js}"></script>` : ''}
         document.body.appendChild(chooserEl);
     }
     document.addEventListener('click', (e) => {
-        if (chooserEl && !chooserEl.contains(e.target) && !e.target.closest('.toolbar button')) {
+        if (chooserEl && !chooserEl.contains(e.target) && !e.target.closest('.toolbar button') && !e.target.closest('.stacked-header button')) {
             chooserEl.remove(); chooserEl = null;
         }
     });
 
-    // ── Cell Selection (Click, Ctrl+Click, Shift+Click range) ──
-    let selectedCells = new Set();
-    let activeCell = null;
-    let lastClickedCell = null;
-    document.addEventListener('click', (e) => {
-        const cell = e.target.closest('.tabulator-cell');
-        if (!cell || cell.closest('.tabulator-header')) return;
-        if (cell.querySelector('input[type="checkbox"]')) return;
-
-        if (e.ctrlKey) {
-            if (selectedCells.has(cell)) {
-                selectedCells.delete(cell); cell.classList.remove('cell-selected');
-            } else {
-                selectedCells.add(cell); cell.classList.add('cell-selected');
-            }
-        } else if (e.shiftKey && lastClickedCell) {
-            // Range select between lastClickedCell and current
-            const allCells = Array.from(document.querySelectorAll('.tabulator-row .tabulator-cell:not(:first-child)'));
-            const lastIdx = allCells.indexOf(lastClickedCell);
-            const currIdx = allCells.indexOf(cell);
-            if (lastIdx >= 0 && currIdx >= 0) {
-                const [start, end] = lastIdx < currIdx ? [lastIdx, currIdx] : [currIdx, lastIdx];
-                selectedCells.forEach(c => c.classList.remove('cell-selected', 'cell-active'));
-                selectedCells.clear();
-                for (let j = start; j <= end; j++) {
-                    selectedCells.add(allCells[j]);
-                    allCells[j].classList.add('cell-selected');
-                }
-            }
-        } else {
-            selectedCells.forEach(c => c.classList.remove('cell-selected', 'cell-active'));
-            selectedCells.clear();
-            selectedCells.add(cell); cell.classList.add('cell-selected');
-        }
-        if (activeCell) activeCell.classList.remove('cell-active');
-        activeCell = cell; cell.classList.add('cell-active');
-        lastClickedCell = cell;
-    });
-
-    // ── CSV Export ───────────────────────────────────
+    // ── Common: CSV Export ───────────────────────────
     function exportCsv() {
-        const table = tables[Math.max(0, currentTab || 0)];
-        if (table) table.download("csv", "query_results.csv");
+        const idx = Math.max(0, typeof currentTab !== 'undefined' ? currentTab : 0);
+        if (gridApi && gridApi.exportCsv) gridApi.exportCsv(idx, 'query_results.csv');
+    }
+    function exportStackedCsv(idx) {
+        if (gridApi && gridApi.exportCsv) gridApi.exportCsv(idx, 'query_results_' + (idx + 1) + '.csv');
     }
 
-    // ── Status Bar ──────────────────────────────────
-    function updateStatus(filteredCount) {
-        const el = document.getElementById('status-info');
-        if (!el) return;
-        if (filteredCount < totalRows) {
-            el.textContent = filteredCount + ' of ' + totalRows + ' rows | ' + elapsed;
-        } else {
-            el.textContent = totalRows + ' rows | ' + elapsed;
-        }
+    // ── Common: Stacked filter ──────────────────────
+    function onStackedFilter(idx, value) {
+        if (gridApi && gridApi.setQuickFilter) gridApi.setQuickFilter(idx, value);
     }
 
-    // ── Tab Switching ───────────────────────────────
+    // ── Common: Context menu ────────────────────────
+    function showContextMenu(e, idx) {
+        e.preventDefault();
+        // Remove any existing menu
+        const old = document.querySelector('.grid-context-menu');
+        if (old) old.remove();
+
+        const menu = document.createElement('div');
+        menu.className = 'grid-context-menu';
+        const items = [
+            { label: 'Copy', shortcut: 'Ctrl+C', action: () => gridApi.copy(idx, false) },
+            { label: 'Copy with Headers', shortcut: 'Ctrl+Shift+C', action: () => gridApi.copy(idx, true) },
+            { label: 'Select All', shortcut: 'Ctrl+A', action: () => gridApi.selectAllRows(idx) },
+            { sep: true },
+            { label: 'Script as INSERT', action: () => gridApi.scriptAsInsert(idx) },
+            { label: 'Copy as IN clause', action: () => gridApi.copyAsInClause(idx) },
+            { label: 'Open in Excel', action: () => gridApi.openInExcel(idx) },
+        ];
+        items.forEach(item => {
+            if (item.sep) {
+                const sep = document.createElement('div');
+                sep.className = 'ctx-sep';
+                menu.appendChild(sep);
+                return;
+            }
+            const el = document.createElement('div');
+            el.className = 'ctx-item';
+            el.innerHTML = item.shortcut
+                ? item.label + "<span style='opacity:0.6;margin-left:24px'>" + item.shortcut + "</span>"
+                : item.label;
+            el.onclick = () => { menu.remove(); if (item.action) item.action(); };
+            menu.appendChild(el);
+        });
+        menu.style.left = e.clientX + 'px';
+        menu.style.top = e.clientY + 'px';
+        document.body.appendChild(menu);
+        // Close on outside click
+        setTimeout(() => {
+            document.addEventListener('click', function handler() {
+                menu.remove();
+                document.removeEventListener('click', handler);
+            });
+        }, 0);
+    }
+
+    // ── Common: Splitter drag ───────────────────────
+    if (isStacked) {
+        document.querySelectorAll('.stacked-splitter').forEach(splitter => {
+            let startY, prevSection, nextSection, prevH, nextH;
+            splitter.addEventListener('mousedown', (e) => {
+                e.preventDefault();
+                startY = e.clientY;
+                prevSection = splitter.previousElementSibling;
+                nextSection = splitter.nextElementSibling;
+                prevH = prevSection.offsetHeight;
+                nextH = nextSection.offsetHeight;
+                splitter.classList.add('active');
+                const onMove = (e2) => {
+                    const dy = e2.clientY - startY;
+                    const newPrev = Math.max(80, prevH + dy);
+                    const newNext = Math.max(80, nextH - dy);
+                    prevSection.style.flex = 'none';
+                    nextSection.style.flex = 'none';
+                    prevSection.style.height = newPrev + 'px';
+                    nextSection.style.height = newNext + 'px';
+                };
+                const onUp = () => {
+                    splitter.classList.remove('active');
+                    document.removeEventListener('mousemove', onMove);
+                    document.removeEventListener('mouseup', onUp);
+                    if (gridApi && gridApi.redrawAll) gridApi.redrawAll();
+                };
+                document.addEventListener('mousemove', onMove);
+                document.addEventListener('mouseup', onUp);
+            });
+        });
+    }
+
+    // ── Common: Tab Switching ───────────────────────
     ${!isStacked ? `
     let currentTab = 0;
     function switchTab(index) {
         document.querySelectorAll('.tab').forEach((t, i) => {
             t.classList.toggle('active', i === (index === -1 ? document.querySelectorAll('.tab').length - 1 : index));
         });
-        resultSets.forEach((_, i) => {
+        const rsCount = gridApi ? gridApi.getTableCount() : 0;
+        for (let i = 0; i < rsCount; i++) {
             const el = document.getElementById('tab-' + i);
             if (el) el.style.display = i === index ? '' : 'none';
-        });
+        }
         const msgEl = document.getElementById('tab-messages');
         if (msgEl) msgEl.style.display = index === -1 ? '' : 'none';
         currentTab = index;
-        if (index >= 0 && tables[index]) {
-            setTimeout(() => tables[index].redraw(true), 50);
+        if (index >= 0 && gridApi && gridApi.redraw) {
+            setTimeout(() => gridApi.redraw(index), 50);
         }
     }
     ` : ''}
+
+    // Disable browser default context menu
+    document.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+    });
 </script>
 </body>
 </html>`;
@@ -824,23 +704,30 @@ ${uris ? `<script src="${uris.js}"></script>` : ''}
         return html;
     }
 
-    private buildInfoText(result: BatchResult): string {
-        const parts: string[] = [];
-        if (result.resultSets.length > 0) {
-            const totalRows = result.resultSets.reduce((sum, rs) => sum + rs.rows.length, 0);
-            parts.push(`${totalRows} rows`);
-        }
-        parts.push(`${(result.elapsed / 1000).toFixed(2)}s`);
-        if (result.error) { parts.push('ERROR'); }
-        return parts.join(' | ');
-    }
-
     private escapeHtml(text: string): string {
         return text
             .replace(/&/g, '&amp;')
             .replace(/</g, '&lt;')
             .replace(/>/g, '&gt;')
             .replace(/"/g, '&quot;');
+    }
+
+    private async openInExcel(data: string): Promise<void> {
+        const os = require('os');
+        const path = require('path');
+        const fs = require('fs');
+        const tmpFile = path.join(os.tmpdir(), `tsql_result_${Date.now()}.csv`);
+        const csvData = data.split('\n').map((line: string) =>
+            line.split('\t').map((cell: string) => {
+                if (cell.includes(',') || cell.includes('"') || cell.includes('\n')) {
+                    return '"' + cell.replace(/"/g, '""') + '"';
+                }
+                return cell;
+            }).join(',')
+        ).join('\n');
+        fs.writeFileSync(tmpFile, '\uFEFF' + csvData, 'utf-8');
+        const uri = vscode.Uri.file(tmpFile);
+        await vscode.env.openExternal(uri);
     }
 
     dispose(): void {
