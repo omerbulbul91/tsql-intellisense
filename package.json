@@ -372,12 +372,12 @@
         },
         {
           "command": "tsql-intellisense.newQueryFromTree",
-          "when": "viewItem == Database || viewItem == Schema",
+          "when": "viewItem == Database || viewItem == Schema || viewItem == ConnectionConnected",
           "group": "inline"
         },
         {
           "command": "tsql-intellisense.newQueryFromTree",
-          "when": "viewItem == Database || viewItem == Schema"
+          "when": "viewItem == Database || viewItem == Schema || viewItem =~ /^Connection/"
         },
         {
           "command": "tsql-intellisense.loadDatabaseSchema",
