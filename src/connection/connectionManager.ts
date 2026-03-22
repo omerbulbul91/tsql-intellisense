@@ -185,6 +185,7 @@ export class ConnectionManager {
         if (!this.pool || !this.pool.connected) { throw new Error('Not connected to database'); }
 
         const request = this.pool.request();
+        (request as any).arrayRowMode = true; // get rows as arrays for proper unnamed column handling
         if (params) {
             for (const [name, param] of Object.entries(params)) {
                 request.input(name, param.type, param.value);
@@ -192,9 +193,7 @@ export class ConnectionManager {
         }
 
         const result = await request.query(sql);
-        const recordset = result.recordset || [];
-        const { columns, rows } = this.normalizeRecordset(recordset);
-        return { rows, columns };
+        return this.normalizeArrayResult(result);
     }
 
     /** Execute a SQL batch (supports GO separators, captures messages) */
@@ -239,80 +238,72 @@ export class ConnectionManager {
         if (!this.pool || !this.pool.connected) { throw new Error('Not connected'); }
 
         const request = this.pool.request();
+        (request as any).arrayRowMode = true;
         request.on('info', (info: any) => {
             if (info.message) { messages.push(info.message); }
         });
 
         const result = await request.batch(sql);
-        const recordsets = result.recordsets as any[][];
-
-        if (recordsets.length === 0) {
-            return [{ rows: [], columns: [] }];
-        }
-
-        return recordsets.map(rs => this.normalizeRecordset(rs));
+        return this.normalizeArrayBatchResult(result);
     }
 
     /**
-     * Normalize a recordset: handle unnamed columns (@@SERVERNAME, DB_NAME() etc.)
-     * mssql gives unnamed columns an empty string key — multiple unnamed cols collide.
-     * We use recordset.columns metadata to get proper column info.
+     * With arrayRowMode=true, result.recordset is an array of arrays (not objects).
+     * result.columns contains ordered column metadata with name/index info.
+     * We convert array rows to Record<string, any> with proper column names,
+     * giving unnamed columns labels like "(No column name)".
      */
-    private normalizeRecordset(recordset: any): { rows: Record<string, any>[]; columns: string[] } {
-        if (!recordset || recordset.length === 0) {
-            // Try to get columns from metadata even if no rows
-            if (recordset?.columns) {
-                return { rows: [], columns: Object.keys(recordset.columns) };
+    private normalizeArrayResult(result: any): QueryResult {
+        const columns = this.buildColumnNames(result.columns);
+        const arrayRows = result.recordset || [];
+        const rows = arrayRows.map((row: any[]) => {
+            const obj: Record<string, any> = {};
+            for (let i = 0; i < columns.length; i++) {
+                obj[columns[i]] = i < row.length ? row[i] : null;
             }
-            return { rows: [], columns: [] };
+            return obj;
+        });
+        return { rows, columns };
+    }
+
+    /** Convert batch result (multiple recordsets) from array mode to named records */
+    private normalizeArrayBatchResult(result: any): QueryResult[] {
+        const recordsets = result.recordsets as any[][];
+        const columnSets = result.columns as any[];
+
+        if (!recordsets || recordsets.length === 0) {
+            return [{ rows: [], columns: [] }];
         }
 
-        // mssql's recordset.columns is an object with column metadata
-        // Each key is the column name (or '' for unnamed), with index/name/type info
-        const colMeta = recordset.columns;
-        if (!colMeta) {
-            // Fallback: use row keys
-            return { rows: recordset, columns: Object.keys(recordset[0]) };
-        }
-
-        // Build ordered column list from metadata
-        const metaEntries = Object.entries(colMeta) as [string, any][];
-        metaEntries.sort((a, b) => (a[1].index ?? 0) - (b[1].index ?? 0));
-
-        const columns: string[] = [];
-        const keyMap = new Map<string, string>(); // original key → display name
-        let unnamedCount = 0;
-
-        for (const [key, meta] of metaEntries) {
-            let displayName = key;
-            if (!key || key === '') {
-                unnamedCount++;
-                displayName = `(No column name${unnamedCount > 1 ? ' ' + unnamedCount : ''})`;
-            }
-            columns.push(displayName);
-            if (key !== displayName) {
-                keyMap.set(key, displayName);
-            }
-        }
-
-        // If we have unnamed columns, we need to rebuild rows with proper keys
-        if (keyMap.size > 0) {
-            // mssql stores unnamed column values under '' key — but multiple unnamed cols
-            // are actually stored as separate properties. Let's rebuild using column index.
-            const rows = recordset.map((row: any) => {
-                const newRow: Record<string, any> = {};
-                for (let i = 0; i < metaEntries.length; i++) {
-                    const [origKey] = metaEntries[i];
-                    const displayName = columns[i];
-                    // Access by original key or by index from the raw row array
-                    newRow[displayName] = row[origKey];
+        return recordsets.map((rs, idx) => {
+            const colMeta = columnSets?.[idx];
+            const columns = this.buildColumnNames(colMeta);
+            const rows = rs.map((row: any[]) => {
+                const obj: Record<string, any> = {};
+                for (let i = 0; i < columns.length; i++) {
+                    obj[columns[i]] = i < row.length ? row[i] : null;
                 }
-                return newRow;
+                return obj;
             });
             return { rows, columns };
-        }
+        });
+    }
 
-        return { rows: recordset, columns };
+    /** Build display column names from mssql column metadata, handling unnamed columns */
+    private buildColumnNames(colMeta: any[] | undefined): string[] {
+        if (!colMeta || colMeta.length === 0) { return []; }
+        const columns: string[] = [];
+        let unnamedCount = 0;
+        for (const col of colMeta) {
+            const name = col.name ?? col;
+            if (!name || name === '') {
+                unnamedCount++;
+                columns.push(unnamedCount === 1 ? '(No column name)' : `(No column name ${unnamedCount})`);
+            } else {
+                columns.push(String(name));
+            }
+        }
+        return columns;
     }
 
     /** Test a connection profile without affecting current connection state */
