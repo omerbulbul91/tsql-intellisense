@@ -264,7 +264,7 @@ export class ConnectionManager {
         const rows = arrayRows.map((row: any[]) => {
             const obj: Record<string, any> = {};
             for (let i = 0; i < columns.length; i++) {
-                obj[columns[i]] = i < row.length ? row[i] : null;
+                obj[columns[i]] = this.formatValue(i < row.length ? row[i] : null);
             }
             return obj;
         });
@@ -293,7 +293,7 @@ export class ConnectionManager {
             const rows = rs.map((row: any[]) => {
                 const obj: Record<string, any> = {};
                 for (let i = 0; i < columns.length; i++) {
-                    obj[columns[i]] = i < row.length ? row[i] : null;
+                    obj[columns[i]] = this.formatValue(i < row.length ? row[i] : null);
                 }
                 return obj;
             });
@@ -302,6 +302,31 @@ export class ConnectionManager {
     }
 
     /** Build display column names from mssql column metadata, handling unnamed columns */
+    /** Format a cell value for display — handles Buffer (binary), Date, etc. */
+    private formatValue(val: any): any {
+        if (val === null || val === undefined) { return null; }
+        // Binary data (Buffer) → hex string
+        if (Buffer.isBuffer(val)) {
+            if (val.length > 64) { return `0x${val.subarray(0, 32).toString('hex').toUpperCase()}... (${val.length} bytes)`; }
+            return `0x${val.toString('hex').toUpperCase()}`;
+        }
+        // Date → SQL Server format
+        if (val instanceof Date) {
+            const y = val.getFullYear();
+            const mo = String(val.getMonth() + 1).padStart(2, '0');
+            const d = String(val.getDate()).padStart(2, '0');
+            const h = String(val.getHours()).padStart(2, '0');
+            const mi = String(val.getMinutes()).padStart(2, '0');
+            const s = String(val.getSeconds()).padStart(2, '0');
+            const ms = String(val.getMilliseconds()).padStart(3, '0');
+            if (h === '00' && mi === '00' && s === '00' && ms === '000') {
+                return `${y}-${mo}-${d}`;
+            }
+            return `${y}-${mo}-${d} ${h}:${mi}:${s}`;
+        }
+        return val;
+    }
+
     private buildColumnNames(colMeta: any[] | any | undefined): string[] {
         if (!colMeta) { return []; }
 
