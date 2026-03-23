@@ -1,11 +1,17 @@
 import * as vscode from 'vscode';
 import { SchemaCache } from '../cache/schemaCache';
 import { QueryRunner } from './queryRunner';
+import { TsqlDefinitionProvider } from './definitionProvider';
 import { SqlContextType, SqlContext, AliasMapping, detectContext, getCurrentStatement, extractNonAggColumns } from '../parser/sqlContext';
 import { FUNCTIONS } from '../formatter/sqlTokenizer';
 
 export class TsqlCompletionProvider implements vscode.CompletionItemProvider {
+    private definitionProvider?: TsqlDefinitionProvider;
     constructor(private schemaCache: SchemaCache, private queryRunner?: QueryRunner) {}
+
+    setDefinitionProvider(provider: TsqlDefinitionProvider): void {
+        this.definitionProvider = provider;
+    }
 
     async provideCompletionItems(
         document: vscode.TextDocument,
@@ -183,18 +189,33 @@ export class TsqlCompletionProvider implements vscode.CompletionItemProvider {
         return list;
     }
 
-    /** Lazily fetch live object definition for ALTER PROC/VIEW/FUNCTION/TRIGGER hover preview */
+    /** Lazily fetch live object definition for ALTER PROC/VIEW/FUNCTION/TRIGGER/TABLE hover preview */
     async resolveCompletionItem(item: vscode.CompletionItem): Promise<vscode.CompletionItem> {
         const detail = item.detail ?? '';
-        const fetchable = detail === 'PROCEDURE — select to fetch code'
-            || detail === 'VIEW' || detail === 'FUNCTION' || detail === 'TRIGGER';
+        const raw = detail.replace(/^T-SQL • /, '');
+        const isTable = raw === 'TABLE';
+        const fetchable = raw === 'PROCEDURE — select to fetch code'
+            || raw === 'PROCEDURE'
+            || raw === 'VIEW' || raw === 'FUNCTION' || raw === 'TRIGGER'
+            || isTable;
         if (!fetchable) { return item; }
         const name = typeof item.label === 'string' ? item.label : item.label.label;
-        const def = await this.schemaCache.fetchObjectDefinition(name);
-        if (def) {
-            const md = new vscode.MarkdownString();
-            md.appendCodeblock(def, 'sql');
-            item.documentation = md;
+        const cleanName = name.replace(/^dbo\./, '');
+
+        if (isTable && this.definitionProvider) {
+            const script = await this.definitionProvider.buildTableScript(cleanName);
+            if (script) {
+                const md = new vscode.MarkdownString();
+                md.appendCodeblock(script, 'sql');
+                item.documentation = md;
+            }
+        } else {
+            const def = await this.schemaCache.fetchObjectDefinition(cleanName);
+            if (def) {
+                const md = new vscode.MarkdownString();
+                md.appendCodeblock(def, 'sql');
+                item.documentation = md;
+            }
         }
         return item;
     }

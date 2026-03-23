@@ -66,14 +66,13 @@ export class SnippetProvider implements vscode.CompletionItemProvider {
 
         // Detail: kaynak etiketi
         item.detail = snippet.description
-            ? `SQL Prompt: ${snippet.description}`
-            : 'SQL Prompt Snippet';
+            ? `T-SQL IntelliSense: ${snippet.description}`
+            : 'T-SQL IntelliSense Snippet';
 
         // Documentation: kaynak + body önizlemesi (SQL syntax highlighting)
         const bodyPreview = snippet.body.replace(/\\n/g, '\n');
         const previewLines = bodyPreview.split('\n').slice(0, 10).join('\n');
         const md = new vscode.MarkdownString();
-        md.appendMarkdown('**SQL Prompt Snippet**\n\n');
         md.appendCodeblock(previewLines, 'sql');
         item.documentation = md;
 
