@@ -239,6 +239,33 @@ export function activate(context: vscode.ExtensionContext) {
         )
     );
 
+    // Auto-trigger completion when cursor lands right after '*' in a SELECT line
+    context.subscriptions.push(
+        vscode.window.onDidChangeTextEditorSelection(e => {
+            const editor = e.textEditor;
+            if (editor.document.languageId !== 'sql') return;
+            // Only trigger on keyboard/mouse cursor moves, not programmatic changes
+            if (e.kind !== vscode.TextEditorSelectionChangeKind.Keyboard &&
+                e.kind !== vscode.TextEditorSelectionChangeKind.Mouse) return;
+            const pos = editor.selection.active;
+            const line = editor.document.lineAt(pos.line).text;
+            const charBefore = pos.character > 0 ? line[pos.character - 1] : '';
+            // Only trigger for wildcard *, not multiplication (e.g. price * qty)
+            const charBeforeStar = pos.character > 1 ? line[pos.character - 2] : ' ';
+            if (charBefore === '*' && /[\s,(\t]/.test(charBeforeStar)) {
+                // Check current and previous lines for SELECT context
+                let hasSelect = /SELECT/i.test(line);
+                if (!hasSelect && pos.line > 0) {
+                    const prevLine = editor.document.lineAt(pos.line - 1).text;
+                    hasSelect = /SELECT/i.test(prevLine);
+                }
+                if (hasSelect) {
+                    vscode.commands.executeCommand('editor.action.triggerSuggest');
+                }
+            }
+        })
+    );
+
     // Register rename provider for alias renaming (F2)
     const renameProvider = new TsqlRenameProvider();
     context.subscriptions.push(
@@ -857,12 +884,12 @@ export function activate(context: vscode.ExtensionContext) {
     }
 
     // Query shortcuts (SSMS-style: Alt+F1 → sp_help, Ctrl+1 → sp_who, etc.)
-    for (let i = 0; i < 10; i++) {
+    for (let i = 0; i <= 10; i++) {
         context.subscriptions.push(
             vscode.commands.registerCommand(`tsql-intellisense.queryShortcut${i}`, async () => {
                 const config = vscode.workspace.getConfiguration('tsql-intellisense');
                 const shortcuts = config.get<{ key: string; query: string }[]>('queryShortcuts', []);
-                const keyMap: Record<number, string> = { 0: 'Alt+F1', 1: 'Ctrl+1', 2: 'Ctrl+2', 3: 'Ctrl+3', 4: 'Ctrl+4', 5: 'Ctrl+5', 6: 'Ctrl+6', 7: 'Ctrl+7', 8: 'Ctrl+8', 9: 'Ctrl+9' };
+                const keyMap: Record<number, string> = { 0: 'Alt+F1', 1: 'Ctrl+1', 2: 'Ctrl+2', 3: 'Ctrl+3', 4: 'Ctrl+4', 5: 'Ctrl+5', 6: 'Ctrl+6', 7: 'Ctrl+7', 8: 'Ctrl+8', 9: 'Ctrl+9', 10: 'Ctrl+F1' };
                 const shortcut = shortcuts.find(s => s.key === keyMap[i]);
                 if (!shortcut || !shortcut.query) {
                     vscode.window.showInformationMessage(`Query shortcut ${i} is not configured`);
@@ -1025,6 +1052,9 @@ export function activate(context: vscode.ExtensionContext) {
             StyleFormProvider.show(context, styleLoader, 'history');
         }),
         vscode.commands.registerCommand('tsql-intellisense.openConnectionSettings', () => {
+            StyleFormProvider.show(context, styleLoader);
+        }),
+        vscode.commands.registerCommand('tsql-intellisense.openNativeSettings', () => {
             vscode.commands.executeCommand('workbench.action.openSettings', '@ext:omerbulbul.tsql-intellisense');
         }),
         vscode.commands.registerCommand('tsql-intellisense.openExtensionPage', () => {
