@@ -942,7 +942,7 @@ export function activate(context: vscode.ExtensionContext) {
                 let word = '';
                 if (editor) {
                     const pos = editor.selection.active;
-                    const wordRange = editor.document.getWordRangeAtPosition(pos, /[\w.\[\]]+/);
+                    const wordRange = editor.document.getWordRangeAtPosition(pos, /[\w\[\]]+/);
                     if (wordRange) {
                         word = editor.document.getText(wordRange);
                     }
