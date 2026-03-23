@@ -6,6 +6,12 @@ import { styleFormTranslations } from './styleFormTranslations';
 export class StyleFormProvider {
     private static currentPanel: vscode.WebviewPanel | undefined;
 
+    static postMessage(msg: any): void {
+        if (StyleFormProvider.currentPanel) {
+            StyleFormProvider.currentPanel.webview.postMessage(msg);
+        }
+    }
+
     static show(
         context: vscode.ExtensionContext,
         styleLoader: StyleLoader,
@@ -2805,7 +2811,13 @@ export class StyleFormProvider {
 
         window.addEventListener('message', (e) => {
             const msg = e.data;
-            if (msg.cmd === 'navigateSection') {
+            if (msg.cmd === 'openSnippetNewWithBody') {
+                navigateToSection('snippets');
+                setTimeout(function() {
+                    openSnippetNewModal();
+                    if (msg.body && modalEditor) { modalEditor.setValue(msg.body); }
+                }, 300);
+            } else if (msg.cmd === 'navigateSection') {
                 navigateToSection(msg.section);
             } else if (msg.cmd === 'saved') {
                 // Visual feedback handled by VS Code notification

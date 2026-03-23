@@ -2,7 +2,7 @@
   "name": "tsql-intellisense",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "0.4.2",
+  "version": "0.5.0",
   "publisher": "omerbulbul",
   "license": "MIT",
   "repository": {
@@ -126,6 +126,11 @@
         "command": "tsql-intellisense.openStyleSettings",
         "title": "%command.openStyleSettings%",
         "icon": "$(gear)",
+        "category": "T-SQL"
+      },
+      {
+        "command": "tsql-intellisense.addSnippetFromSelection",
+        "title": "%command.addSnippetFromSelection%",
         "category": "T-SQL"
       },
       {
@@ -394,24 +399,34 @@
     "menus": {
       "editor/context": [
         {
+          "command": "tsql-intellisense.runQuery",
+          "when": "editorLangId == sql && tsqlIntellisense.active",
+          "group": "z_tsql@1"
+        },
+        {
+          "command": "tsql-intellisense.addSnippetFromSelection",
+          "when": "editorLangId == sql && tsqlIntellisense.active && editorHasSelection",
+          "group": "z_tsql@2"
+        },
+        {
           "command": "tsql-intellisense.formatSql",
           "when": "editorLangId == sql && tsqlIntellisense.active",
-          "group": "1_modification@1"
+          "group": "z_tsql@3"
         },
         {
           "command": "tsql-intellisense.openStyleSettings",
           "when": "editorLangId == sql && tsqlIntellisense.active",
-          "group": "1_modification@2"
+          "group": "z_tsql@4"
         },
         {
           "command": "tsql-intellisense.openProjectFile",
           "when": "editorLangId == sql && tsqlIntellisense.active",
-          "group": "z_tsql@0"
+          "group": "z_tsql@5"
         },
         {
           "command": "tsql-intellisense.selectInObjectExplorer",
           "when": "editorLangId == sql && tsqlIntellisense.active",
-          "group": "z_tsql@1"
+          "group": "z_tsql@6"
         }
       ],
       "editor/title": [],
@@ -730,6 +745,11 @@
           "id": "tsql-results-panel",
           "title": "%viewsContainer.queryResults%",
           "icon": "$(database)"
+        },
+        {
+          "id": "tsql-messages-panel",
+          "title": "%viewsContainer.messages%",
+          "icon": "$(output)"
         }
       ]
     },
@@ -748,6 +768,13 @@
         {
           "id": "tsqlResults",
           "name": "%view.queryResults%",
+          "type": "webview"
+        }
+      ],
+      "tsql-messages-panel": [
+        {
+          "id": "tsqlMessages",
+          "name": "%view.messages%",
           "type": "webview"
         }
       ]

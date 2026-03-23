@@ -22,11 +22,13 @@ import { FormatterProvider } from './providers/formatterProvider';
 import { StyleFormProvider } from './providers/styleFormProvider';
 import { TranslationEditor } from './providers/translationEditor';
 import { QueryHistoryProvider, QueryHistoryEntry } from './providers/queryHistoryProvider';
+import { MessagePanel } from './providers/messagePanel';
 
 let connectionManager: ConnectionManager;
 let schemaCacheManager: SchemaCacheManager;
 let alterProcProvider: AlterProcProvider;
 let queryRunner: QueryRunner;
+let messagePanel: MessagePanel;
 
 export function activate(context: vscode.ExtensionContext) {
     // Mark extension as active (for keybinding priority over mssql)
@@ -211,6 +213,13 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.window.registerWebviewViewProvider('tsqlResults', queryRunner)
     );
 
+    // Register messages panel in bottom area
+    messagePanel = new MessagePanel();
+    context.subscriptions.push(
+        vscode.window.registerWebviewViewProvider('tsqlMessages', messagePanel)
+    );
+    queryRunner.setMessagePanel(messagePanel);
+
     // Register CodeLens provider — shows ▷ Run + server/db at batch start lines
     const codeLensProvider = new TsqlCodeLensProvider(queryRunner);
     context.subscriptions.push(
@@ -337,6 +346,19 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(
         vscode.commands.registerCommand('tsql-intellisense.openStyleSettings', () => {
             StyleFormProvider.show(context, styleLoader);
+        })
+    );
+
+    // Add Snippet from selection — opens Options → Snippets with body pre-filled
+    context.subscriptions.push(
+        vscode.commands.registerCommand('tsql-intellisense.addSnippetFromSelection', () => {
+            const editor = vscode.window.activeTextEditor;
+            const selectedText = editor ? editor.document.getText(editor.selection) : '';
+            StyleFormProvider.show(context, styleLoader, 'snippets');
+            // Post the selected text to pre-fill the snippet body after the panel is ready
+            setTimeout(() => {
+                StyleFormProvider.postMessage({ cmd: 'openSnippetNewWithBody', body: selectedText });
+            }, 800);
         })
     );
 
