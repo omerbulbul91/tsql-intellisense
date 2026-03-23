@@ -451,7 +451,7 @@
         },
         {
           "command": "tsql-intellisense.editConnection",
-          "when": "viewItem =~ /^Connection/"
+          "when": "viewItem =~ /^Connection/ || viewItem == Database"
         },
         {
           "command": "tsql-intellisense.deleteConnection",
@@ -1129,7 +1129,7 @@
     "build": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node && esbuild src/extension.web.ts --bundle --outfile=dist/extension.web.js --external:vscode --format=cjs --platform=browser",
     "build:web": "esbuild src/extension.web.ts --bundle --outfile=dist/extension.web.js --external:vscode --format=cjs --platform=browser",
     "watch": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --watch",
-    "test": "npx ts-node test/contextDetection.test.ts && npx ts-node test/projectSync.test.ts && npx ts-node test/formatter.test.ts && npx ts-node test/statementRule.test.ts && npx ts-node test/rename.test.ts",
+    "test": "npx ts-node test/contextDetection.test.ts && npx ts-node test/projectSync.test.ts && npx ts-node test/formatter.test.ts && npx ts-node test/statementRule.test.ts && npx ts-node test/rename.test.ts && npx ts-node test/packageMenus.test.ts",
     "package": "vsce package"
   },
   "dependencies": {
