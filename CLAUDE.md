@@ -36,6 +36,7 @@ src/
 │   ├── snippetProvider.ts          -- Redgate SQL Prompt snippet yükleyici
 │   ├── alterProcProvider.ts         -- Quick Pick ile SP seçme komutu
 │   ├── queryRunner.ts              -- WebviewViewProvider, sorgu çalıştırma, sonuç paneli (tabs/stacked)
+│   ├── queryHistoryProvider.ts     -- TreeDataProvider, sorgu geçmişi (tarih/dosya gruplu ağaç)
 │   └── renameProvider.ts           -- F2 ile alias rename
 ├── formatter/
 │   ├── sqlFormatter.ts              -- Ana formatter pipeline (CREATE OR ALTER, spacing, dbo. prefix)
@@ -71,27 +72,25 @@ src/
 | `ALTER PROC` | SP listesi, seçince kodu getir |
 | Genel fallback | Sorgu içinde keyword önerisi (ORDER BY, WHERE vs.) |
 
-### Tablo/View Documentation Popup
+### Documentation Popup
 
-Completion listesinde tablo/view seçildiğinde sağ panelde detaylı bilgi gösterilir.
-Metadata arka planda yüklenir — yüklenene kadar "Schema loading..." görünür.
+Completion listesinde nesne seçildiğinde sağ panelde detaylı bilgi gösterilir.
+Tüm nesne tipleri `resolveCompletionItem` ile **canlı DB'den** çekilir (cache'ten değil).
 
-**TABLE popup içeriği (tamamı gösterilmeli):**
+**Desteklenen nesne tipleri ve kaynak:**
+- **TABLE** → `definitionProvider.buildTableScript()` — CREATE TABLE + PK + Index + FK + Check + Trigger
+- **VIEW** → `schemaCache.fetchObjectDefinition()` — `OBJECT_DEFINITION()` sorgusu
+- **SP (PROCEDURE)** → `schemaCache.fetchObjectDefinition()` — `OBJECT_DEFINITION()` sorgusu
+- **FUNCTION** → `schemaCache.fetchObjectDefinition()` — `OBJECT_DEFINITION()` sorgusu
+- **TRIGGER** → `schemaCache.fetchObjectDefinition()` — `OBJECT_DEFINITION()` sorgusu
+
+**FROM/JOIN bağlamında TABLE popup ek içerik:**
 - `Copy Script` | `Open Script` tıklanabilir linkler
-- CREATE TABLE scripti (tüm kolonlar, tip, nullable)
-- PRIMARY KEY constraint
-- UNIQUE / NONCLUSTERED / CLUSTERED INDEX'ler
-- FOREIGN KEY constraint'ler (hangi tabloya referans verdiği)
-- CHECK constraint'ler (varsa)
-- DEFAULT constraint'ler (varsa)
-- ⚡ Trigger'lar (CREATE TRIGGER scriptiyle)
-
-**VIEW popup içeriği:**
-- `Copy Script` | `Open Script` tıklanabilir linkler
-- Gerçek CREATE VIEW tanımı (DB'den `OBJECT_DEFINITION` ile çekilir)
-- Kolon listesi yedek olarak (view tanımı henüz yüklenmediyse)
+- ⚡ Trigger'lı tablolar özel ikon ile gösterilir
 
 **Önemli kurallar:**
+- [2026-03-23] `resolveCompletionItem`'da detail karşılaştırması yaparken `T-SQL • ` prefix'i sıyırılmalı — `provideCompletionItems` tüm detail'lara bu prefix'i ekler
+- [2026-03-23] `completionProvider`'dan `definitionProvider.buildTableScript()`'e erişim için `setDefinitionProvider()` ile bağlantı kurulmalı
 - Doc popup hiçbir zaman completion'ı bloklamamalı (async await YAPMA)
 - Metadata yüklenmediyse "Schema loading..." göster, boş bırakma
 - `md.isTrusted = true` ve `md.supportHtml = true` set edilmeli (command linkler için)
@@ -125,18 +124,11 @@ Metadata arka planda yüklenir — yüklenene kadar "Schema loading..." görün�
 
 ### SQL Snippet'leri
 
-| Kısayol | Sonuç |
-|---------|-------|
-| `loj` | LEFT OUTER JOIN ... ON |
-| `lj` | LEFT JOIN ... ON |
-| `ij` | INNER JOIN ... ON |
-| `rj` | RIGHT JOIN ... ON |
-| `cj` | CROSS JOIN ... |
-| `st` | SELECT TOP 100 * FROM ... |
+Built-in snippet'ler (`contributes.snippets`) kaldırılmıştır — tüm snippet'ler `tsql-intellisense.snippetFolder` ayarında belirtilen klasörden yüklenir. `snippets/sql.json` dosyası repoda durur ama `package.json`'da kayıtlı değildir. Çift snippet sorunu önlemek için `contributes.snippets` boş bırakılmalıdır.
 
-### Redgate SQL Prompt Snippet Desteği
+### Snippet Klasörü Desteği
 
-- `tsql-intellisense.snippetFolder` ayarına Redgate snippet dizin yolu girilir
+- `tsql-intellisense.snippetFolder` ayarına snippet dizin yolu girilir (herhangi bir klasör olabilir)
 - Command Palette'den `T-SQL IntelliSense: Set Snippet Folder` ile folder picker açılabilir
 - Dizindeki `.json` dosyaları Redgate formatında (`{id, prefix, description, body}`) okunur
 - Placeholder dönüşümleri:
@@ -144,8 +136,27 @@ Metadata arka planda yüklenir — yüklenene kadar "Schema loading..." görün�
   - `$PASTE$` → pano içeriği (boşsa tabstop)
   - `$table_name$`, `$column_name$` vb. → VS Code tabstop (Tab ile gezilir)
   - `$SELECTIONSTART$` / `$SELECTIONEND$` → kaldırılır
-- Completion listesinde detail alanında `SQL Prompt` etiketi, doc popup'ta body önizlemesi görünür
+- Completion listesinde detail alanında `T-SQL IntelliSense` etiketi, doc popup'ta SQL body önizlemesi görünür
 - Snippet'ler schema completion'larının altında sıralanır (`sortText: "zz_"`)
+
+### Snippet Manager
+
+- Context menüden (sağ tık → Snippet Manager) veya Command Palette'den açılır
+- `SnippetManagerProvider` WebviewPanel olarak editor tab'ında açılır
+- "Add Snippet" komutu (seçili metin varsa) `SnippetManagerProvider.openNewWithBody()` ile "Yeni Snippet" dialog'unu açar
+- [2026-03-23] Add Snippet açılırken alt panel (`workbench.action.closePanel`) kapatılmalı — dialog alt panelin altında kalmamalı
+- [2026-03-23] Snippet CRUD işlemleri StyleFormProvider değil SnippetManagerProvider üzerinden yapılmalı
+
+### Query History
+
+- Sidebar'da `QUERY HISTORY` TreeView paneli — tarih grubu → dosya grubu → entry hiyerarşisi
+- Her sorgu çalıştırıldığında `addEntry()` ile kayıt eklenir (globalState'te persist)
+- [2026-03-24] FileGroupItem (dosya grubu) label'da `#seqNo` gösterilmez — child entry'lerde zaten var
+- [2026-03-24] Tek tık dosya açmaz — tooltip hover'da SQL query ile birlikte gösterilir
+- [2026-03-24] Çift tık dosyayı açar (pinned tab)
+- [2026-03-24] Tooltip: bağlantı adı, DB, tarih + SQL code block (4000 karakter, syntax highlighted)
+- Aynı fileName + sql kombinasyonu tekrar çalışırsa eski kayıt silinip yenisi eklenir (dedup)
+- Ayarlar: `queryHistory.enabled`, `queryHistory.maxEntries` (100), `queryHistory.retentionDays` (7), `queryHistory.maxQuerySize` (1MB)
 
 ### Query Shortcuts (SSMS Tarzı)
 
@@ -252,8 +263,8 @@ npm test    # 199 test (context detection + projectSync/snippet + formatter)
 | 22 | F12 Table definition | Tablo adı üzerinde F12 | CREATE TABLE + PK + FK + Index scripti |
 | 23 | F12 View definition | View adı üzerinde F12 | CREATE VIEW scripti |
 | 24 | SP param completion | `EXEC spName` seç | Parametreler otomatik doldurulur (DECLARE + format) |
-| 25 | Redgate snippet | Snippet prefix yaz (ör. `snp_`) | Completion listesinde "SQL Prompt" etiketiyle görünür |
-| 26 | Snippet doc popup | Snippet seç, doc popup'a bak | **SQL Prompt Snippet** etiketi + SQL body önizlemesi |
+| 25 | Snippet completion | Snippet prefix yaz (ör. `snp_`) | Completion listesinde "T-SQL IntelliSense" etiketiyle görünür |
+| 26 | Snippet doc popup | Snippet seç, doc popup'a bak | SQL body önizlemesi (başlık tekrarı olmamalı) |
 | 27 | Snippet $PASTE$ | Metin kopyala, $PASTE$ snippet tetikle | Kopyalanan metin yapıştırılır |
 | 28 | Snippet folder picker | Command Palette → Set Snippet Folder | Folder picker açılır, dizin seçilir |
 | 29 | ALTER TABLE completion | `ALTER TABLE tab` yaz | Tablo listesi gelir, seçince CREATE scripti AÇILMAZ |
@@ -307,6 +318,71 @@ npm test    # 199 test (41 context + 51 projectSync + 78 tokenizer/casing/layout
 
 `test/spFormat.test.ts` — Gerçek dünya Türkçe SP ile 78 satırlık end-to-end doğrulama
 
+### Loglama (Logging)
+
+Projede merkezi bir logger modülü yoktur — loglama doğrudan VS Code `OutputChannel` API'si ve `console.log/error` ile yapılır.
+
+#### Output Channel'lar
+
+| Kanal Adı | Oluşturulduğu Yer | Kullanım |
+|-----------|--------------------|----------|
+| `T-SQL Connection` | `connectionManager.ts` (L48) | Bağlantı, sorgu, DB switch, zamanlama (`_ts()` helper) |
+| `T-SQL Snippets` | `extension.ts` (L332) | Snippet dosya yükleme logları |
+| `T-SQL Formatter` | `extension.ts` (L375) | Style dosyası yükleme, konfigürasyon logları |
+
+#### Loglama Mekanizması
+
+- **ConnectionManager**: `this.log` property'si (`vscode.OutputChannel`), tüm bağlantı/sorgu olaylarını loglar. `_ts()` helper ile timestamp eklenir
+- **SchemaCache**: `connectionManager.log` üzerinden loglar (kendi OutputChannel'ı yok — `private get log()` getter ile erişir)
+- **SnippetProvider**: Constructor'da `OutputChannel` parametre alır, snippet yükleme loglarını yazar
+- **StyleLoader**: Constructor'da opsiyonel `OutputChannel` alır, `private log(msg)` helper method ile loglar
+- **Webview (Grid) scriptleri**: `console.log/error` ile `[TSQL]` prefix'li client-side loglama (queryRunner, agGridRenderer, handsontableRenderer, tabulatorRenderer)
+- **ProjectSync**: `console.error` ile hata logları (`[ProjectSync]` prefix)
+
+#### Kurallar
+
+- Yeni modül eklerken mevcut OutputChannel'lardan birini kullan veya gerekçeli yeni kanal oluştur
+- Hata loglarında `console.error` kullan, bilgi loglarında `OutputChannel.appendLine` tercih et
+- Webview (client-side) loglarında `[TSQL]` prefix'i zorunlu — DevTools'ta filtreleme kolaylığı sağlar
+- SchemaCache gibi modüller kendi OutputChannel oluşturmak yerine ConnectionManager'ın kanalını paylaşmalı
+
+### Cancel (İptal) Mantığı
+
+Bağlantı ve sorgu çalıştırma işlemlerinde kullanıcı iptal desteği vardır.
+
+#### Bağlantı İptali
+
+- `_connectInternal()` → `vscode.window.withProgress({ cancellable: true })` ile Cancel butonu gösterir
+- İptal edildiğinde `cancelled = true` flag set edilir, `pool.close()` çağrılır
+- İptal sonrası `pool = null`, `activeProfile = null` reset edilir ve loglanır
+- `cancelConnect()` metodu dışarıdan çağrılabilir (henüz bağlanmamışsa pool'u kapatır)
+- İptal hem başarılı bağlantı sonrası hem catch bloğunda kontrol edilmeli — race condition önlenir
+
+#### Eşzamanlı Bağlantı Koruması
+
+- `connect()` metodu `_connectPromise` ile deduplicate eder — aynı profile'e ikinci çağrı gelirse mevcut promise reuse edilir
+- Farklı profil geldiğinde yeni `_connectInternal` başlar, `this.pool` varsa önce `disconnect()` çağrılır
+- [2026-03-24] İlk bağlantı henüz tamamlanmamışken (pool=null) farklı profil ile ikinci çağrı gelirse iki paralel bağlantı girişimi oluşabilir — `_connectPromise` kontrolü sadece aynı profil için çalışır
+
+#### Sorgu İptali
+
+- `cancelQuery()` → `this._activeRequest.cancel()` ile TDS protokolünde ATTENTION paketi gönderir (mssql/tedious)
+- `_activeRequest` her `executeSingleBatch()` başında set edilir, sorgu bitince `null` yapılır
+- `isQueryRunning` getter ile aktif sorgu durumu kontrol edilebilir
+
+#### QueryRunner Tarafı
+
+- F5 (`runQuery`) ve shortcut (`runQueryText`) her ikisi de `withProgress({ cancellable: true })` kullanır
+- Cancel butonuna basıldığında `connectionManager.cancelQuery()` çağrılır
+- F5'te bağlantı kopmuşsa otomatik reconnect + retry yapılır — retry sırasında da cancel çalışır
+
+#### Kurallar
+
+- Yeni uzun süren işlem eklerken mutlaka `withProgress({ cancellable: true })` kullan
+- Cancel sonrası state temizliği yapılmalı (`pool = null`, `_activeRequest = null` vb.)
+- Cancel loglanmalı — Output Channel'a timestamp ile yazılmalı
+- `_activeRequest` yalnızca `executeSingleBatch` içinde set edilmeli, başka yerden doğrudan atama yapılmamalı
+
 ## Çalışma Kuralları
 
 - Test sırasında bulunan hata veya eksik özellikler, sormadan CLAUDE.md'ye kural olarak eklenir
@@ -332,3 +408,6 @@ npm test    # 199 test (41 context + 51 projectSync + 78 tokenizer/casing/layout
 
 ### Rename Provider
 - [2026-03-23] F2 alias rename yaparken FROM/JOIN'deki tablo adı pozisyonları hariç tutulmalı — alias = tablo adı olduğunda tablo adını değiştirmemeli
+
+### Extension Page (About Extension)
+- [2026-03-23] "About Extension" komutu `extension.open` değil `workbench.extensions.search` ile `@id:omerbulbul.tsql-intellisense` filtresi kullanmalı — Extensions sidebar'daki zengin sağ tık menüsüne (Install Specific Version, Download VSIX vs.) erişim sağlar

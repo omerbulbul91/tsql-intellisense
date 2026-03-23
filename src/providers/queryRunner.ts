@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { ConnectionManager, BatchResult, QueryResult } from '../connection/connectionManager';
 import { createGridRenderer } from './grids/gridRenderer';
 import { MessagePanel } from './messagePanel';
+import { ts } from '../utils/timestamp';
 
 export class QueryRunner implements vscode.WebviewViewProvider {
     private webviewView: vscode.WebviewView | null = null;
@@ -156,14 +157,20 @@ export class QueryRunner implements vscode.WebviewViewProvider {
         this.lastMeta = meta;
         this.documentMeta.set(editor.document.uri.toString(), meta);
 
+        const preview = sql.replace(/\s+/g, ' ').trim().substring(0, 200);
+        this.connectionManager.log.appendLine(`[${ts()}] Query (F5): ${preview}`);
+
         // Show progress — retry once on connection failure
         let result = await vscode.window.withProgress(
             {
                 location: vscode.ProgressLocation.Notification,
                 title: 'Executing query...',
-                cancellable: false,
+                cancellable: true,
             },
-            async () => {
+            async (_progress, token) => {
+                token.onCancellationRequested(() => {
+                    this.connectionManager.cancelQuery();
+                });
                 try {
                     return await this.connectionManager.executeBatch(sql);
                 } catch (err: any) {
@@ -248,9 +255,14 @@ export class QueryRunner implements vscode.WebviewViewProvider {
             {
                 location: vscode.ProgressLocation.Notification,
                 title: 'Executing query...',
-                cancellable: false,
+                cancellable: true,
             },
-            () => this.connectionManager.executeBatch(sql)
+            (_progress, token) => {
+                token.onCancellationRequested(() => {
+                    this.connectionManager.cancelQuery();
+                });
+                return this.connectionManager.executeBatch(sql);
+            }
         );
 
         this.lastResult = result;

@@ -142,7 +142,7 @@ export class TsqlDefinitionProvider implements vscode.DefinitionProvider {
         return null;
     }
 
-    private async buildTableScript(tableName: string): Promise<string | null> {
+    async buildTableScript(tableName: string): Promise<string | null> {
         try {
             const result = await this.connectionManager.executeQuery(
                 TABLE_SCRIPT_QUERY,
