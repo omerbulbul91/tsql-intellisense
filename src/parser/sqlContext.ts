@@ -333,9 +333,13 @@ export function detectContext(textBeforeCursor: string, fullStatementText: strin
     // Only if the statement has a FROM clause with a table
     const tables = extractTables(fullStatementText);
     if (tables.length > 0) {
-        const aliases = extractAliases(fullStatementText);
+        let aliases = extractAliases(fullStatementText);
+        // If no aliases found, create mappings from table names (table name as both alias and tableName)
+        if (aliases.length === 0) {
+            aliases = tables.map(t => ({ alias: '', tableName: t }));
+        }
         // Find alias for the primary table
-        const primaryAlias = aliases.length > 0 ? aliases[0].alias : undefined;
+        const primaryAlias = aliases.length > 0 && aliases[0].alias ? aliases[0].alias : undefined;
 
         // Check if cursor is in a column context (after SELECT, WHERE, ORDER BY, etc.)
         // Include * as valid prefix for "expand all columns"
@@ -361,13 +365,22 @@ export function detectContext(textBeforeCursor: string, fullStatementText: strin
             };
         }
 
-        const columnContextMatch = currentLine.match(/(?:SELECT(?:\s+(?:DISTINCT|ALL|TOP\s+\d+))?|WHERE|AND|OR|ON|SET|ORDER\s+BY|HAVING|WHEN|THEN|ELSE|CASE|,|\()\s*([\w*]*)$/i);
+        let columnContextMatch = currentLine.match(/(?:SELECT(?:\s+(?:DISTINCT|ALL|TOP\s+\d+))?|WHERE|AND|OR|ON|SET|ORDER\s+BY|HAVING|WHEN|THEN|ELSE|CASE|,|\()\s*([\w*]*)$/i);
+        // If current line is just '*' or whitespace+word and previous line ends with SELECT/comma/keyword, treat as continuation
+        if (!columnContextMatch && lines.length >= 2) {
+            const prevLine = lines[lines.length - 2].trimEnd();
+            const trimmedCurrent = currentLine.match(/^\s*([\w*]*)$/);
+            if (trimmedCurrent && /(?:SELECT(?:\s+(?:DISTINCT|ALL|TOP\s+\d+))?|WHERE|AND|OR|ON|SET|ORDER\s+BY|HAVING|WHEN|THEN|ELSE|CASE|,)\s*$/i.test(prevLine)) {
+                columnContextMatch = trimmedCurrent;
+            }
+        }
         if (columnContextMatch) {
             return {
                 type: SqlContextType.AFTER_SELECT,
                 prefix: columnContextMatch[1],
                 tableName: tables[0],
                 alias: primaryAlias,
+                aliases,
             };
         }
 

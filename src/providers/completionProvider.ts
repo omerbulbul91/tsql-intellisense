@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { SchemaCache } from '../cache/schemaCache';
 import { QueryRunner } from './queryRunner';
-import { SqlContextType, SqlContext, detectContext, getCurrentStatement, extractNonAggColumns } from '../parser/sqlContext';
+import { SqlContextType, SqlContext, AliasMapping, detectContext, getCurrentStatement, extractNonAggColumns } from '../parser/sqlContext';
 import { FUNCTIONS } from '../formatter/sqlTokenizer';
 
 export class TsqlCompletionProvider implements vscode.CompletionItemProvider {
@@ -82,7 +82,7 @@ export class TsqlCompletionProvider implements vscode.CompletionItemProvider {
                 return this.completeAlterProc(dbName);
 
             case SqlContextType.AFTER_SELECT:
-                return await this.completeColumnsWithAlias(context.tableName!, context.prefix, context.alias, position, dbName);
+                return await this.completeColumnsWithAlias(context.tableName!, context.prefix, context.alias, position, dbName, textBeforeCursor, context.aliases);
 
             case SqlContextType.AFTER_TABLE_NAME:
                 return this.completeAfterTableName(context.tableName);
@@ -808,7 +808,7 @@ export class TsqlCompletionProvider implements vscode.CompletionItemProvider {
     }
 
     /** Complete columns with alias prefix (for SELECT/WHERE context) */
-    private async completeColumnsWithAlias(tableName: string, prefix?: string, alias?: string, position?: vscode.Position, dbName?: string): Promise<vscode.CompletionList> {
+    private async completeColumnsWithAlias(tableName: string, prefix?: string, alias?: string, position?: vscode.Position, dbName?: string, textBeforeCursor?: string, aliases?: AliasMapping[]): Promise<vscode.CompletionList> {
         const items: vscode.CompletionItem[] = [];
         const columns = dbName
             ? await this.schemaCache.loadColumnsForDbTable(dbName, tableName)
@@ -824,16 +824,45 @@ export class TsqlCompletionProvider implements vscode.CompletionItemProvider {
             );
         }
 
-        // Add "* (expand all)" snippet
-        if (columns.length > 0 && alias) {
+        // Add "* (expand all)" snippet — only when user typed '*'
+        const showStar = columns.length > 0 && prefix === '*';
+        if (prefix === '*' && !showStar) {
+            // Show info item explaining why expand is not available
+            const reason = columns.length === 0 ? `Table '${tableName}' not found in schema` : 'No alias found';
+            const infoItem = new vscode.CompletionItem(`* (expand unavailable: ${reason})`, vscode.CompletionItemKind.Text);
+            infoItem.sortText = '0_0000';
+            infoItem.filterText = '*';
+            infoItem.insertText = '*';
+            items.push(infoItem);
+        }
+        if (showStar) {
+            // Collect columns from ALL tables/aliases in the query
+            const allExpandedCols: string[] = [];
+            if (aliases && aliases.length > 0) {
+                for (const am of aliases) {
+                    const cols = dbName
+                        ? await this.schemaCache.loadColumnsForDbTable(dbName, am.tableName)
+                        : await this.schemaCache.getColumns(am.tableName);
+                    // Use alias if available, otherwise use table name as prefix
+                    const ap = am.alias ? `${am.alias}.` : (aliases.length > 1 ? `${am.tableName}.` : '');
+                    for (const c of cols) {
+                        allExpandedCols.push(`${ap}${c.name}`);
+                    }
+                }
+            }
+
+            const totalTables = aliases ? aliases.length : 1;
             const starItem = new vscode.CompletionItem('* (expand all columns)', vscode.CompletionItemKind.Snippet);
-            starItem.detail = `${columns.length} columns with ${alias}. prefix`;
+            starItem.detail = `${allExpandedCols.length} columns from ${totalTables} table${totalTables > 1 ? 's' : ''}`;
             starItem.sortText = '0_0000';
-            starItem.filterText = '* expand all';
-            const allCols = TsqlCompletionProvider.formatExpandedColumns(columns.map(c => `${aliasPrefix}${c.name}`));
+            starItem.filterText = '*';
+            const allCols = TsqlCompletionProvider.formatExpandedColumns(allExpandedCols);
             starItem.insertText = new vscode.SnippetString(allCols);
-            if (replaceRange) {
-                starItem.range = replaceRange;
+            if (prefix === '*') {
+                starItem.preselect = true;
+                if (replaceRange) {
+                    starItem.range = replaceRange;
+                }
             }
             items.push(starItem);
         }
@@ -951,6 +980,9 @@ export class TsqlCompletionProvider implements vscode.CompletionItemProvider {
             item.sortText = `0_${String(col.ordinalPosition).padStart(4, '0')}`;
             item.filterText = col.name;
             item.insertText = displayName;
+            if (replaceRange) {
+                item.range = replaceRange;
+            }
             items.push(item);
         }
 
