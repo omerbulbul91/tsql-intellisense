@@ -1,14 +1,19 @@
 import * as vscode from 'vscode';
 import { ConnectionManager, BatchResult, QueryResult } from '../connection/connectionManager';
 import { createGridRenderer } from './grids/gridRenderer';
+import { MessagePanel } from './messagePanel';
 
 export class QueryRunner implements vscode.WebviewViewProvider {
     private webviewView: vscode.WebviewView | null = null;
     private lastResult: BatchResult | null = null;
+    private lastMeta: { startTime: Date; startLine: number } | null = null;
     /** Per-document query results — keyed by document URI string */
     private documentResults = new Map<string, BatchResult>();
+    /** Per-document query metadata — keyed by document URI string */
+    private documentMeta = new Map<string, { startTime: Date; startLine: number }>();
     private _onQueryExecuted = new vscode.EventEmitter<{ sql: string; result: BatchResult }>();
     public readonly onQueryExecuted = this._onQueryExecuted.event;
+    private messagePanel: MessagePanel | null = null;
 
     /** Tracks which database each document belongs to (URI → {profileName, dbName}) */
     private documentDbMap = new Map<string, { profileName: string; dbName: string } | null>();
@@ -25,6 +30,17 @@ export class QueryRunner implements vscode.WebviewViewProvider {
                 this.webviewView.webview.html = this.buildEmptyHtml();
             }
         });
+    }
+
+    /** Set the message panel to send messages to */
+    setMessagePanel(panel: MessagePanel): void {
+        this.messagePanel = panel;
+    }
+
+    /** Get the query metadata for a document */
+    getQueryMeta(uri?: vscode.Uri): { startTime: Date; startLine: number } | undefined {
+        if (uri) { return this.documentMeta.get(uri.toString()); }
+        return this.lastMeta || undefined;
     }
 
     /** Associate a document with a specific database (or null for server-level) */
@@ -134,6 +150,12 @@ export class QueryRunner implements vscode.WebviewViewProvider {
             return;
         }
 
+        // Capture query metadata for SSMS-style messages
+        const startLine = selection.isEmpty ? 1 : selection.start.line + 1;
+        const meta = { startTime: new Date(), startLine };
+        this.lastMeta = meta;
+        this.documentMeta.set(editor.document.uri.toString(), meta);
+
         // Show progress — retry once on connection failure
         let result = await vscode.window.withProgress(
             {
@@ -216,6 +238,12 @@ export class QueryRunner implements vscode.WebviewViewProvider {
 
         if (!sql.trim()) { return; }
 
+        const editor = vscode.window.activeTextEditor;
+        const startLine = editor ? (editor.selection.isEmpty ? 1 : editor.selection.start.line + 1) : 1;
+        const meta = { startTime: new Date(), startLine };
+        this.lastMeta = meta;
+        if (editor) { this.documentMeta.set(editor.document.uri.toString(), meta); }
+
         const result = await vscode.window.withProgress(
             {
                 location: vscode.ProgressLocation.Notification,
@@ -226,7 +254,6 @@ export class QueryRunner implements vscode.WebviewViewProvider {
         );
 
         this.lastResult = result;
-        const editor = vscode.window.activeTextEditor;
         if (editor) { this.documentResults.set(editor.document.uri.toString(), result); }
         this.showResults(result);
         if (!result.error) {
@@ -236,11 +263,20 @@ export class QueryRunner implements vscode.WebviewViewProvider {
 
     /** Display results in the bottom panel */
     private showResults(result: BatchResult): void {
-        // Make sure the panel is visible
-        vscode.commands.executeCommand('tsqlResults.focus');
-
         if (this.webviewView) {
             this.webviewView.webview.html = this.buildHtml(result);
+        }
+
+        // Send messages to the separate messages panel
+        if (this.messagePanel) {
+            this.messagePanel.showMessages(result, this.lastMeta || undefined);
+        }
+
+        // Focus: error → Messages panel, success → Results panel
+        if (result.error) {
+            vscode.commands.executeCommand('tsqlMessages.focus');
+        } else {
+            vscode.commands.executeCommand('tsqlResults.focus');
         }
     }
 
@@ -263,7 +299,6 @@ export class QueryRunner implements vscode.WebviewViewProvider {
         const config = vscode.workspace.getConfiguration('tsql-intellisense');
         const displayMode = config.get<string>('resultDisplayMode', 'tabs');
         const gridLibrary = config.get<string>('gridLibrary', 'tabulator');
-        const messagesHtml = this.buildMessages(result);
         const isStacked = displayMode === 'stacked' && result.resultSets.length > 1;
 
         const renderer = createGridRenderer(gridLibrary);
@@ -336,7 +371,7 @@ ${grid.headHtml}
         margin-top: 4px;
     }
     .col-chooser .col-chooser-actions button { flex: 1; font-size: 10px; padding: 2px 4px; }
-    /* ── Tabs ─────────────────────────────────────── */
+    /* ── Tabs (multi result set) ────────────────────── */
     .tabs {
         display: flex;
         background: var(--vscode-editorWidget-background);
@@ -391,17 +426,19 @@ ${grid.headHtml}
     .stacked-splitter:hover, .stacked-splitter.active {
         opacity: 1;
     }
-    /* ── Messages / Error ────────────────────────── */
-    .messages {
-        padding: 6px 8px; font-family: var(--vscode-editor-fontFamily, monospace);
-        font-size: 12px; white-space: pre-wrap;
-        border-top: 1px solid var(--vscode-editorWidget-border);
-        max-height: 120px; overflow-y: auto; flex-shrink: 0;
+    /* ── Status bar ───────────────────────────────── */
+    .status-bar {
+        padding: 2px 8px; font-size: 11px;
+        color: var(--vscode-descriptionForeground);
+        background: var(--vscode-editorWidget-background);
+        border-bottom: 1px solid var(--vscode-editorWidget-border);
+        flex-shrink: 0;
     }
-    .error {
+    .error-bar {
         color: var(--vscode-errorForeground);
         background: var(--vscode-inputValidation-errorBackground);
-        padding: 6px 8px; border-left: 3px solid var(--vscode-inputValidation-errorBorder);
+        padding: 4px 8px; border-left: 3px solid var(--vscode-inputValidation-errorBorder);
+        font-size: 11px; flex-shrink: 0;
     }
     /* ── Context menu (common) ───────────────────── */
     .grid-context-menu {
@@ -439,6 +476,7 @@ ${grid.headHtml}
 </style>
 </head>
 <body>
+    ${result.error ? `<div class="error-bar">${this.escapeHtml(result.error)}</div>` : ''}
     ${result.resultSets.length > 0 && !isStacked ? `
     <div class="toolbar">
         <label>Filter:</label>
@@ -454,16 +492,16 @@ ${grid.headHtml}
                     Result ${i + 1}
                 </div>
             `).join('')}
-            <div class="tab" onclick="switchTab(-1)">Messages</div>
         </div>
     ` : ''}
+    <div class="status-bar">${result.resultSets.reduce((sum, rs) => sum + rs.rows.length, 0)} rows | ${(result.elapsed / 1000).toFixed(3)}s</div>
     ${isStacked ? `
         <div class="stacked-wrapper">
             ${result.resultSets.map((rs, i) => `
                 ${i > 0 ? '<div class="stacked-splitter" data-index="' + i + '"></div>' : ''}
                 <div class="stacked-section">
                     <div class="stacked-header">
-                        <span class="sh-title">Result ${i + 1} (${rs.rows.length} rows | ${(result.elapsed / 1000).toFixed(2)}s)</span>
+                        <span class="sh-title">Result ${i + 1} (${rs.rows.length} rows)</span>
                         <input type="text" placeholder="Filter..." oninput="onStackedFilter(${i}, this.value)">
                         <button onclick="toggleStackedColumnChooser(event, ${i})">Columns</button>
                         <button onclick="exportStackedCsv(${i})">CSV</button>
@@ -471,7 +509,6 @@ ${grid.headHtml}
                     <div id="grid-${i}" class="stacked-grid"></div>
                 </div>
             `).join('')}
-            ${messagesHtml ? `<div class="stacked-section" style="flex:0;min-height:auto"><div class="stacked-header"><span class="sh-title">Messages</span></div>${messagesHtml}</div>` : ''}
         </div>
     ` : `
         ${result.resultSets.map((_, i) => `
@@ -479,11 +516,7 @@ ${grid.headHtml}
                 <div id="grid-${i}" class="grid-container"></div>
             </div>
         `).join('')}
-        <div id="tab-messages" style="${result.resultSets.length > 0 ? 'display:none' : ''}">
-            ${messagesHtml}
-        </div>
     `}
-    ${!isStacked && result.resultSets.length <= 1 ? messagesHtml : ''}
 <script>const vscodeApi = acquireVsCodeApi();</script>
 <script>
 console.log('[TSQL] Grid init starting...');
@@ -672,15 +705,13 @@ console.log('[TSQL] Grid init completed, gridApi:', typeof window.gridApi);
     let currentTab = 0;
     function switchTab(index) {
         document.querySelectorAll('.tab').forEach((t, i) => {
-            t.classList.toggle('active', i === (index === -1 ? document.querySelectorAll('.tab').length - 1 : index));
+            t.classList.toggle('active', i === index);
         });
         const rsCount = gridApi ? gridApi.getTableCount() : 0;
         for (let i = 0; i < rsCount; i++) {
             const el = document.getElementById('tab-' + i);
             if (el) el.style.display = i === index ? '' : 'none';
         }
-        const msgEl = document.getElementById('tab-messages');
-        if (msgEl) msgEl.style.display = index === -1 ? '' : 'none';
         currentTab = index;
         if (index >= 0 && gridApi && gridApi.redraw) {
             setTimeout(() => gridApi.redraw(index), 50);
@@ -695,20 +726,6 @@ console.log('[TSQL] Grid init completed, gridApi:', typeof window.gridApi);
 </script>
 </body>
 </html>`;
-    }
-
-    private buildMessages(result: BatchResult): string {
-        let html = '';
-        if (result.error) {
-            html += `<div class="error">${this.escapeHtml(result.error)}</div>`;
-        }
-        if (result.messages.length > 0) {
-            html += `<div class="messages">${result.messages.map(m => this.escapeHtml(m)).join('\n')}</div>`;
-        }
-        if (!result.error && result.messages.length === 0 && result.resultSets.length === 0) {
-            html += '<div class="messages">Command(s) completed successfully.</div>';
-        }
-        return html;
     }
 
     private escapeHtml(text: string): string {
