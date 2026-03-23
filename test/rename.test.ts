@@ -34,13 +34,29 @@ function findParamOccurrences(fullText: string, paramName: string): number[] {
 }
 
 // ── Helper: simulate alias rename (find all alias occurrences in current statement) ──
+// Mirrors renameProvider.ts logic: excludes table name positions in FROM/JOIN clauses
 function findAliasOccurrences(fullText: string, offset: number, aliasName: string): number[] {
     const statement = getCurrentStatement(fullText, offset);
     const statementStart = fullText.indexOf(statement);
+
+    // Find table name positions to exclude (same logic as renameProvider.ts)
+    const tableNamePositions = new Set<number>();
+    const fromJoinRegex = /(?:FROM|(?:INNER|LEFT|RIGHT|CROSS|FULL)\s+(?:OUTER\s+)?JOIN|JOIN)\s+(?:dbo\.)?(\[?\w+\]?)\s+/gi;
+    let fjMatch;
+    while ((fjMatch = fromJoinRegex.exec(statement)) !== null) {
+        const tableNameInMatch = fjMatch[1];
+        const tableNameStart = fjMatch.index + fjMatch[0].indexOf(tableNameInMatch);
+        tableNamePositions.add(tableNameStart);
+    }
+
     const regex = new RegExp(`\\b${escapeRegex(aliasName)}\\b`, 'gi');
     const positions: number[] = [];
     let match;
     while ((match = regex.exec(statement)) !== null) {
+        // Skip table name positions
+        if (tableNamePositions.has(match.index)) {
+            continue;
+        }
         positions.push(statementStart + match.index);
     }
     return positions;
@@ -180,6 +196,35 @@ console.log('\n── Alias Rename: Regression Tests ──');
 
     const kOccurrences = findAliasOccurrences(sql, 10, 'k');
     assert(kOccurrences.length === 3, 'alias k found 3 times');
+}
+
+// ═══════════════════════════════════════════════════════
+// ALIAS RENAME — ALIAS = TABLE NAME (SHOULD NOT RENAME TABLE)
+// ═══════════════════════════════════════════════════════
+console.log('\n── Alias Rename: Alias = Table Name ──');
+
+{
+    // With dbo. prefix — alias same as table name
+    const sql = `SELECT RN100_Kullanicilar.KullaniciID, RN100_Kullanicilar.RolID\nFROM dbo.RN100_Kullanicilar RN100_Kullanicilar`;
+    const occurrences = findAliasOccurrences(sql, 10, 'RN100_Kullanicilar');
+    // Should find: 2 usages in SELECT + 1 alias definition in FROM = 3 (NOT the table name after dbo.)
+    assert(occurrences.length === 3, 'alias=tableName with dbo.: table name excluded, 3 occurrences (2 usage + 1 def)');
+}
+
+{
+    // Without dbo. prefix — alias same as table name
+    const sql = `SELECT RN100_Kullanicilar.KullaniciID\nFROM RN100_Kullanicilar RN100_Kullanicilar`;
+    const occurrences = findAliasOccurrences(sql, 10, 'RN100_Kullanicilar');
+    // Should find: 1 usage in SELECT + 1 alias definition = 2 (NOT the table name in FROM)
+    assert(occurrences.length === 2, 'alias=tableName without dbo.: table name excluded, 2 occurrences (1 usage + 1 def)');
+}
+
+{
+    // Multi-table with alias = table name on one
+    const sql = `SELECT RN100_Kullanicilar.KullaniciID, R.RolName\nFROM dbo.RN100_Kullanicilar RN100_Kullanicilar\nLEFT OUTER JOIN dbo.RN100_Roller R ON R.RolID = RN100_Kullanicilar.RolID`;
+    const occurrences = findAliasOccurrences(sql, 10, 'RN100_Kullanicilar');
+    // SELECT usage (1) + FROM alias def (1) + ON usage (1) = 3
+    assert(occurrences.length === 3, 'multi-table alias=tableName: 3 occurrences (table name excluded)');
 }
 
 // ═══════════════════════════════════════════════════════
