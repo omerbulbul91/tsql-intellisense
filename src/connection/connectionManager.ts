@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import * as mssql from 'mssql';
+import { ts } from '../utils/timestamp';
 
 export interface ConnectionProfile {
     name: string;
@@ -35,6 +36,7 @@ export class ConnectionManager {
     private _onConnectionChanged = new vscode.EventEmitter<ConnectionProfile | null>();
     public readonly onConnectionChanged = this._onConnectionChanged.event;
     private _connectingProfileName: string | null = null;
+    public readonly log: vscode.OutputChannel;
 
     get connectingProfileName(): string | null { return this._connectingProfileName; }
     get isConnecting(): boolean { return this._connectingProfileName !== null; }
@@ -44,6 +46,7 @@ export class ConnectionManager {
         this.statusBarItem.command = 'tsql-intellisense.connect';
         // Status bar hidden — connection info shown in query file header instead
         this.statusBarItem.hide();
+        this.log = vscode.window.createOutputChannel('T-SQL Connection');
     }
 
     get isConnected(): boolean {
@@ -136,22 +139,76 @@ export class ConnectionManager {
         return config;
     }
 
+    private _activeRequest: mssql.Request | null = null;
+    private _connectPromise: Promise<void> | null = null;
+
     /** Connect to a database using a profile */
     async connect(profile: ConnectionProfile): Promise<void> {
+        // If already connecting to the same profile, reuse the pending promise
+        if (this._connectPromise && this._connectingProfileName === profile.name) {
+            return this._connectPromise;
+        }
+        this._connectPromise = this._connectInternal(profile);
+        try {
+            await this._connectPromise;
+        } finally {
+            this._connectPromise = null;
+        }
+    }
+
+    private async _connectInternal(profile: ConnectionProfile): Promise<void> {
         if (this.pool) { await this.disconnect(); }
         this._connectingProfileName = profile.name;
+        let cancelled = false;
+        const start = Date.now();
+        this.log.appendLine(`[${ts()}] Connecting to ${profile.name} (${profile.server}/${profile.database})...`);
         try {
             const config = this.buildPoolConfig(profile);
             const pool = new mssql.ConnectionPool(config);
-            await pool.connect();
+
+            // Show progress notification with Cancel button
+            await vscode.window.withProgress(
+                {
+                    location: vscode.ProgressLocation.Notification,
+                    title: `Connecting to ${profile.name}...`,
+                    cancellable: true,
+                },
+                async (_progress, token) => {
+                    token.onCancellationRequested(() => {
+                        cancelled = true;
+                        pool.close().catch(() => {});
+                    });
+                    await pool.connect();
+                }
+            );
+
+            if (cancelled) {
+                this.log.appendLine(`[${ts()}] Cancelled by user (${Date.now() - start}ms)`);
+                this.pool = null;
+                this.activeProfile = null;
+                this.updateStatusBar();
+                return;
+            }
             this.pool = pool;
             this.activeProfile = profile;
             this.updateStatusBar();
+            // Fetch SPID for logging
+            let spid = '?';
+            try {
+                const r = await pool.request().query('SELECT @@SPID AS spid');
+                spid = r.recordset?.[0]?.spid?.toString() ?? '?';
+            } catch { /* ignore */ }
+            this.log.appendLine(`[${ts()}] Connected to ${profile.name} (SPID: ${spid}, ${Date.now() - start}ms)`);
             this._onConnectionChanged.fire(profile);
         } catch (err: any) {
             this.pool = null;
             this.activeProfile = null;
             this.updateStatusBar();
+            if (cancelled) {
+                this.log.appendLine(`[${ts()}] Cancelled by user (${Date.now() - start}ms)`);
+                return;
+            }
+            this.log.appendLine(`[${ts()}] Failed: ${err.message} (${Date.now() - start}ms)`);
             throw new Error(`Connection failed: ${err.message}`);
         } finally {
             this._connectingProfileName = null;
@@ -172,10 +229,12 @@ export class ConnectionManager {
     /** Disconnect from the current database */
     async disconnect(): Promise<void> {
         if (this.pool) {
+            const name = this.activeProfile?.name || 'unknown';
             try { await this.pool.close(); } catch { /* ignore */ }
             this.pool = null;
             this.activeProfile = null;
             this.updateStatusBar();
+            this.log.appendLine(`[${ts()}] Disconnected from ${name}`);
             this._onConnectionChanged.fire(null);
         }
     }
@@ -234,19 +293,37 @@ export class ConnectionManager {
         }
     }
 
+    /** Cancel the currently running query */
+    cancelQuery(): void {
+        if (this._activeRequest) {
+            this.log.appendLine(`[${ts()}] Query cancelled by user`);
+            this._activeRequest.cancel();
+            this._activeRequest = null;
+        }
+    }
+
+    get isQueryRunning(): boolean {
+        return this._activeRequest !== null;
+    }
+
     private async executeSingleBatch(sql: string, messages: string[]): Promise<QueryResult[]> {
         if (!this.pool || !this.pool.connected) { throw new Error('Not connected'); }
 
         // Use query() instead of batch() for arrayRowMode compatibility
         // GO splitting is already handled by executeBatch()
         const request = this.pool.request();
+        this._activeRequest = request;
         (request as any).arrayRowMode = true;
         request.on('info', (info: any) => {
             if (info.message) { messages.push(info.message); }
         });
 
-        const result = await request.query(sql);
-        return this.normalizeArrayQueryResults(result);
+        try {
+            const result = await request.query(sql);
+            return this.normalizeArrayQueryResults(result);
+        } finally {
+            this._activeRequest = null;
+        }
     }
 
     /**
@@ -418,6 +495,9 @@ export class ConnectionManager {
     async softSwitchDatabase(dbName: string): Promise<void> {
         if (!this.pool || !this.activeProfile) { return; }
         if (this.activeProfile.database.toLowerCase() === dbName.toLowerCase()) { return; }
+        const from = this.activeProfile.database;
+        const start = Date.now();
+        this.log.appendLine(`[${ts()}] Switching DB: ${from} → ${dbName}...`);
         try {
             const newProfile = { ...this.activeProfile, database: dbName };
             await this.pool.close();
@@ -426,7 +506,10 @@ export class ConnectionManager {
             await pool.connect();
             this.pool = pool;
             this.activeProfile = newProfile;
-        } catch { /* silently fail */ }
+            this.log.appendLine(`[${ts()}] Switched to ${dbName} (${Date.now() - start}ms)`);
+        } catch (err: any) {
+            this.log.appendLine(`[${ts()}] Switch failed: ${err.message} (${Date.now() - start}ms)`);
+        }
     }
 
     showEditorDb(_dbName: string | null): void {

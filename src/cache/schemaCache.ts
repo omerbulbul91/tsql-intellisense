@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { ConnectionManager, TYPES } from '../connection/connectionManager';
+import { ts } from '../utils/timestamp';
 import {
     ALL_OBJECTS_QUERY,
     ALL_ROUTINES_QUERY,
@@ -70,6 +71,8 @@ export class SchemaCache {
     private _onSchemaLoaded = new vscode.EventEmitter<void>();
     public readonly onSchemaLoaded = this._onSchemaLoaded.event;
 
+    private get log(): vscode.OutputChannel { return this.connectionManager.log; }
+
     constructor(private connectionManager: ConnectionManager) {}
 
     get isLoaded(): boolean {
@@ -110,6 +113,8 @@ export class SchemaCache {
         if (!this.connectionManager.isConnected) { return; }
         if (this.extraDbObjects.has(dbKey)) { return; } // already loaded
 
+        const start = Date.now();
+        this.log.appendLine(`[${ts()}] Loading cross-DB objects for ${dbName}...`);
         const safe = dbName.replace(/\]/g, ']]');
         const result = await this.connectionManager.executeQuery(
             `SELECT name, type FROM (
@@ -138,6 +143,7 @@ export class SchemaCache {
             map.set(name.toLowerCase(), { name, type });
         }
         this.extraDbObjects.set(dbKey, map);
+        this.log.appendLine(`[${ts()}] Cross-DB ${dbName}: ${map.size} objects (${Date.now() - start}ms)`);
     }
 
     /** Load columns for a table in any DB (routes to main cache if dbName is the active DB) */
@@ -213,6 +219,9 @@ export class SchemaCache {
         this.viewDefinitions.clear();
         this.viewDefsLoaded = false;
 
+        const start = Date.now();
+        this.log.appendLine(`[${ts()}] Schema loading object names for ${this._loadedDbName}...`);
+
         // Load tables and views
         const tablesResult = await this.connectionManager.executeQuery(ALL_OBJECTS_QUERY);
         for (const row of tablesResult.rows) {
@@ -238,6 +247,7 @@ export class SchemaCache {
             this.objects.set(name.toLowerCase(), { name, type: 'TRIGGER' });
         }
 
+        this.log.appendLine(`[${ts()}] Schema loaded ${this.objects.size} objects (${Date.now() - start}ms)`);
         this._onSchemaLoaded.fire();
     }
 
@@ -247,6 +257,8 @@ export class SchemaCache {
             return;
         }
 
+        const start = Date.now();
+        this.log.appendLine(`[${ts()}] Loading all columns...`);
         const result = await this.connectionManager.executeQuery(ALL_COLUMNS_QUERY);
 
         for (const row of result.rows) {
@@ -272,6 +284,7 @@ export class SchemaCache {
         }
 
         this.allColumnsLoaded = true;
+        this.log.appendLine(`[${ts()}] All columns loaded: ${result.rows.length} columns (${Date.now() - start}ms)`);
     }
 
     /** Load columns for a specific table (lazy, or force reload) */
@@ -287,6 +300,7 @@ export class SchemaCache {
             return [];
         }
 
+        this.log.appendLine(`[${ts()}] Loading columns for ${tableName}${forceReload ? ' (force)' : ''}...`);
         const result = await this.connectionManager.executeQuery(TABLE_COLUMNS_QUERY, {
             tableName: { type: TYPES.NVarChar, value: tableName },
         });
@@ -336,8 +350,9 @@ export class SchemaCache {
             return;
         }
 
+        const start = Date.now();
+        this.log.appendLine(`[${ts()}] Loading foreign keys...`);
         const result = await this.connectionManager.executeQuery(FK_QUERY);
-        console.log(`[CACHE] FK query returned ${result.rows.length} rows`);
         this.foreignKeys = result.rows.map(row => ({
             fkName: row['FK_NAME'] as string,
             parentTable: row['PARENT_TABLE'] as string,
@@ -346,6 +361,7 @@ export class SchemaCache {
             referencedColumn: row['REFERENCED_COLUMN'] as string,
         }));
         this.fkLoaded = true;
+        this.log.appendLine(`[${ts()}] Foreign keys loaded: ${this.foreignKeys.length} relations (${Date.now() - start}ms)`);
     }
 
     /** Get FK relationships between two tables */
@@ -365,8 +381,9 @@ export class SchemaCache {
             return;
         }
 
+        const start = Date.now();
+        this.log.appendLine(`[${ts()}] Loading triggers...`);
         const result = await this.connectionManager.executeQuery(ALL_TRIGGERS_QUERY);
-        console.log(`[CACHE] Trigger query returned ${result.rows.length} rows`);
         this.triggers.clear();
 
         for (const row of result.rows) {
@@ -383,6 +400,7 @@ export class SchemaCache {
             this.triggers.get(tableName)!.push(trigger);
         }
         this.triggersLoaded = true;
+        this.log.appendLine(`[${ts()}] Triggers loaded: ${result.rows.length} triggers (${Date.now() - start}ms)`);
     }
 
     /** Get triggers for a table */
@@ -402,8 +420,9 @@ export class SchemaCache {
             return;
         }
 
+        const start = Date.now();
+        this.log.appendLine(`[${ts()}] Loading indexes...`);
         const result = await this.connectionManager.executeQuery(ALL_INDEXES_QUERY);
-        console.log(`[CACHE] Index query returned ${result.rows.length} rows`);
         this.indexes.clear();
 
         for (const row of result.rows) {
@@ -423,6 +442,7 @@ export class SchemaCache {
             this.indexes.get(tableName)!.push(idx);
         }
         this.indexesLoaded = true;
+        this.log.appendLine(`[${ts()}] Indexes loaded: ${result.rows.length} indexes (${Date.now() - start}ms)`);
     }
 
     /** Get indexes for a table */
@@ -436,8 +456,9 @@ export class SchemaCache {
             return;
         }
 
+        const start = Date.now();
+        this.log.appendLine(`[${ts()}] Loading view definitions...`);
         const result = await this.connectionManager.executeQuery(ALL_VIEW_DEFINITIONS_QUERY);
-        console.log(`[CACHE] View definitions query returned ${result.rows.length} rows`);
         this.viewDefinitions.clear();
 
         for (const row of result.rows) {
@@ -448,6 +469,7 @@ export class SchemaCache {
             }
         }
         this.viewDefsLoaded = true;
+        this.log.appendLine(`[${ts()}] View definitions loaded: ${result.rows.length} views (${Date.now() - start}ms)`);
     }
 
     /** Get view definition */
@@ -490,6 +512,7 @@ export class SchemaCache {
         if (minutes <= 0) { return; }
 
         this.refreshTimer = setInterval(() => {
+            this.log.appendLine(`[${ts()}] Auto-refresh triggered (every ${minutes}min)`);
             this.refresh();
         }, minutes * 60 * 1000);
     }

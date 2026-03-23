@@ -30,7 +30,11 @@
       "Bash(node -e \"const re = /\\(?:SELECT\\(?:\\\\s+\\(?:DISTINCT|ALL|TOP\\\\s+\\\\d+\\)\\)?|WHERE|AND|OR|ON|SET|ORDER\\\\s+BY|HAVING|WHEN|THEN|ELSE|CASE|,|\\\\\\(\\)\\\\s*\\([\\\\w*]*\\)$/i; console.log\\(re.exec\\(''Select  *''\\)\\);\")",
       "Bash(git checkout:*)",
       "Skill(plan-eng-review)",
-      "Skill(plan-eng-review:*)"
+      "Skill(plan-eng-review:*)",
+      "Bash(vsce package:*)",
+      "Skill(plan-design-review)",
+      "Skill(plan-design-review:*)",
+      "Bash(git diff:*)"
     ],
     "additionalDirectories": [
       "c:\\Users\\ÖmerBülbül\\source\\repos\\tsql-intellisense\\docs\\superpowers"
