@@ -377,6 +377,18 @@
         "title": "%command.deleteHistoryEntry%",
         "icon": "$(trash)",
         "category": "T-SQL"
+      },
+      {
+        "command": "tsql-intellisense.openExtensionPage",
+        "title": "%command.openExtensionPage%",
+        "icon": "$(info)",
+        "category": "T-SQL"
+      },
+      {
+        "command": "tsql-intellisense.openWalkthrough",
+        "title": "%command.openWalkthrough%",
+        "icon": "$(book)",
+        "category": "T-SQL"
       }
     ],
     "menus": {
@@ -456,6 +468,21 @@
         {
           "command": "tsql-intellisense.deleteConnection",
           "when": "viewItem =~ /^Connection/"
+        },
+        {
+          "command": "tsql-intellisense.openConnectionSettings",
+          "when": "viewItem =~ /^Connection/",
+          "group": "9_info@1"
+        },
+        {
+          "command": "tsql-intellisense.openExtensionPage",
+          "when": "viewItem =~ /^Connection/",
+          "group": "9_info@2"
+        },
+        {
+          "command": "tsql-intellisense.openWalkthrough",
+          "when": "viewItem =~ /^Connection/",
+          "group": "9_info@3"
         },
         {
           "command": "tsql-intellisense.RefreshDatabases",
@@ -727,6 +754,11 @@
     },
     "viewsWelcome": [
       {
+        "view": "tsqlConnections",
+        "contents": "%view.connectionsWelcome%",
+        "when": "tsqlConnections.isEmpty"
+      },
+      {
         "view": "tsqlQueryHistory",
         "contents": "%view.queryHistoryWelcome%"
       }
@@ -735,6 +767,75 @@
       {
         "language": "sql",
         "path": "./snippets/sql.json"
+      }
+    ],
+    "walkthroughs": [
+      {
+        "id": "tsql-intellisense.getStarted",
+        "title": "%walkthrough.title%",
+        "description": "%walkthrough.description%",
+        "steps": [
+          {
+            "id": "addConnection",
+            "title": "%walkthrough.addConnection.title%",
+            "description": "%walkthrough.addConnection.description%",
+            "media": {
+              "markdown": "walkthroughs/addConnection.md"
+            },
+            "completionEvents": [
+              "onCommand:tsql-intellisense.addConnection"
+            ]
+          },
+          {
+            "id": "objectExplorer",
+            "title": "%walkthrough.objectExplorer.title%",
+            "description": "%walkthrough.objectExplorer.description%",
+            "media": {
+              "markdown": "walkthroughs/objectExplorer.md"
+            },
+            "completionEvents": [
+              "onView:tsqlConnections"
+            ]
+          },
+          {
+            "id": "intellisense",
+            "title": "%walkthrough.intellisense.title%",
+            "description": "%walkthrough.intellisense.description%",
+            "media": {
+              "markdown": "walkthroughs/intellisense.md"
+            }
+          },
+          {
+            "id": "runQuery",
+            "title": "%walkthrough.runQuery.title%",
+            "description": "%walkthrough.runQuery.description%",
+            "media": {
+              "markdown": "walkthroughs/runQuery.md"
+            },
+            "completionEvents": [
+              "onCommand:tsql-intellisense.runQuery"
+            ]
+          },
+          {
+            "id": "formatSql",
+            "title": "%walkthrough.formatSql.title%",
+            "description": "%walkthrough.formatSql.description%",
+            "media": {
+              "markdown": "walkthroughs/formatSql.md"
+            },
+            "completionEvents": [
+              "onCommand:tsql-intellisense.formatSql"
+            ]
+          },
+          {
+            "id": "goToDefinition",
+            "title": "%walkthrough.goToDefinition.title%",
+            "description": "%walkthrough.goToDefinition.description%",
+            "media": {
+              "markdown": "walkthroughs/goToDefinition.md"
+            }
+          }
+        ]
       }
     ],
     "configuration": [

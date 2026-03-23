@@ -9,7 +9,8 @@ export class ConnectionFormProvider {
         context: vscode.ExtensionContext,
         connectionManager: ConnectionManager,
         treeProvider: ConnectionTreeProvider,
-        editProfile?: ConnectionProfile
+        editProfile?: ConnectionProfile,
+        showProjectPath: boolean = true
     ): void {
         const column = vscode.window.activeTextEditor?.viewColumn || vscode.ViewColumn.One;
 
@@ -24,6 +25,7 @@ export class ConnectionFormProvider {
                 profile: editProfile || null,
                 saved,
                 recent,
+                showProjectPath,
             });
             return;
         }
@@ -37,7 +39,7 @@ export class ConnectionFormProvider {
 
         ConnectionFormProvider.currentPanel = panel;
         panel.iconPath = new vscode.ThemeIcon('database');
-        panel.webview.html = ConnectionFormProvider.getHtml(editProfile, saved, recent);
+        panel.webview.html = ConnectionFormProvider.getHtml(editProfile, saved, recent, showProjectPath);
 
         panel.webview.onDidReceiveMessage(async (msg) => {
             switch (msg.cmd) {
@@ -295,7 +297,8 @@ export class ConnectionFormProvider {
     private static getHtml(
         editProfile?: ConnectionProfile,
         saved: ConnectionProfile[] = [],
-        recent: ConnectionProfile[] = []
+        recent: ConnectionProfile[] = [],
+        showProjectPath: boolean = true
     ): string {
         const p = editProfile;
         const e = ConnectionFormProvider.escapeHtml;
@@ -488,7 +491,7 @@ export class ConnectionFormProvider {
                 <label for="trustCert" style="margin:0;font-weight:normal;text-transform:none;letter-spacing:0">Trust Server Certificate</label>
             </div>
         </div>
-        <div class="form-group" id="projectPathGroup" style="display:${p?.database ? 'block' : 'none'}">
+        <div class="form-group" id="projectPathGroup" style="display:${showProjectPath && p?.database ? 'block' : 'none'}">
             <label>Project Path <span style="font-weight:normal;text-transform:none">(for <span id="projectDbLabel">${p?.database ? e(p.database) : ''}</span>)</span></label>
             <div class="browse-group">
                 <input id="projectPath" value="${p ? e((p.databaseProjects && p.database && p.databaseProjects[p.database]) ? p.databaseProjects[p.database] : (p.projectPath || '')) : ''}" placeholder="Optional: SQL project folder for this database" />
@@ -531,6 +534,7 @@ export class ConnectionFormProvider {
     let originalName = ${p ? `'${e(p.name).replace(/'/g, "\\'")}'` : 'null'};
     let savedConns = ${savedJson};
     let recentConns = ${recentJson};
+    let projectPathEnabled = ${showProjectPath};
 
     renderSidebar();
     updateConnStr();
@@ -579,7 +583,7 @@ export class ConnectionFormProvider {
         const db = document.getElementById('database').value.trim();
         const group = document.getElementById('projectPathGroup');
         const label = document.getElementById('projectDbLabel');
-        group.style.display = db ? 'block' : 'none';
+        group.style.display = projectPathEnabled && db ? 'block' : 'none';
         label.textContent = db;
     }
 
@@ -640,11 +644,13 @@ export class ConnectionFormProvider {
             trustServerCertificate: document.getElementById('trustCert').checked,
             encrypt: document.getElementById('encrypt').value,
         };
-        const projPath = document.getElementById('projectPath').value.trim();
-        if (profile.database) {
-            // Always send databaseProjects key; empty string = delete signal
-            profile.databaseProjects = {};
-            profile.databaseProjects[profile.database] = projPath;
+        if (projectPathEnabled) {
+            const projPath = document.getElementById('projectPath').value.trim();
+            if (profile.database) {
+                // Always send databaseProjects key; empty string = delete signal
+                profile.databaseProjects = {};
+                profile.databaseProjects[profile.database] = projPath;
+            }
         }
         if (isSql) {
             profile.user = document.getElementById('user').value.trim();
@@ -789,6 +795,7 @@ export class ConnectionFormProvider {
             recentConns = msg.recent || [];
             renderSidebar();
         } else if (msg.cmd === 'loadProfile') {
+            if (msg.showProjectPath !== undefined) { projectPathEnabled = msg.showProjectPath; }
             if (msg.profile) {
                 fillForm(msg.profile);
             } else {

@@ -157,16 +157,18 @@ export class TabulatorRenderer implements GridRenderer {
         resultSets: { columns: string[]; rows: any[] }[],
         isStacked: boolean,
     ): string {
-        const resultSetsJson = JSON.stringify(resultSets.map(rs => ({ columns: rs.columns, rows: rs.rows })));
+        const resultSetsJson = JSON.stringify(resultSets.map(rs => ({ columns: rs.columns, rows: rs.rows })))
+            .replace(/<\/script>/gi, '<\\/script>');
         return `
     const resultSets = ${resultSetsJson};
     const tables = [];
     const isStacked = ${isStacked};
 
     resultSets.forEach((rs, i) => {
+      try {
         if (rs.columns.length === 0) return;
         const el = document.getElementById('grid-' + i);
-        if (!el) return;
+        if (!el) { console.error('[TSQL] grid-' + i + ' element not found'); return; }
 
         const columns = [
             { formatter: "rowSelection", titleFormatter: "rowSelection", headerSort: false, resizable: false, width: 30, hozAlign: "center" },
@@ -205,6 +207,11 @@ export class TabulatorRenderer implements GridRenderer {
         });
 
         tables.push(table);
+      } catch (err) {
+        console.error('[TSQL] Tabulator grid-' + i + ' init error:', err);
+        const el = document.getElementById('grid-' + i);
+        if (el) el.innerHTML = '<p style="padding:8px;color:var(--vscode-errorForeground)">Grid error: ' + err.message + '</p>';
+      }
     });
 
     // ── Context Menu ─────────────────────────────────

@@ -23,7 +23,8 @@
       "Bash(node -e \"console.log\\(require\\(''./node_modules/ag-grid-community/package.json''\\).version\\)\")",
       "Bash(node -e \"const ag = require\\(''ag-grid-community''\\); const t = ag.themeBalham; console.log\\(typeof t, Object.keys\\(t\\).slice\\(0,10\\)\\); console.log\\(typeof t.withParams\\); console.log\\(typeof t.dark\\);\")",
       "Bash(npm uninstall:*)",
-      "Bash(ls c:/Users/ÖmerBülbül/source/repos/tsql-intellisense/node_modules/ag-grid-community/styles/ag-theme-alpine*)"
+      "Bash(ls c:/Users/ÖmerBülbül/source/repos/tsql-intellisense/node_modules/ag-grid-community/styles/ag-theme-alpine*)",
+      "Bash(grep -l \"Tb_Rn_Crm_PrimOlayLog\" \"/c/Users/ÖmerBülbül/source/repos/OCTO_ATIKSA/dbo/Views\"/*.sql)"
     ],
     "additionalDirectories": [
       "c:\\Users\\ÖmerBülbül\\source\\repos\\tsql-intellisense\\docs\\superpowers"

@@ -48,6 +48,7 @@
   "command.Script.Delete": "DELETE Olarak",
   "command.Script.Execute": "EXECUTE Olarak",
 
+  "command.RefreshConnections": "Yenile",
   "command.RefreshDatabases": "Veritabanlarını Yenile",
   "command.FilterDatabases": "Veritabanlarını Filtrele",
   "command.NewDatabase": "Yeni Veritabanı",
@@ -67,6 +68,7 @@
   "view.connections": "Bağlantılar",
   "view.queryResults": "Sorgu Sonuçları",
   "view.queryHistory": "Sorgu Geçmişi",
+  "view.connectionsWelcome": "Henüz bağlantı yok.\n[Bağlantı Ekle](command:tsql-intellisense.addConnection)\n[Başlangıç Rehberi](command:workbench.action.openWalkthrough?%22omerbulbul.tsql-intellisense%23tsql-intellisense.getStarted%22)",
   "view.queryHistoryWelcome": "Sorgu Geçmişi Yok",
 
   "config.title": "T-SQL IntelliSense",
@@ -105,7 +107,9 @@
   "command.clearQueryHistory": "Sorgu Geçmişini Temizle",
   "command.deleteHistoryEntry": "Geçmiş Kaydını Sil",
   "command.openQueryHistorySettings": "Sorgu Geçmişi Ayarları",
-  "command.openConnectionSettings": "Bağlantı Ayarları",
+  "command.openConnectionSettings": "Eklenti Ayarları",
+  "command.openExtensionPage": "Eklenti Hakkında",
+  "command.openWalkthrough": "Başlangıç Rehberi",
 
   "config.queryHistory.enabled": "Sorgu geçmişi takibini etkinleştir",
   "config.queryHistory.maxQuerySize": "Geçmişe kaydedilecek maksimum sorgu boyutu (bayt). Bu boyutu aşan sorgular kaydedilmez",
@@ -150,5 +154,20 @@
   "config.ddl.alignDataTypes": "CREATE TABLE'da veri tiplerini ve kısıtlamaları hizala",
   "config.ddl.placeFirstParam": "İlk prosedür parametresini yeni satıra yerleştir (never, always, ifMultiple)",
   "config.ddl.collapseShort": "Kısa DDL ifadelerini tek satıra daralt",
-  "config.ddl.collapseShortLen": "Bu karakter sayısından kısa DDL ifadelerini daralt"
+  "config.ddl.collapseShortLen": "Bu karakter sayısından kısa DDL ifadelerini daralt",
+
+  "walkthrough.title": "T-SQL IntelliSense'e Başlayın",
+  "walkthrough.description": "SQL Server'a bağlanmayı, IntelliSense, sorgu çalıştırma, formatlama ve navigasyon özelliklerini öğrenin.",
+  "walkthrough.addConnection.title": "Veritabanı Bağlantısı Ekleyin",
+  "walkthrough.addConnection.description": "IntelliSense ve sorgu çalıştırmayı etkinleştirmek için ilk SQL Server bağlantınızı yapılandırın.\n\n[Bağlantı Ekle](command:tsql-intellisense.addConnection)",
+  "walkthrough.objectExplorer.title": "Veritabanınızı Keşfedin",
+  "walkthrough.objectExplorer.description": "Object Explorer ağaç görünümünde tabloları, view'ları, saklı yordamları ve fonksiyonları görüntüleyin — SSMS gibi.",
+  "walkthrough.intellisense.title": "Akıllı IntelliSense Kullanın",
+  "walkthrough.intellisense.description": "Bir `.sql` dosyası açın ve yazmaya başlayın — tablolar, kolonlar, SP'ler ve daha fazlası için bağlama duyarlı öneriler alın.",
+  "walkthrough.runQuery.title": "Sorgu Çalıştırın",
+  "walkthrough.runQuery.description": "SQL'inizi çalıştırmak için **F5** tuşuna basın ve sonuçları sıralanabilir grid'de CSV/JSON export ile görün.\n\n[Sorgu Çalıştır](command:tsql-intellisense.runQuery)",
+  "walkthrough.formatSql.title": "SQL'inizi Formatlayın",
+  "walkthrough.formatSql.description": "Keyword büyük/küçük harf, cümlecik hizalama ve Redgate SQL Prompt stil desteğiyle SQL'i otomatik formatlayın.\n\n[SQL Formatla](command:tsql-intellisense.formatSql)",
+  "walkthrough.goToDefinition.title": "F12 ve F2 ile Navigasyon",
+  "walkthrough.goToDefinition.description": "Herhangi bir nesne üzerinde **F12** tuşuna basarak tanımını görüntüleyin. Bir alias üzerinde **F2** ile sorgu genelinde yeniden adlandırın."
 }

@@ -148,6 +148,7 @@ export class ConnectionTreeProvider implements vscode.TreeDataProvider<DatabaseT
 
     private getConnectionNodes(): (DatabaseTreeItem | ErrorItem)[] {
         const profiles = this.treeQueryService.getProfiles();
+        vscode.commands.executeCommand('setContext', 'tsqlConnections.isEmpty', profiles.length === 0);
         return profiles.map((p) => {
             const isConnected = this.treeQueryService.currentProfileName === p.name;
             const node = new DatabaseTreeItem(

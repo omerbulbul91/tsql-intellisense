@@ -32,6 +32,17 @@ export function activate(context: vscode.ExtensionContext) {
     // Mark extension as active (for keybinding priority over mssql)
     vscode.commands.executeCommand('setContext', 'tsqlIntellisense.active', true);
 
+    // Show walkthrough on first install
+    const walkthroughShownKey = 'tsql.walkthroughShown';
+    if (!context.globalState.get<boolean>(walkthroughShownKey)) {
+        context.globalState.update(walkthroughShownKey, true);
+        vscode.commands.executeCommand(
+            'workbench.action.openWalkthrough',
+            'omerbulbul.tsql-intellisense#tsql-intellisense.getStarted',
+            false
+        );
+    }
+
     // Initialize core components
     connectionManager = new ConnectionManager();
     schemaCacheManager = new SchemaCacheManager();
@@ -829,7 +840,8 @@ export function activate(context: vscode.ExtensionContext) {
             vscode.commands.registerCommand(`tsql-intellisense.queryShortcut${i}`, async () => {
                 const config = vscode.workspace.getConfiguration('tsql-intellisense');
                 const shortcuts = config.get<{ key: string; query: string }[]>('queryShortcuts', []);
-                const shortcut = shortcuts[i];
+                const keyMap: Record<number, string> = { 0: 'Alt+F1', 1: 'Ctrl+1', 2: 'Ctrl+2', 3: 'Ctrl+3', 4: 'Ctrl+4', 5: 'Ctrl+5', 6: 'Ctrl+6', 7: 'Ctrl+7', 8: 'Ctrl+8', 9: 'Ctrl+9' };
+                const shortcut = shortcuts.find(s => s.key === keyMap[i]);
                 if (!shortcut || !shortcut.query) {
                     vscode.window.showInformationMessage(`Query shortcut ${i} is not configured`);
                     return;
@@ -991,7 +1003,17 @@ export function activate(context: vscode.ExtensionContext) {
             StyleFormProvider.show(context, styleLoader, 'history');
         }),
         vscode.commands.registerCommand('tsql-intellisense.openConnectionSettings', () => {
-            StyleFormProvider.show(context, styleLoader, 'connections');
+            vscode.commands.executeCommand('workbench.action.openSettings', '@ext:omerbulbul.tsql-intellisense');
+        }),
+        vscode.commands.registerCommand('tsql-intellisense.openExtensionPage', () => {
+            vscode.commands.executeCommand('extension.open', 'omerbulbul.tsql-intellisense');
+        }),
+        vscode.commands.registerCommand('tsql-intellisense.openWalkthrough', () => {
+            vscode.commands.executeCommand(
+                'workbench.action.openWalkthrough',
+                'omerbulbul.tsql-intellisense#tsql-intellisense.getStarted',
+                true
+            );
         }),
         vscode.commands.registerCommand('tsql-intellisense.deleteHistoryEntry', (item: any) => {
             if (item?.entry?.id) {
@@ -1088,9 +1110,9 @@ export function activate(context: vscode.ExtensionContext) {
                 const dbName = item instanceof DatabaseTreeItem ? item.databaseName : item?.dbName;
                 if (dbName && item?.nodeType === NodeType.Database) {
                     const editCopy = { ...profile, database: dbName };
-                    ConnectionFormProvider.show(context, connectionManager, treeProvider, editCopy);
+                    ConnectionFormProvider.show(context, connectionManager, treeProvider, editCopy, true);
                 } else {
-                    ConnectionFormProvider.show(context, connectionManager, treeProvider, profile);
+                    ConnectionFormProvider.show(context, connectionManager, treeProvider, profile, false);
                 }
             }
         })
@@ -1587,6 +1609,7 @@ export function activate(context: vscode.ExtensionContext) {
 
     // Tree management: Refresh & Filter commands
     context.subscriptions.push(
+        vscode.commands.registerCommand('tsql-intellisense.RefreshConnections', () => treeProvider.refresh()),
         vscode.commands.registerCommand('tsql-intellisense.RefreshDatabases', (node: DatabaseTreeItem) => treeProvider.refresh(node)),
         vscode.commands.registerCommand('tsql-intellisense.FilterDatabases', async () => {
             const value = await vscode.window.showInputBox({ prompt: 'Filter databases (empty to clear)', value: treeProvider.getDatabaseFilter() });
