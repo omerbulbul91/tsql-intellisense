@@ -9,26 +9,38 @@ export class TsqlRenameProvider implements vscode.RenameProvider {
         newName: string,
         _token: vscode.CancellationToken
     ): vscode.WorkspaceEdit | undefined {
-        const result = this.getAliasAtPosition(document, position);
+        const result = this.getRenameTarget(document, position);
         if (!result) { return undefined; }
 
-        const { alias: oldName } = result;
+        const { name: oldName, kind } = result;
         const fullText = document.getText();
-        const offset = document.offsetAt(position);
-        const statement = getCurrentStatement(fullText, offset);
-        const statementStart = fullText.indexOf(statement);
-
         const edit = new vscode.WorkspaceEdit();
 
-        // Find all occurrences of the alias in the statement
-        // Match as standalone word (word boundary) — handles both "k" alone and "k.Column"
-        const regex = new RegExp(`\\b${this.escapeRegex(oldName)}\\b`, 'gi');
-        let match;
-        while ((match = regex.exec(statement)) !== null) {
-            const absOffset = statementStart + match.index;
-            const startPos = document.positionAt(absOffset);
-            const endPos = document.positionAt(absOffset + oldName.length);
-            edit.replace(document.uri, new vscode.Range(startPos, endPos), newName);
+        if (kind === 'parameter') {
+            // Parameters: rename across the entire document
+            // Ensure newName starts with @
+            const newParam = newName.startsWith('@') ? newName : '@' + newName;
+            const regex = new RegExp(`${this.escapeRegex(oldName)}\\b`, 'gi');
+            let match;
+            while ((match = regex.exec(fullText)) !== null) {
+                const startPos = document.positionAt(match.index);
+                const endPos = document.positionAt(match.index + oldName.length);
+                edit.replace(document.uri, new vscode.Range(startPos, endPos), newParam);
+            }
+        } else {
+            // Aliases: rename within current statement
+            const offset = document.offsetAt(position);
+            const statement = getCurrentStatement(fullText, offset);
+            const statementStart = fullText.indexOf(statement);
+
+            const regex = new RegExp(`\\b${this.escapeRegex(oldName)}\\b`, 'gi');
+            let match;
+            while ((match = regex.exec(statement)) !== null) {
+                const absOffset = statementStart + match.index;
+                const startPos = document.positionAt(absOffset);
+                const endPos = document.positionAt(absOffset + oldName.length);
+                edit.replace(document.uri, new vscode.Range(startPos, endPos), newName);
+            }
         }
 
         return edit;
@@ -39,20 +51,27 @@ export class TsqlRenameProvider implements vscode.RenameProvider {
         position: vscode.Position,
         _token: vscode.CancellationToken
     ): { range: vscode.Range; placeholder: string } {
-        const result = this.getAliasAtPosition(document, position);
+        const result = this.getRenameTarget(document, position);
         if (!result) {
-            throw new Error('Rename only works on table aliases');
+            throw new Error('Rename only works on table aliases and parameters');
         }
 
         return {
             range: result.range,
-            placeholder: result.alias,
+            placeholder: result.name,
         };
     }
 
-    /** Check if cursor is on a known alias — works on definition site AND usage sites (alias.Column) */
-    private getAliasAtPosition(document: vscode.TextDocument, position: vscode.Position): { alias: string; range: vscode.Range } | undefined {
-        // Use VS Code's built-in word detection
+    /** Check if cursor is on a known alias or parameter */
+    private getRenameTarget(document: vscode.TextDocument, position: vscode.Position): { name: string; range: vscode.Range; kind: 'alias' | 'parameter' } | undefined {
+        // Check for parameter (@word) first
+        const paramRange = document.getWordRangeAtPosition(position, /@\w+/);
+        if (paramRange) {
+            const param = document.getText(paramRange);
+            return { name: param, range: paramRange, kind: 'parameter' };
+        }
+
+        // Use VS Code's built-in word detection for aliases
         const wordRange = document.getWordRangeAtPosition(position, /\w+/);
         if (!wordRange) { return undefined; }
 
@@ -67,7 +86,7 @@ export class TsqlRenameProvider implements vscode.RenameProvider {
         // Check if the word under cursor is a known alias
         const match = aliases.find(a => a.alias.toLowerCase() === word.toLowerCase());
         if (match) {
-            return { alias: match.alias, range: wordRange };
+            return { name: match.alias, range: wordRange, kind: 'alias' };
         }
 
         return undefined;
