@@ -21,6 +21,7 @@ import { StyleLoader } from './formatter/styleLoader';
 import { FormatterProvider } from './providers/formatterProvider';
 import { StyleFormProvider } from './providers/styleFormProvider';
 import { TranslationEditor } from './providers/translationEditor';
+import { ts } from './utils/timestamp';
 import { QueryHistoryProvider, QueryHistoryEntry } from './providers/queryHistoryProvider';
 import { MessagePanel } from './providers/messagePanel';
 
@@ -116,7 +117,9 @@ export function activate(context: vscode.ExtensionContext) {
     let historyLastClickTime = 0;
     let historyLastClickId = '';
     let historyClickTimer: ReturnType<typeof setTimeout> | null = null;
-    let historyPreviewDoc: vscode.TextDocument | null = null;
+    let historyPreviewUri: vscode.Uri | null = null;
+    /** Map open tab URIs to their history entry (for pin tracking) */
+    const documentEntryMap = new Map<string, QueryHistoryEntry>();
 
     /** Find a unique untitled URI: try base name, then (1), (2), ... */
     function findUniqueUntitledUri(baseName: string): vscode.Uri {
@@ -137,51 +140,92 @@ export function activate(context: vscode.ExtensionContext) {
         try { return require('fs').existsSync(filePath); } catch { return false; }
     }
 
+
+    async function closeHistoryPreview(): Promise<void> {
+        if (!historyPreviewUri) { return; }
+        const prevTab = vscode.window.tabGroups.all
+            .flatMap(g => g.tabs)
+            .find(t => (t.input as any)?.uri?.toString() === historyPreviewUri!.toString());
+        if (prevTab) {
+            // Always close preview tab silently (revert if dirty to avoid "Save?" prompt)
+            if (prevTab.isDirty) {
+                await vscode.window.showTextDocument(historyPreviewUri, { preview: true, preserveFocus: false });
+                await vscode.commands.executeCommand('workbench.action.revertAndCloseActiveEditor');
+            } else {
+                await vscode.window.tabGroups.close(prevTab);
+            }
+        }
+        historyPreviewUri = null;
+    }
+
     async function openHistoryFile(entry: QueryHistoryEntry, preview: boolean): Promise<void> {
         let doc: vscode.TextDocument;
         const isRealFile = fileExists(entry.filePath);
 
         if (isRealFile) {
+            // Close preview if opening a real file
+            if (preview) { await closeHistoryPreview(); }
             const uri = vscode.Uri.file(entry.filePath);
             doc = await vscode.workspace.openTextDocument(uri);
+            if (preview) {
+                historyPreviewUri = uri;
+
+            }
         } else if (preview) {
-            // Single click — reuse tracked preview document
-            const isPreviewOpen = historyPreviewDoc && vscode.workspace.textDocuments.some(d => d.uri.toString() === historyPreviewDoc!.uri.toString());
-            if (isPreviewOpen && historyPreviewDoc) {
-                doc = historyPreviewDoc;
+            // Single click — reuse existing preview doc or create new one
+            if (historyPreviewUri) {
+                // Reuse existing preview tab — just replace content
+                doc = await vscode.workspace.openTextDocument(historyPreviewUri);
                 const edit = new vscode.WorkspaceEdit();
-                const fullRange = new vscode.Range(0, 0, doc.lineCount, 0);
-                edit.replace(doc.uri, fullRange, entry.sql);
+                edit.replace(doc.uri, new vscode.Range(0, 0, doc.lineCount, 0), entry.sql);
                 await vscode.workspace.applyEdit(edit);
             } else {
-                const previewUri = vscode.Uri.parse(`untitled:HistoryPreview.sql`);
-                doc = await vscode.workspace.openTextDocument(previewUri);
+                // No preview open — create new untitled
+                const name = entry.fileName.endsWith('.sql') ? entry.fileName : entry.fileName + '.sql';
+                const uri = findUniqueUntitledUri(name);
+                doc = await vscode.workspace.openTextDocument(uri);
                 const edit = new vscode.WorkspaceEdit();
                 edit.insert(doc.uri, new vscode.Position(0, 0), entry.sql);
                 await vscode.workspace.applyEdit(edit);
-                historyPreviewDoc = doc;
+                historyPreviewUri = doc.uri;
             }
+
         } else {
-            // Double click — open with original file name (.sql ensured), unique if taken
-            const name = entry.fileName.endsWith('.sql') ? entry.fileName : entry.fileName + '.sql';
-            const uri = findUniqueUntitledUri(name);
-            doc = await vscode.workspace.openTextDocument(uri);
-            const edit = new vscode.WorkspaceEdit();
-            edit.insert(doc.uri, new vscode.Position(0, 0), entry.sql);
-            await vscode.workspace.applyEdit(edit);
+            // Double click (pin) — if preview is open, promote it to pinned
+            if (historyPreviewUri) {
+                doc = await vscode.workspace.openTextDocument(historyPreviewUri);
+                // Replace content with this entry's content (in case it's different)
+                const edit = new vscode.WorkspaceEdit();
+                edit.replace(doc.uri, new vscode.Range(0, 0, doc.lineCount, 0), entry.sql);
+                await vscode.workspace.applyEdit(edit);
+                historyPreviewUri = null; // No longer a preview
+            } else {
+                // No preview — open fresh
+                const name = entry.fileName.endsWith('.sql') ? entry.fileName : entry.fileName + '.sql';
+                const uri = findUniqueUntitledUri(name);
+                doc = await vscode.workspace.openTextDocument(uri);
+                const edit = new vscode.WorkspaceEdit();
+                edit.insert(doc.uri, new vscode.Position(0, 0), entry.sql);
+                await vscode.workspace.applyEdit(edit);
+            }
         }
 
         await vscode.window.showTextDocument(doc, { preview });
+        // Track entry for this tab
+        documentEntryMap.set(doc.uri.toString(), entry);
         queryRunner.setDocumentDatabase(doc.uri, {
             profileName: entry.connectionName,
             dbName: entry.databaseName,
         });
-        const profile = connectionManager.getSavedProfiles().find(p => p.name === entry.connectionName);
-        if (profile) {
-            if (!connectionManager.isConnected || connectionManager.currentProfile?.name !== entry.connectionName) {
-                await connectionManager.connect({ ...profile, database: entry.databaseName });
-            } else if (connectionManager.currentProfile?.database?.toLowerCase() !== entry.databaseName.toLowerCase()) {
-                await connectionManager.softSwitchDatabase(entry.databaseName);
+        // Only auto-connect on double-click (pinned) — preview skips to avoid VPN/timeout delays
+        if (!preview) {
+            const profile = connectionManager.getSavedProfiles().find(p => p.name === entry.connectionName);
+            if (profile) {
+                if (!connectionManager.isConnected || connectionManager.currentProfile?.name !== entry.connectionName) {
+                    await connectionManager.connect({ ...profile, database: entry.databaseName });
+                } else if (connectionManager.currentProfile?.database?.toLowerCase() !== entry.databaseName.toLowerCase()) {
+                    await connectionManager.softSwitchDatabase(entry.databaseName);
+                }
             }
         }
     }
@@ -199,12 +243,8 @@ export function activate(context: vscode.ExtensionContext) {
             if (isDoubleClick) {
                 // Double click → open with original file name (pinned)
                 openHistoryFile(entry, false);
-            } else {
-                // Single click → preview (wait to rule out double click)
-                historyClickTimer = setTimeout(() => {
-                    openHistoryFile(entry, true);
-                }, 400);
             }
+            // Single click → do nothing (tooltip shows on hover)
         })
     );
 
@@ -277,6 +317,7 @@ export function activate(context: vscode.ExtensionContext) {
 
     // Register definition provider (F12 → Go to Definition)
     const definitionProvider = new TsqlDefinitionProvider(connectionManager, schemaCache, queryRunner);
+    completionProvider.setDefinitionProvider(definitionProvider);
     context.subscriptions.push(
         vscode.languages.registerDefinitionProvider(
             { language: 'sql', scheme: '*' },
@@ -376,15 +417,15 @@ export function activate(context: vscode.ExtensionContext) {
         })
     );
 
-    // Add Snippet from selection — opens Options → Snippets with body pre-filled
+    // Add Snippet from selection — opens Snippet Manager with body pre-filled
     context.subscriptions.push(
         vscode.commands.registerCommand('tsql-intellisense.addSnippetFromSelection', () => {
             const editor = vscode.window.activeTextEditor;
             const selectedText = editor ? editor.document.getText(editor.selection) : '';
-            StyleFormProvider.show(context, styleLoader, 'snippets');
-            // Post the selected text to pre-fill the snippet body after the panel is ready
+            vscode.commands.executeCommand('workbench.action.closePanel');
+            SnippetManagerProvider.createOrShow(context.extensionUri, snippetProvider);
             setTimeout(() => {
-                StyleFormProvider.postMessage({ cmd: 'openSnippetNewWithBody', body: selectedText });
+                SnippetManagerProvider.openNewWithBody(selectedText);
             }, 800);
         })
     );
@@ -909,6 +950,7 @@ export function activate(context: vscode.ExtensionContext) {
 
                 // Replace @WORD placeholder
                 const sql = shortcut.query.replace(/@WORD/g, word);
+                connectionManager.log.appendLine(`[${ts()}] Query shortcut (${keyMap[i]}): ${sql.replace(/\s+/g, ' ').trim().substring(0, 200)}`);
                 await queryRunner.runQueryText(sql);
             })
         );
@@ -1023,21 +1065,39 @@ export function activate(context: vscode.ExtensionContext) {
         const uriKey = editor.document.uri.toString();
         const isUntitled = editor.document.uri.scheme === 'untitled';
         const filePath = isUntitled ? uriKey : editor.document.uri.fsPath;
+
+        // Strip history header from SQL before comparison/storage
+        const sqlClean = sql.replace(/^-- #\d+ \|[^\n]*\n/, '');
+
         // Skip if SQL content hasn't changed since last history entry
-        if (lastHistorySql.get(uriKey) === sql) { return; }
-        lastHistorySql.set(uriKey, sql);
+        if (lastHistorySql.get(uriKey) === sqlClean) { return; }
+        lastHistorySql.set(uriKey, sqlClean);
         const docDb = queryRunner.getDocumentDatabase(editor.document.uri);
         const dbName = docDb?.dbName ?? profile.database;
-        const fileName = isUntitled
-            ? (editor.document.uri.path || 'Untitled')
-            : require('path').basename(filePath);
+
+        // Determine fileName — if tab is linked to a history entry, reuse its fileName
+        const linkedEntry = documentEntryMap.get(uriKey);
+        const fileName = linkedEntry
+            ? linkedEntry.fileName
+            : isUntitled
+                ? (editor.document.uri.path || 'Untitled')
+                : require('path').basename(filePath);
+
         historyProvider.addEntry({
             fileName,
             filePath,
-            sql,
+            sql: sqlClean,
             connectionName: profile.name,
             databaseName: dbName,
         });
+
+        // Update tab's linked entry to the newly created one
+        if (linkedEntry || isUntitled) {
+            const latest = historyProvider.getLatestEntry(fileName);
+            if (latest) {
+                documentEntryMap.set(uriKey, latest);
+            }
+        }
     });
 
     // Query History commands
@@ -1045,8 +1105,15 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.commands.registerCommand('tsql-intellisense.refreshQueryHistory', () => {
             historyProvider.refresh();
         }),
-        vscode.commands.registerCommand('tsql-intellisense.clearQueryHistory', () => {
-            historyProvider.clearAll();
+        vscode.commands.registerCommand('tsql-intellisense.clearQueryHistory', async () => {
+            const answer = await vscode.window.showWarningMessage(
+                'Clear all query history?',
+                { modal: true },
+                'Yes'
+            );
+            if (answer === 'Yes') {
+                historyProvider.clearAll();
+            }
         }),
         vscode.commands.registerCommand('tsql-intellisense.openQueryHistorySettings', () => {
             StyleFormProvider.show(context, styleLoader, 'history');
@@ -1058,7 +1125,7 @@ export function activate(context: vscode.ExtensionContext) {
             vscode.commands.executeCommand('workbench.action.openSettings', '@ext:omerbulbul.tsql-intellisense');
         }),
         vscode.commands.registerCommand('tsql-intellisense.openExtensionPage', () => {
-            vscode.commands.executeCommand('extension.open', 'omerbulbul.tsql-intellisense');
+            vscode.commands.executeCommand('workbench.extensions.search', '@id:omerbulbul.tsql-intellisense');
         }),
         vscode.commands.registerCommand('tsql-intellisense.openWalkthrough', () => {
             vscode.commands.executeCommand(
@@ -1067,9 +1134,25 @@ export function activate(context: vscode.ExtensionContext) {
                 true
             );
         }),
-        vscode.commands.registerCommand('tsql-intellisense.deleteHistoryEntry', (item: any) => {
-            if (item?.entry?.id) {
-                historyProvider.deleteEntry(item.entry.id);
+        vscode.commands.registerCommand('tsql-intellisense.deleteHistoryEntry', async (item: any) => {
+            if (item?.entries?.length > 1) {
+                const answer = await vscode.window.showWarningMessage(
+                    `Delete all ${item.entries.length} entries for "${item.entry.fileName}"?`,
+                    { modal: true },
+                    'Yes'
+                );
+                if (answer === 'Yes') {
+                    historyProvider.deleteEntries(item.entries.map((e: any) => e.id));
+                }
+            } else if (item?.entry?.id) {
+                const answer = await vscode.window.showWarningMessage(
+                    `Delete "${item.entry.fileName}"?`,
+                    { modal: true },
+                    'Yes'
+                );
+                if (answer === 'Yes') {
+                    historyProvider.deleteEntry(item.entry.id);
+                }
             }
         }),
         vscode.commands.registerCommand('tsql-intellisense.openHistoryEntry', async (entry: QueryHistoryEntry) => {

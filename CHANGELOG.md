@@ -1,5 +1,35 @@
 # Changelog
 
+## [0.5.3] - 2026-03-24
+
+### Added
+- **Query cancel** — F5 and query shortcuts now show Cancel button; cancels the running TDS request
+- **Connection cancel** — connection progress notification supports Cancel button
+- **Connection dedup** — duplicate connect calls to the same profile reuse the pending connection
+- **Schema cache logging** — all cache operations (objects, columns, FK, triggers, indexes, views) logged with timing to T-SQL Connection output channel
+- **Query history seqNo** — entries display `#N` sequence numbers per file name
+- **Query history rich tooltip** — hover shows connection, database, date, and full SQL (4000 chars)
+- **Query history batch delete** — file group delete removes all entries with confirmation
+- **Query history dedup** — re-running the same SQL from the same file replaces the old entry
+- **Snippet Manager from context menu** — "Add Snippet" opens Snippet Manager (not Style Form)
+- **Table doc popup** — completion hover for TABLE shows full CREATE TABLE script via `buildTableScript()`
+- **Query shortcut logging** — Alt+F1, Ctrl+1..9 shortcuts logged to output channel
+
+### Changed
+- **Context menu order** — Snippet Manager inserted at position 3, other items shifted down
+- **Snippet label** — "SQL Prompt" branding replaced with "T-SQL IntelliSense"
+- **Built-in snippets removed** — `contributes.snippets` emptied to prevent duplicates with snippet folder
+- **History single-click** — no longer opens preview; tooltip shows on hover instead
+- **History double-click** — promotes preview tab to pinned; auto-connects to the entry's database
+- **Clear history** — now requires confirmation dialog
+- **Delete history entry** — now requires confirmation dialog
+- **Extension page** — uses `workbench.extensions.search` instead of `extension.open`
+
+### Fixed
+- **Schema cache console.log** — replaced stray `console.log` calls with OutputChannel logging
+- **resolveCompletionItem detail prefix** — strips `T-SQL • ` prefix before matching object type
+- **History header stripping** — removes `-- #N |...` header from SQL before storage/comparison
+
 ## [0.5.2] - 2026-03-23
 
 ### Added

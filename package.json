@@ -2,7 +2,7 @@
   "name": "tsql-intellisense",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "0.5.2",
+  "version": "0.5.3",
   "publisher": "omerbulbul",
   "license": "MIT",
   "repository": {
@@ -449,24 +449,29 @@
           "group": "z_tsql@2"
         },
         {
-          "command": "tsql-intellisense.formatSql",
+          "command": "tsql-intellisense.openSnippetManager",
           "when": "editorLangId == sql && tsqlIntellisense.active",
           "group": "z_tsql@3"
         },
         {
-          "command": "tsql-intellisense.openStyleSettings",
+          "command": "tsql-intellisense.formatSql",
           "when": "editorLangId == sql && tsqlIntellisense.active",
           "group": "z_tsql@4"
         },
         {
-          "command": "tsql-intellisense.openProjectFile",
+          "command": "tsql-intellisense.openStyleSettings",
           "when": "editorLangId == sql && tsqlIntellisense.active",
           "group": "z_tsql@5"
         },
         {
-          "command": "tsql-intellisense.selectInObjectExplorer",
+          "command": "tsql-intellisense.openProjectFile",
           "when": "editorLangId == sql && tsqlIntellisense.active",
           "group": "z_tsql@6"
+        },
+        {
+          "command": "tsql-intellisense.selectInObjectExplorer",
+          "when": "editorLangId == sql && tsqlIntellisense.active",
+          "group": "z_tsql@7"
         }
       ],
       "editor/title": [],
@@ -865,12 +870,7 @@
         "contents": "%view.queryHistoryWelcome%"
       }
     ],
-    "snippets": [
-      {
-        "language": "sql",
-        "path": "./snippets/sql.json"
-      }
-    ],
+    "snippets": [],
     "walkthroughs": [
       {
         "id": "tsql-intellisense.getStarted",

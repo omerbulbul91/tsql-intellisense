@@ -34,6 +34,10 @@ export class SnippetManagerProvider {
         SnippetManagerProvider.sendSnippets();
     }
 
+    static openNewWithBody(body: string): void {
+        SnippetManagerProvider.currentPanel?.webview.postMessage({ cmd: 'openNewWithBody', body });
+    }
+
     private static async sendSnippets(): Promise<void> {
         const folder = SnippetManagerProvider.snippetProvider.getSnippetFolder();
         let error: string | undefined;
@@ -508,6 +512,20 @@ document.addEventListener('keydown', e => {
 
 function escHtml(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 function showModalError(msg) { document.getElementById('modal-error').textContent = msg || 'Bilinmeyen hata.'; }
+
+window.addEventListener('message', e => {
+    if (e.data.cmd === 'openNewWithBody') {
+        editMode = false;
+        document.getElementById('modal-title').textContent = 'Yeni Snippet';
+        document.getElementById('modal-prefix').value = '';
+        document.getElementById('modal-desc').value = '';
+        document.getElementById('modal-editor-area').value = e.data.body || '';
+        document.getElementById('prefix-error').textContent = '';
+        document.getElementById('modal-error').textContent = '';
+        document.getElementById('modal-overlay').style.display = 'flex';
+        document.getElementById('modal-prefix').focus();
+    }
+});
 
 vscode.postMessage({ cmd: 'loadSnippets' });
 </script>

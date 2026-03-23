@@ -16,6 +16,8 @@ export interface QueryHistoryEntry {
     databaseName: string;
     /** Execution timestamp (ISO string) */
     timestamp: string;
+    /** Unique sequence number per fileName (auto-incremented) */
+    seqNo: number;
 }
 
 type DateGroup = 'today' | 'yesterday' | 'thisWeek' | 'older';
@@ -41,34 +43,37 @@ class FileGroupItem extends vscode.TreeItem {
 
     constructor(fileName: string, entries: QueryHistoryEntry[], dateGroup: DateGroup) {
         const hasMultiple = entries.length > 1;
+
+        // Sort desc by timestamp (newest first)
+        entries.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+        const latest = entries[0];
+
+        const baseLabel = hasMultiple ? `${fileName} (${entries.length})` : fileName;
         super(
-            fileName,
+            baseLabel.trim(),
             hasMultiple
                 ? vscode.TreeItemCollapsibleState.Collapsed
                 : vscode.TreeItemCollapsibleState.None
         );
 
         this.entries = entries;
-        this.entry = entries[0]; // newest first
+        this.entry = latest;
         this.dateGroup = dateGroup;
 
-        // Sort desc by timestamp (newest first)
-        entries.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-        const latest = entries[0];
-        const times = entries.map(e => {
-            const d = new Date(e.timestamp);
-            return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-        });
-        this.description = `${times.join(', ')}    ${latest.connectionName}  ${latest.databaseName}`;
+        this.description = latest.databaseName;
 
-        // Tooltip: SQL preview of the most recent entry
+        // Rich tooltip with full SQL (hover shows this)
+        const d = new Date(latest.timestamp);
+        const fullDate = d.toLocaleDateString('tr-TR') + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
         this.tooltip = new vscode.MarkdownString();
-        this.tooltip.appendCodeblock(latest.sql.substring(0, 2000), 'sql');
+        this.tooltip.appendMarkdown(`**${latest.connectionName}** — ${latest.databaseName}  \n`);
+        this.tooltip.appendMarkdown(`📅 ${fullDate}  \n\n`);
+        this.tooltip.appendCodeblock(latest.sql.substring(0, 4000), 'sql');
 
         this.iconPath = new vscode.ThemeIcon('file');
         this.contextValue = 'historyEntry';
 
-        // Command for click handling (single/double detected in extension.ts)
+        // No command on single click — double click handled via historyItemClicked
         this.command = {
             command: 'tsql-intellisense.historyItemClicked',
             title: '',
@@ -83,18 +88,33 @@ class HistoryEntryItem extends vscode.TreeItem {
 
     constructor(entry: QueryHistoryEntry) {
         const d = new Date(entry.timestamp);
-        const timeStr = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-        super(timeStr, vscode.TreeItemCollapsibleState.None);
+        const today = new Date();
+        const isToday = d.getFullYear() === today.getFullYear()
+            && d.getMonth() === today.getMonth()
+            && d.getDate() === today.getDate();
+        const timeStr = isToday
+            ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })
+            : `${d.toLocaleDateString('tr-TR')} ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })}`;
+
+        // Show seqNo in label
+        const seqLabel = entry.seqNo ? `#${entry.seqNo}` : '';
+        super(`${seqLabel} ${timeStr}`.trim(), vscode.TreeItemCollapsibleState.None);
 
         this.entry = entry;
-        this.description = `${entry.connectionName}  ${entry.databaseName}`;
+        this.description = entry.databaseName;
 
+        // Rich tooltip with full SQL
+        const fullDate = d.toLocaleDateString('tr-TR') + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
         this.tooltip = new vscode.MarkdownString();
-        this.tooltip.appendCodeblock(entry.sql.substring(0, 2000), 'sql');
+        this.tooltip.appendMarkdown(`**${entry.fileName} ${seqLabel}**  \n`);
+        this.tooltip.appendMarkdown(`${entry.connectionName} — ${entry.databaseName}  \n`);
+        this.tooltip.appendMarkdown(`📅 ${fullDate}  \n\n`);
+        this.tooltip.appendCodeblock(entry.sql.substring(0, 4000), 'sql');
 
         this.iconPath = new vscode.ThemeIcon('debug-stackframe-dot');
         this.contextValue = 'historyEntry';
 
+        // Command for double-click detection
         this.command = {
             command: 'tsql-intellisense.historyItemClicked',
             title: '',
@@ -140,7 +160,7 @@ export class QueryHistoryProvider implements vscode.TreeDataProvider<TreeNode> {
     }
 
     /** Add a new history entry */
-    addEntry(entry: Omit<QueryHistoryEntry, 'id' | 'timestamp'>): void {
+    addEntry(entry: Omit<QueryHistoryEntry, 'id' | 'timestamp' | 'seqNo'>): void {
         if (!this.isEnabled()) { return; }
 
         const config = vscode.workspace.getConfiguration('tsql-intellisense');
@@ -152,7 +172,11 @@ export class QueryHistoryProvider implements vscode.TreeDataProvider<TreeNode> {
             ...entry,
             id: Date.now().toString(36) + Math.random().toString(36).substring(2, 6),
             timestamp: new Date().toISOString(),
+            seqNo: this.getNextSeqNo(entry.fileName),
         };
+
+        // Remove previous entry with same fileName + sql to avoid duplicates
+        this.entries = this.entries.filter(e => !(e.fileName === newEntry.fileName && e.sql === newEntry.sql));
 
         this.entries.unshift(newEntry);
 
@@ -172,6 +196,14 @@ export class QueryHistoryProvider implements vscode.TreeDataProvider<TreeNode> {
         this._onDidChangeTreeData.fire();
     }
 
+    /** Delete multiple entries by ids */
+    deleteEntries(ids: string[]): void {
+        const idSet = new Set(ids);
+        this.entries = this.entries.filter(e => !idSet.has(e.id));
+        this.save();
+        this._onDidChangeTreeData.fire();
+    }
+
     /** Clear all history */
     clearAll(): void {
         this.entries = [];
@@ -183,6 +215,18 @@ export class QueryHistoryProvider implements vscode.TreeDataProvider<TreeNode> {
     refresh(): void {
         this.cleanupOldEntries();
         this._onDidChangeTreeData.fire();
+    }
+
+    /** Get the most recent entry for a fileName */
+    getLatestEntry(fileName: string): QueryHistoryEntry | undefined {
+        return this.entries.find(e => e.fileName === fileName);
+    }
+
+    /** Get next sequence number for a fileName */
+    getNextSeqNo(fileName: string): number {
+        return this.entries
+            .filter(e => e.fileName === fileName)
+            .reduce((max, e) => Math.max(max, e.seqNo || 0), 0) + 1;
     }
 
     private isEnabled(): boolean {
@@ -234,20 +278,22 @@ export class QueryHistoryProvider implements vscode.TreeDataProvider<TreeNode> {
             older: 'Older',
         };
 
-        const dateEntries = new Map<DateGroup, QueryHistoryEntry[]>();
-        for (const entry of this.entries) {
-            const dg = this.getDateGroup(entry.timestamp);
-            if (!dateEntries.has(dg)) { dateEntries.set(dg, []); }
-            dateEntries.get(dg)!.push(entry);
+        // Group all entries by fileName first, then assign to date group of most recent entry
+        const fileGroups = this.groupByFileName(this.entries);
+        const dateFileGroups = new Map<DateGroup, QueryHistoryEntry[][]>();
+
+        for (const group of fileGroups) {
+            // Sort newest first
+            group.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+            const newestDate = this.getDateGroup(group[0].timestamp);
+            if (!dateFileGroups.has(newestDate)) { dateFileGroups.set(newestDate, []); }
+            dateFileGroups.get(newestDate)!.push(group);
         }
 
         const order: DateGroup[] = ['today', 'yesterday', 'thisWeek', 'older'];
         return order
-            .filter(g => dateEntries.has(g))
-            .map(g => {
-                const fileGroups = this.groupByFileName(dateEntries.get(g)!);
-                return new DateGroupItem(g, groupLabels[g], fileGroups.length);
-            });
+            .filter(g => dateFileGroups.has(g))
+            .map(g => new DateGroupItem(g, groupLabels[g], dateFileGroups.get(g)!.length));
     }
 
     /** Group entries by fileName only */
@@ -261,8 +307,18 @@ export class QueryHistoryProvider implements vscode.TreeDataProvider<TreeNode> {
     }
 
     private getFileGroupsForDate(group: DateGroup): FileGroupItem[] {
-        const dateEntries = this.entries.filter(e => this.getDateGroup(e.timestamp) === group);
-        const fileGroups = this.groupByFileName(dateEntries);
-        return fileGroups.map(g => new FileGroupItem(g[0].fileName, g, group));
+        // Group all entries by fileName, assign to date group of most recent entry
+        const fileGroups = this.groupByFileName(this.entries);
+        const result: FileGroupItem[] = [];
+
+        for (const entries of fileGroups) {
+            entries.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+            const newestDate = this.getDateGroup(entries[0].timestamp);
+            if (newestDate === group) {
+                result.push(new FileGroupItem(entries[0].fileName, entries, group));
+            }
+        }
+
+        return result;
     }
 }
