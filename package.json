@@ -2,7 +2,7 @@
   "name": "tsql-intellisense",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "0.5.0",
+  "version": "0.5.2",
   "publisher": "omerbulbul",
   "license": "MIT",
   "repository": {
@@ -94,6 +94,41 @@
       {
         "command": "tsql-intellisense.queryShortcut3",
         "title": "%command.queryShortcut3%",
+        "category": "T-SQL"
+      },
+      {
+        "command": "tsql-intellisense.queryShortcut4",
+        "title": "%command.queryShortcut4%",
+        "category": "T-SQL"
+      },
+      {
+        "command": "tsql-intellisense.queryShortcut5",
+        "title": "%command.queryShortcut5%",
+        "category": "T-SQL"
+      },
+      {
+        "command": "tsql-intellisense.queryShortcut6",
+        "title": "%command.queryShortcut6%",
+        "category": "T-SQL"
+      },
+      {
+        "command": "tsql-intellisense.queryShortcut7",
+        "title": "%command.queryShortcut7%",
+        "category": "T-SQL"
+      },
+      {
+        "command": "tsql-intellisense.queryShortcut8",
+        "title": "%command.queryShortcut8%",
+        "category": "T-SQL"
+      },
+      {
+        "command": "tsql-intellisense.queryShortcut9",
+        "title": "%command.queryShortcut9%",
+        "category": "T-SQL"
+      },
+      {
+        "command": "tsql-intellisense.queryShortcut10",
+        "title": "%command.queryShortcut10%",
         "category": "T-SQL"
       },
       {
@@ -378,6 +413,11 @@
         "category": "T-SQL"
       },
       {
+        "command": "tsql-intellisense.openNativeSettings",
+        "title": "%command.openNativeSettings%",
+        "category": "T-SQL"
+      },
+      {
         "command": "tsql-intellisense.deleteHistoryEntry",
         "title": "%command.deleteHistoryEntry%",
         "icon": "$(trash)",
@@ -485,7 +525,7 @@
           "when": "viewItem =~ /^Connection/"
         },
         {
-          "command": "tsql-intellisense.openConnectionSettings",
+          "command": "tsql-intellisense.openNativeSettings",
           "when": "viewItem =~ /^Connection/",
           "group": "9_info@1"
         },
@@ -692,6 +732,11 @@
         "when": "editorLangId == sql"
       },
       {
+        "command": "tsql-intellisense.queryShortcut10",
+        "key": "ctrl+f1",
+        "when": "editorLangId == sql"
+      },
+      {
         "command": "tsql-intellisense.queryShortcut1",
         "key": "ctrl+1",
         "when": "editorLangId == sql"
@@ -704,6 +749,36 @@
       {
         "command": "tsql-intellisense.queryShortcut3",
         "key": "ctrl+3",
+        "when": "editorLangId == sql"
+      },
+      {
+        "command": "tsql-intellisense.queryShortcut4",
+        "key": "ctrl+4",
+        "when": "editorLangId == sql"
+      },
+      {
+        "command": "tsql-intellisense.queryShortcut5",
+        "key": "ctrl+5",
+        "when": "editorLangId == sql"
+      },
+      {
+        "command": "tsql-intellisense.queryShortcut6",
+        "key": "ctrl+6",
+        "when": "editorLangId == sql"
+      },
+      {
+        "command": "tsql-intellisense.queryShortcut7",
+        "key": "ctrl+7",
+        "when": "editorLangId == sql"
+      },
+      {
+        "command": "tsql-intellisense.queryShortcut8",
+        "key": "ctrl+8",
+        "when": "editorLangId == sql"
+      },
+      {
+        "command": "tsql-intellisense.queryShortcut9",
+        "key": "ctrl+9",
         "when": "editorLangId == sql"
       },
       {
