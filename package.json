@@ -253,6 +253,12 @@
         "category": "T-SQL"
       },
       {
+        "command": "tsql-intellisense.RefreshConnections",
+        "title": "%command.RefreshConnections%",
+        "icon": "$(refresh)",
+        "category": "T-SQL"
+      },
+      {
         "command": "tsql-intellisense.RefreshDatabases",
         "title": "%command.RefreshDatabases%",
         "icon": "$(refresh)",
@@ -404,7 +410,7 @@
           "group": "navigation"
         },
         {
-          "command": "tsql-intellisense.refreshSchema",
+          "command": "tsql-intellisense.RefreshConnections",
           "when": "view == tsqlConnections",
           "group": "navigation"
         },
@@ -1123,7 +1129,7 @@
     "build": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node && esbuild src/extension.web.ts --bundle --outfile=dist/extension.web.js --external:vscode --format=cjs --platform=browser",
     "build:web": "esbuild src/extension.web.ts --bundle --outfile=dist/extension.web.js --external:vscode --format=cjs --platform=browser",
     "watch": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --watch",
-    "test": "npx ts-node test/contextDetection.test.ts && npx ts-node test/projectSync.test.ts && npx ts-node test/formatter.test.ts && npx ts-node test/statementRule.test.ts",
+    "test": "npx ts-node test/contextDetection.test.ts && npx ts-node test/projectSync.test.ts && npx ts-node test/formatter.test.ts && npx ts-node test/statementRule.test.ts && npx ts-node test/rename.test.ts",
     "package": "vsce package"
   },
   "dependencies": {
