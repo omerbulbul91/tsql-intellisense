@@ -106,16 +106,19 @@ export class HandsontableRenderer implements GridRenderer {
         resultSets: { columns: string[]; rows: any[] }[],
         isStacked: boolean,
     ): string {
-        const resultSetsJson = JSON.stringify(resultSets.map(rs => ({ columns: rs.columns, rows: rs.rows })));
+        const resultSetsJson = JSON.stringify(resultSets.map(rs => ({ columns: rs.columns, rows: rs.rows })))
+            .replace(/<\/script>/gi, '<\\/script>');
         return `
     const resultSets = ${resultSetsJson};
     const hots = [];
     const hotData = []; // keep original data refs
+    const isStacked = ${isStacked};
 
     resultSets.forEach((rs, i) => {
+      try {
         if (rs.columns.length === 0) return;
         const el = document.getElementById('grid-' + i);
-        if (!el) return;
+        if (!el) { console.error('[TSQL] grid-' + i + ' element not found'); return; }
 
         // Convert row objects to 2D array
         const data = rs.rows.map(row => rs.columns.map(col => row[col]));
@@ -155,6 +158,11 @@ export class HandsontableRenderer implements GridRenderer {
         });
 
         hots.push(hot);
+      } catch (err) {
+        console.error('[TSQL] Handsontable grid-' + i + ' init error:', err);
+        const el = document.getElementById('grid-' + i);
+        if (el) el.innerHTML = '<p style="padding:8px;color:var(--vscode-errorForeground)">Grid error: ' + err.message + '</p>';
+      }
     });
 
     // ── Context menu via right-click ────────────────
@@ -329,15 +337,18 @@ export class HandsontableRenderer implements GridRenderer {
         isStacked: boolean,
     ): string {
         // Reuse the AG Grid native table approach
-        const resultSetsJson = JSON.stringify(resultSets.map(rs => ({ columns: rs.columns, rows: rs.rows })));
+        const resultSetsJson = JSON.stringify(resultSets.map(rs => ({ columns: rs.columns, rows: rs.rows })))
+            .replace(/<\/script>/gi, '<\\/script>');
         return `
     const resultSets = ${resultSetsJson};
     const grids = [];
+    const isStacked = ${isStacked};
 
     resultSets.forEach((rs, i) => {
+      try {
         if (rs.columns.length === 0) return;
         const el = document.getElementById('grid-' + i);
-        if (!el) return;
+        if (!el) { console.error('[TSQL] grid-' + i + ' element not found'); return; }
         el.classList.add('native-grid');
         const wrapper = document.createElement('div');
         wrapper.style.width = '100%';
@@ -375,6 +386,11 @@ export class HandsontableRenderer implements GridRenderer {
         table.appendChild(tbody);
         wrapper.appendChild(table);
         grids.push({ el, wrapper, table, thead, tbody, data: rs.rows, columns: rs.columns, filteredRows: null, hiddenCols: new Set(), sortField: null, sortDir: '' });
+      } catch (err) {
+        console.error('[TSQL] Handsontable fallback grid-' + i + ' init error:', err);
+        const el = document.getElementById('grid-' + i);
+        if (el) el.innerHTML = '<p style="padding:8px;color:var(--vscode-errorForeground)">Grid error: ' + err.message + '</p>';
+      }
     });
 
     function sortColumn(gridIdx, field, th) {

@@ -23,7 +23,7 @@ export class StyleFormProvider {
 
         const panel = vscode.window.createWebviewPanel(
             'tsqlStyleForm',
-            'SQL Prompt Options',
+            'Settings',
             column,
             { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [vscode.Uri.joinPath(context.extensionUri, 'node_modules', 'monaco-editor', 'min'), vscode.Uri.joinPath(context.extensionUri, 'resources')] }
         );
@@ -46,6 +46,7 @@ export class StyleFormProvider {
         const snippetFolder = config.get<string>('snippetFolder', '');
         // Read connections to show count
         const connections = config.get<any[]>('connections', []);
+        const queryShortcuts = config.get<{ key: string; query: string }[]>('queryShortcuts', []);
         const lang = context.globalState.get<string>('tsql.uiLang', 'en');
         const customTranslations = context.globalState.get<Record<string, Record<string, string>>>('tsql.customTranslations', {});
         const fmtConfig = {
@@ -56,7 +57,7 @@ export class StyleFormProvider {
             schemaDdl: styleLoader.getSchemaDdlOptions(),
         };
 
-        panel.webview.html = StyleFormProvider.getHtml(panel.webview, context.extensionUri, casingOpts, layoutOpts, aliasOpts, insertionKeys, styleName, styleFile, snippetFolder, connections.length, lang, customTranslations, fmtConfig);
+        panel.webview.html = StyleFormProvider.getHtml(panel.webview, context.extensionUri, casingOpts, layoutOpts, aliasOpts, insertionKeys, styleName, styleFile, snippetFolder, connections.length, queryShortcuts, lang, customTranslations, fmtConfig);
 
         // Navigate to initial section after webview is ready
         if (initialSection) {
@@ -108,9 +109,13 @@ export class StyleFormProvider {
                     if (msg.insertionKeys) {
                         await config.update('insertionKeys', msg.insertionKeys, vscode.ConfigurationTarget.Global);
                     }
+                    // Query shortcuts
+                    if (msg.queryShortcuts) {
+                        await config.update('queryShortcuts', msg.queryShortcuts, vscode.ConfigurationTarget.Global);
+                    }
                     panel.webview.postMessage({ cmd: 'saved' });
                     const uiLang = context.globalState.get<string>('tsql.uiLang', 'en');
-                    vscode.window.showInformationMessage(uiLang === 'tr' ? 'Stil ayarları kaydedildi' : 'Style settings saved');
+                    vscode.window.showInformationMessage(uiLang === 'tr' ? 'Ayarlar kaydedildi' : 'Settings saved');
                     break;
                 }
                 case 'loadFile': {
@@ -549,6 +554,7 @@ export class StyleFormProvider {
         styleFile: string,
         snippetFolder: string,
         connectionCount: number,
+        queryShortcuts: { key: string; query: string }[],
         lang: string,
         customTranslations: Record<string, Record<string, string>>,
         fmtConfig: { whitespace: any; controlFlow: any; variables: any; dataDml: any; schemaDdl: any }
@@ -605,6 +611,17 @@ export class StyleFormProvider {
         const langDropdownItemsHtml = langDropdownItems.map(l =>
             `<div class="lang-option" onclick="selectLangOption('${l.code}')" data-lang="${l.code}">${l.flagHtml}${l.name}${l.suffix}</div>`
         ).join('');
+        // Query Shortcuts rows (SSMS-style: Alt+F1, Ctrl+F1, Ctrl+1..Ctrl+9)
+        const qsKeyLabels = ['Alt+F1', 'Ctrl+F1', 'Ctrl+1', 'Ctrl+2', 'Ctrl+3', 'Ctrl+4', 'Ctrl+5', 'Ctrl+6', 'Ctrl+7', 'Ctrl+8', 'Ctrl+9'];
+        const qsRowsHtml = qsKeyLabels.map((label, i) => {
+            const match = queryShortcuts.find(s => s.key === label);
+            const val = (match?.query || '').replace(/"/g, '&quot;');
+            return `<tr>
+                <td style="padding:4px 10px; border-bottom:1px solid var(--vscode-panel-border); font-size:13px; white-space:nowrap; color:var(--vscode-foreground);">${label}</td>
+                <td style="padding:4px 6px; border-bottom:1px solid var(--vscode-panel-border);"><input type="text" id="qs_${i}" value="${val}" style="width:100%; padding:4px 6px; font-size:13px; font-family:var(--vscode-font-family); background:var(--vscode-input-background); color:var(--vscode-input-foreground); border:1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius:2px; box-sizing:border-box;" /></td>
+            </tr>`;
+        }).join('\n');
+
         // Keep hidden select for compatibility
         const langOptionsHtml = allLangCodes.map(c => {
             const flag = langFlags[c] || c.toUpperCase();
@@ -1091,7 +1108,7 @@ export class StyleFormProvider {
 </head>
 <body>
     <div class="header">
-        <h1>SQL Prompt Options</h1>
+        <h1 data-i18n="pageTitle">Settings</h1>
         <select id="langSelect" onchange="setLang(this.value)" style="display:none;">
             ${langOptionsHtml}
         </select>
@@ -1163,6 +1180,7 @@ export class StyleFormProvider {
             <div class="section-group expanded">
                 <div class="menu-item" onclick="showSection('connections')" data-i18n="nav.connections">Connections</div>
                 <div class="menu-item" onclick="showSection('language')" data-i18n="nav.language">Language</div>
+                <div class="menu-item" onclick="showSection('queryShortcuts')" data-i18n="nav.queryShortcuts">Query Shortcuts</div>
             </div>
         </div>
 
@@ -2011,6 +2029,31 @@ export class StyleFormProvider {
                         <div style="margin-top:4px; font-size:11px; color:var(--vscode-descriptionForeground);" id="langEditProgress"></div>
                     </div>
                 </div>
+
+                <!-- Query Shortcuts Section -->
+                <div id="section-queryShortcuts" style="display:none">
+                    <h2 data-i18n="qs.title">Settings &gt; Query Shortcuts</h2>
+
+                    <p style="font-size:13px; color:var(--vscode-descriptionForeground); margin-bottom:12px;" data-i18n="qs.desc">
+                        Query shortcuts execute the specified query when the shortcut key is pressed. Use @WORD to insert the word under the cursor.
+                    </p>
+
+                    <table style="width:100%; border-collapse:collapse; border:1px solid var(--vscode-panel-border); border-radius:2px;">
+                        <thead>
+                            <tr>
+                                <th style="padding:6px 10px; text-align:left; font-size:12px; font-weight:600; border-bottom:1px solid var(--vscode-panel-border); background:var(--vscode-editorWidget-background); width:100px;" data-i18n="qs.shortcuts">Shortcuts</th>
+                                <th style="padding:6px 10px; text-align:left; font-size:12px; font-weight:600; border-bottom:1px solid var(--vscode-panel-border); background:var(--vscode-editorWidget-background);" data-i18n="qs.storedProcedure">Stored Procedure</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${qsRowsHtml}
+                        </tbody>
+                    </table>
+
+                    <div style="display:flex; justify-content:flex-end; margin-top:12px;">
+                        <button class="btn btn-secondary" onclick="resetQueryShortcuts()" data-i18n="qs.resetToDefault">Reset to Default</button>
+                    </div>
+                </div>
             </div>
 
             <div class="preview-panel" id="formatPreviewPanel">
@@ -2509,7 +2552,38 @@ export class StyleFormProvider {
                     collapseShortDdlStatements: document.getElementById('ddl_collapseShort').checked,
                     collapseShortDdlShorterThan: parseInt(document.getElementById('ddl_collapseShortLen').value) || 120,
                 },
+                queryShortcuts: getQueryShortcuts(),
             });
+        }
+
+        const qsKeyLabels = ['Alt+F1', 'Ctrl+F1', 'Ctrl+1', 'Ctrl+2', 'Ctrl+3', 'Ctrl+4', 'Ctrl+5', 'Ctrl+6', 'Ctrl+7', 'Ctrl+8', 'Ctrl+9'];
+        const qsDefaults = [
+            { key: 'Alt+F1', query: "EXEC sp_help '@WORD'" },
+            { key: 'Ctrl+1', query: 'EXEC sp_who' },
+            { key: 'Ctrl+2', query: 'EXEC sp_lock' },
+            { key: 'Ctrl+3', query: 'SELECT TOP 100 * FROM @WORD' },
+        ];
+
+        function getQueryShortcuts() {
+            const shortcuts = [];
+            for (let i = 0; i < qsKeyLabels.length; i++) {
+                const el = document.getElementById('qs_' + i);
+                const val = el ? el.value.trim() : '';
+                if (val) {
+                    shortcuts.push({ key: qsKeyLabels[i], query: val });
+                }
+            }
+            return shortcuts;
+        }
+
+        function resetQueryShortcuts() {
+            for (let i = 0; i < qsKeyLabels.length; i++) {
+                const el = document.getElementById('qs_' + i);
+                if (el) {
+                    const def = qsDefaults.find(d => d.key === qsKeyLabels[i]);
+                    el.value = def ? def.query : '';
+                }
+            }
         }
 
         function loadFile() {

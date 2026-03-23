@@ -46,17 +46,18 @@ export class AgGridRenderer implements GridRenderer {
         resultSets: { columns: string[]; rows: any[] }[],
         isStacked: boolean,
     ): string {
-        const resultSetsJson = JSON.stringify(resultSets.map(rs => ({ columns: rs.columns, rows: rs.rows })));
+        const resultSetsJson = JSON.stringify(resultSets.map(rs => ({ columns: rs.columns, rows: rs.rows })))
+            .replace(/<\/script>/gi, '<\\/script>');
         return `
     const resultSets = ${resultSetsJson};
     const grids = [];
+    const isStacked = ${isStacked};
 
-    // AG Grid doesn't ship a UMD build for webview — we build a lightweight table ourselves
-    // using the same gridApi interface
     resultSets.forEach((rs, i) => {
+      try {
         if (rs.columns.length === 0) return;
         const el = document.getElementById('grid-' + i);
-        if (!el) return;
+        if (!el) { console.error('[TSQL] grid-' + i + ' element not found'); return; }
 
         el.classList.add('ag-native-grid');
         if (!isStacked) { el.style.height = '100%'; }
@@ -92,6 +93,11 @@ export class AgGridRenderer implements GridRenderer {
         el.appendChild(table);
 
         grids.push({ el, table, thead, tbody, data: rs.rows, columns: rs.columns, filteredRows: null, hiddenCols: new Set(), sortField: null, sortDir: '' });
+      } catch (err) {
+        console.error('[TSQL] AG-Grid grid-' + i + ' init error:', err);
+        const el = document.getElementById('grid-' + i);
+        if (el) el.innerHTML = '<p style="padding:8px;color:var(--vscode-errorForeground)">Grid error: ' + err.message + '</p>';
+      }
     });
 
     // ── Sorting ────────────────────────────────────

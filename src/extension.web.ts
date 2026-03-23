@@ -66,6 +66,7 @@ export function activate(context: vscode.ExtensionContext): void {
         'Script.Select', 'Script.Insert', 'Script.Update',
         'Script.Delete', 'Script.Execute',
         // Tree management commands
+        'RefreshConnections',
         'RefreshDatabases', 'FilterDatabases', 'NewDatabase',
         'RefreshDatabase', 'NewSchema', 'RefreshFolder', 'FilterFolder',
         'NewTable', 'NewView', 'NewScalarFunction', 'NewTableValuedFunction',

@@ -48,6 +48,7 @@
   "command.Script.Delete": "DELETE To",
   "command.Script.Execute": "EXECUTE To",
 
+  "command.RefreshConnections": "Refresh",
   "command.RefreshDatabases": "Refresh Databases",
   "command.FilterDatabases": "Filter Databases",
   "command.NewDatabase": "New Database",
@@ -67,6 +68,7 @@
   "view.connections": "Connections",
   "view.queryResults": "Query Results",
   "view.queryHistory": "Query History",
+  "view.connectionsWelcome": "No connections yet.\n[Add Connection](command:tsql-intellisense.addConnection)\n[Get Started](command:workbench.action.openWalkthrough?%22omerbulbul.tsql-intellisense%23tsql-intellisense.getStarted%22)",
   "view.queryHistoryWelcome": "No Queries Available",
 
   "config.title": "T-SQL IntelliSense",
@@ -105,7 +107,9 @@
   "command.clearQueryHistory": "Clear Query History",
   "command.deleteHistoryEntry": "Delete History Entry",
   "command.openQueryHistorySettings": "Query History Settings",
-  "command.openConnectionSettings": "Connection Settings",
+  "command.openConnectionSettings": "Extension Settings",
+  "command.openExtensionPage": "About Extension",
+  "command.openWalkthrough": "Get Started",
 
   "config.queryHistory.enabled": "Enable query history tracking",
   "config.queryHistory.maxQuerySize": "Maximum query size in bytes to save in history (queries exceeding this are not saved)",
@@ -150,5 +154,20 @@
   "config.ddl.alignDataTypes": "Align data types and constraints in CREATE TABLE",
   "config.ddl.placeFirstParam": "Place first procedure parameter on new line (never, always, ifMultiple)",
   "config.ddl.collapseShort": "Collapse short DDL statements to a single line",
-  "config.ddl.collapseShortLen": "Collapse DDL statements shorter than this many characters"
+  "config.ddl.collapseShortLen": "Collapse DDL statements shorter than this many characters",
+
+  "walkthrough.title": "Get Started with T-SQL IntelliSense",
+  "walkthrough.description": "Learn how to connect to SQL Server and use IntelliSense, query execution, formatting, and navigation features.",
+  "walkthrough.addConnection.title": "Add a Database Connection",
+  "walkthrough.addConnection.description": "Configure your first SQL Server connection to enable IntelliSense and query execution.\n\n[Add Connection](command:tsql-intellisense.addConnection)",
+  "walkthrough.objectExplorer.title": "Explore Your Database",
+  "walkthrough.objectExplorer.description": "Browse tables, views, stored procedures, and functions in the Object Explorer tree view — just like SSMS.",
+  "walkthrough.intellisense.title": "Use Smart IntelliSense",
+  "walkthrough.intellisense.description": "Open a `.sql` file and start typing — get context-aware completions for tables, columns, SPs, and more.",
+  "walkthrough.runQuery.title": "Run a Query",
+  "walkthrough.runQuery.description": "Press **F5** to execute your SQL and see results in a sortable grid with CSV/JSON export.\n\n[Run Query](command:tsql-intellisense.runQuery)",
+  "walkthrough.formatSql.title": "Format Your SQL",
+  "walkthrough.formatSql.description": "Auto-format SQL with keyword casing, clause alignment, and Redgate SQL Prompt style support.\n\n[Format SQL](command:tsql-intellisense.formatSql)",
+  "walkthrough.goToDefinition.title": "Navigate with F12 & F2",
+  "walkthrough.goToDefinition.description": "Press **F12** on any object to view its definition. Press **F2** on an alias to rename it across the query."
 }

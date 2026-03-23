@@ -485,7 +485,14 @@ ${grid.headHtml}
     `}
     ${!isStacked && result.resultSets.length <= 1 ? messagesHtml : ''}
 <script>const vscodeApi = acquireVsCodeApi();</script>
+<script>
+console.log('[TSQL] Grid init starting...');
+console.log('[TSQL] grid-0 exists:', !!document.getElementById('grid-0'));
+</script>
 ${grid.initScript}
+<script>
+console.log('[TSQL] Grid init completed, gridApi:', typeof window.gridApi);
+</script>
 <script>
     const isStacked = ${isStacked};
 

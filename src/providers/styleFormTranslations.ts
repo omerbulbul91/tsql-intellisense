@@ -215,6 +215,14 @@ export const styleFormTranslations: Record<string, Record<string, string>> = {
         'lang.translationEditorDesc': 'Create or edit translations for custom languages. Built-in languages (en, tr) are read-only.',
         'lang.openFullEditor': 'Open full editor',
         'lang.translation': 'Translation',
+        // Query Shortcuts
+        'pageTitle': 'Settings',
+        'nav.queryShortcuts': 'Query Shortcuts',
+        'qs.title': 'Settings > Query Shortcuts',
+        'qs.desc': 'Query shortcuts execute the specified query when the shortcut key is pressed. Use @WORD to insert the word under the cursor.',
+        'qs.shortcuts': 'Shortcuts',
+        'qs.storedProcedure': 'Stored Procedure',
+        'qs.resetToDefault': 'Reset to Default',
         // Dropdown options
         'ws.optSpaces': 'Spaces',
         'ws.optTabs': 'Tabs',
@@ -509,6 +517,14 @@ export const styleFormTranslations: Record<string, Record<string, string>> = {
         'lang.translationEditorDesc': '\u00D6zel diller i\u00E7in \u00E7eviriler oluşturun veya d\u00FCzenleyin. Yerleşik diller (en, tr) salt okunurdur.',
         'lang.openFullEditor': 'Tam edit\u00F6r\u00FC a\u00E7',
         'lang.translation': '\u00C7eviri',
+        // Query Shortcuts
+        'pageTitle': 'Ayarlar',
+        'nav.queryShortcuts': 'Sorgu K\u0131sayollar\u0131',
+        'qs.title': 'Ayarlar > Sorgu K\u0131sayollar\u0131',
+        'qs.desc': 'Sorgu k\u0131sayollar\u0131, k\u0131sayol tu\u015Funa bas\u0131ld\u0131\u011F\u0131nda belirtilen sorguyu \u00E7al\u0131\u015Ft\u0131r\u0131r. \u0130mlecin alt\u0131ndaki kelimeyi eklemek i\u00E7in @WORD kullan\u0131n.',
+        'qs.shortcuts': 'K\u0131sayollar',
+        'qs.storedProcedure': 'Saklı Yordam',
+        'qs.resetToDefault': 'Varsayılana Sıfırla',
         // Dropdown options
         'ws.optSpaces': 'Boşluk',
         'ws.optTabs': 'Tab',
