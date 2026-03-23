@@ -1,6 +1,7 @@
 .vscode/**
 .claude/**
 node_modules/**
+!node_modules/tabulator-tables/dist/**
 src/**
 test/**
 docs/**

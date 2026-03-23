@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.5.2] - 2026-03-23
+
+### Added
+- **Star expand multi-table** — `*` expand now includes columns from all JOIN'ed tables with alias prefix
+- **Star expand auto-trigger** — cursor landing after `*` in SELECT context auto-opens suggestions
+- **Star expand unavailable warning** — shows reason when table not found in schema
+- **Multi-line SELECT context** — `SELECT` on one line, columns on next line now detected correctly
+- **Ctrl+F1 query shortcut** — new configurable shortcut, parity with settings UI
+- **Alias-less table expand** — `*` expand works without aliases, uses table name as prefix
+
+### Changed
+- **F12 Go to Definition** — table scripts now fetched live from DB (IDENTITY, computed columns, CHECK/DEFAULT constraints included)
+- **F12 cache refresh** — after F12, column cache is refreshed for the navigated object
+
+### Fixed
+- **Star expand position** — `*` expand suggestion appears only when `*` is typed, not in general SELECT context
+- **Selection listener guard** — auto-trigger skips multiplication `*` (e.g. `price * quantity`)
+- **F2 rename** — alias rename excludes FROM/JOIN table name positions when alias matches table name
+
 ## [0.3.0] - 2026-03-18
 
 ### Added
