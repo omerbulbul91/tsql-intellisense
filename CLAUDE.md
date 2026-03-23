@@ -57,11 +57,11 @@ src/
 
 | Bağlam | Davranış |
 |--------|----------|
-| `FROM / JOIN` | Tablo/view önerisi, otomatik alias üretimi |
+| `FROM / JOIN` | Tablo/view önerisi, otomatik alias üretimi. `dbo.` yazıldıysa seçilen tabloya tekrar `dbo.` eklenmez |
 | `FROM table alias keyword` | SQL keyword önerisi (WHERE, ORDER BY, JOIN vs.) |
 | `alias.` | O tablonun kolonları (PK 🔑, FK 🔗 ikonlu, tip + nullable bilgisiyle) |
-| `SELECT` | Kolon önerisi + SQL fonksiyon snippet'leri (COUNT, SUM, ROW_NUMBER, CAST, ISNULL vs.) |
-| `SELECT ... *` | `* (expand all columns)` — tüm kolonları alias'lı açar |
+| `SELECT` | Alias'lar + kolonlar + SQL fonksiyon snippet'leri + system variable'lar (@@ROWCOUNT, @@SPID, @@SERVERNAME vs.) |
+| `SELECT ... *` | `* (expand all columns)` — tüm kolonları alias'lı açar (multi-table: tüm JOIN'li tabloların kolonları dahil). Cursor `*` sağına gelince otomatik tetiklenir, TAB ile expand. Virgülden sonra `*` yazılmadıysa gösterilmez, yazıldıysa gösterilir. FROM yoksa expand gelmez (tablo bilinmiyor). Tablo şemada bulunamazsa `expand unavailable: Table not found in schema` uyarısı gösterilir |
 | `JOIN table alias ON` | Join condition önerisi (FK eşleşmeleri üstte, aynı isimli kolonlar altta) |
 | `= ` (ON clause içinde) | Alias + tüm alias'ların kolonları |
 | `( ` (fonksiyon içi) | Kolon önerisi (SUM(), COUNT() içinde) |
@@ -107,8 +107,9 @@ Metadata arka planda yüklenir — yüklenene kadar "Schema loading..." görün�
 
 - SP/Function üzerinde F12 → CREATE PROCEDURE/FUNCTION scripti yeni tab'da açılır
 - View üzerinde F12 → CREATE VIEW scripti
-- Table üzerinde F12 → CREATE TABLE + PK + Index + FK + Trigger scripti
-- `OBJECT_DEFINITION` ile DB'den çekilir (SP/Function/View), Table için cache'ten üretilir
+- Table üzerinde F12 → CREATE TABLE + PK + Index + FK + Check + Default + Trigger scripti (IDENTITY, computed column dahil)
+- Tüm nesne tipleri DB'den canlı çekilir (cache'ten değil). F12 sonrası sadece o nesnenin cache'i güncellenir (tablo/view kolonları, view definition) — tüm DB refresh yapılmaz
+- **ÖNEMLİ:** `provideDefinition` içinde `showTextDocument` çağrılmamalı — VS Code bu metodu Ctrl+hover'da da çağırır, `showTextDocument` olursa hover'da bile yeni tab açılır. Sadece `Location` döndürülmeli, navigasyonu VS Code halleder
 
 ### SP Parametre Completion
 
@@ -154,9 +155,12 @@ Metadata arka planda yüklenir — yüklenene kadar "Schema loading..." görün�
 | `Ctrl+1` | `EXEC sp_who` | Aktif oturumlar |
 | `Ctrl+2` | `EXEC sp_lock` | Kilitler |
 | `Ctrl+3` | `SELECT TOP 100 * FROM @WORD` | Tablodan veri çek |
+| `Ctrl+F1` | (boş) | Kullanıcı tanımlı |
+| `Ctrl+4` - `Ctrl+9` | (boş) | Kullanıcı tanımlı |
 
 - `@WORD` → cursor altındaki kelime ile replace edilir
 - Settings'ten özelleştirilebilir: `tsql-intellisense.queryShortcuts`
+- Tüm kısayollar (Alt+F1, Ctrl+F1, Ctrl+1..Ctrl+9) package.json'da komut + keybinding olarak kayıtlı olmalı
 
 ### Sorgu Çalıştırma
 
@@ -302,3 +306,29 @@ npm test    # 199 test (41 context + 51 projectSync + 78 tokenizer/casing/layout
 ```
 
 `test/spFormat.test.ts` — Gerçek dünya Türkçe SP ile 78 satırlık end-to-end doğrulama
+
+## Çalışma Kuralları
+
+- Test sırasında bulunan hata veya eksik özellikler, sormadan CLAUDE.md'ye kural olarak eklenir
+- Ship sonrası `vsce package && vsce publish` çalıştır (marketplace'e otomatik yayınla)
+
+### Test Sonrası Otomatik Eylemler
+
+**Test BAŞARISIZ olduğunda:**
+- Hatanın kök nedenini tespit et
+- Düzeltmeyi uygula ve testi tekrar çalıştır
+- Hatanın tekrarını önleyecek kuralı CLAUDE.md'ye ekle (format: `[TARİH] [MODÜL] kural açıklaması`)
+- Eğer hata bir edge case ise, ilgili fonksiyona guard clause ekle
+
+**Test BAŞARILI olduğunda:**
+- Test kapsamını (coverage) kontrol et — eksik branch veya edge case varsa yeni test ekle
+- Testin dokunduğu modüllerde TODO veya FIXME varsa raporla
+- Performans regresyonu olup olmadığını değerlendir (önceki çalışma süresine kıyasla)
+
+### CLAUDE.md Güncelleme Kuralları
+- Her eklenen kural tek satırda, aksiyon odaklı olmalı (örn: "DataGrid'e 10K+ satır yüklerken mutlaka virtualScroll: true kullan")
+- Aynı kural zaten varsa tekrar ekleme
+- Kurallar modül bazlı gruplandırılmalı
+
+### Rename Provider
+- [2026-03-23] F2 alias rename yaparken FROM/JOIN'deki tablo adı pozisyonları hariç tutulmalı — alias = tablo adı olduğunda tablo adını değiştirmemeli

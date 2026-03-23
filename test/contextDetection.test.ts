@@ -164,6 +164,58 @@ const goText = 'SELECT 1\nGO\nSELECT 2';
 const stmtGo2 = getCurrentStatement(goText, 15);
 assert(stmtGo2.trim().startsWith('SELECT 2'), 'getCurrentStatement respects GO separator');
 
+// ─── Multi-line SELECT context ───
+console.log('\n── Multi-line SELECT context ──');
+
+// SELECT on line 1, * on line 2
+const multiLineStmt1 = 'Select *\nFrom dbo.Table1 T';
+const mlCtx1 = contextFull('Select\n*', multiLineStmt1);
+assert(mlCtx1.type === SqlContextType.AFTER_SELECT, 'SELECT on line 1, * on line 2 → AFTER_SELECT');
+assert(mlCtx1.prefix === '*', 'multi-line * prefix is correct');
+
+// SELECT on line 1, word on line 2
+const multiLineStmt2 = 'Select col1\nFrom dbo.Table1 T';
+const mlCtx2 = contextFull('Select\ncol1', multiLineStmt2);
+assert(mlCtx2.type === SqlContextType.AFTER_SELECT, 'SELECT on line 1, word on line 2 → AFTER_SELECT');
+assert(mlCtx2.prefix === 'col1', 'multi-line word prefix is correct');
+
+// Comma on line 1, word on line 2
+const multiLineStmt3 = 'Select T.Col1,\nT.Col2 From dbo.Table1 T';
+const mlCtx3 = contextFull('Select T.Col1,\nT', multiLineStmt3);
+assert(mlCtx3.type === SqlContextType.AFTER_ALIAS_DOT || mlCtx3.type === SqlContextType.AFTER_SELECT,
+    'comma on line 1, alias.prefix on line 2 → valid context');
+
+// ─── Alias-less table mapping ───
+console.log('\n── Alias-less table mapping ──');
+
+const noAliasStmt = 'SELECT * FROM Table1 LEFT JOIN Table2 ON Table1.ID = Table2.ID';
+const noAliasCtx = contextFull('SELECT *', noAliasStmt);
+assert(noAliasCtx.type === SqlContextType.AFTER_SELECT, 'alias-less tables → AFTER_SELECT');
+assert(noAliasCtx.aliases !== undefined && noAliasCtx.aliases.length === 2,
+    'alias-less tables produce 2 alias mappings from table names');
+assert(noAliasCtx.aliases![0].tableName === 'Table1', 'first alias mapping has correct table name');
+assert(noAliasCtx.aliases![0].alias === '', 'alias-less mapping has empty alias');
+
+// With aliases — should use real aliases
+const withAliasStmt = 'SELECT * FROM Table1 T1 LEFT JOIN Table2 T2 ON T1.ID = T2.ID';
+const withAliasCtx = contextFull('SELECT *', withAliasStmt);
+assert(withAliasCtx.aliases !== undefined && withAliasCtx.aliases.length === 2,
+    'aliased tables produce 2 alias mappings');
+assert(withAliasCtx.aliases![0].alias === 'T1', 'first alias mapping has correct alias');
+
+// ─── Star expand conditions ───
+console.log('\n── Star expand prefix detection ──');
+
+// SELECT * → prefix should be *
+const starStmt = 'SELECT * FROM Table1 T';
+const starCtx = contextFull('SELECT *', starStmt);
+assert(starCtx.type === SqlContextType.AFTER_SELECT, 'SELECT * → AFTER_SELECT');
+assert(starCtx.prefix === '*', 'SELECT * → prefix is *');
+
+// SELECT word → prefix should be the word
+const wordCtx = contextFull('SELECT col', 'SELECT col FROM Table1 T');
+assert(wordCtx.prefix === 'col', 'SELECT col → prefix is col');
+
 // ─── Summary ───
 console.log(`\n${'═'.repeat(40)}`);
 console.log(`Results: ${passed} passed, ${failed} failed, ${passed + failed} total`);

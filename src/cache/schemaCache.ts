@@ -455,6 +455,11 @@ export class SchemaCache {
         return this.viewDefinitions.get(viewName.toLowerCase());
     }
 
+    /** Update cached view definition */
+    setViewDefinition(viewName: string, definition: string): void {
+        this.viewDefinitions.set(viewName.toLowerCase(), definition);
+    }
+
     /** Get all FK relationships involving a specific table (as parent or referenced) */
     getForeignKeysForTable(tableName: string): ForeignKeyInfo[] {
         const t = tableName.toLowerCase();

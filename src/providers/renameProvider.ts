@@ -33,9 +33,23 @@ export class TsqlRenameProvider implements vscode.RenameProvider {
             const statement = getCurrentStatement(fullText, offset);
             const statementStart = fullText.indexOf(statement);
 
+            // Find table name positions in FROM/JOIN clauses to exclude from rename
+            const tableNamePositions = new Set<number>();
+            const fromJoinRegex = /(?:FROM|(?:INNER|LEFT|RIGHT|CROSS|FULL)\s+(?:OUTER\s+)?JOIN|JOIN)\s+(?:dbo\.)?(\[?\w+\]?)\s+/gi;
+            let fjMatch;
+            while ((fjMatch = fromJoinRegex.exec(statement)) !== null) {
+                const tableNameInMatch = fjMatch[1];
+                const tableNameStart = fjMatch.index + fjMatch[0].indexOf(tableNameInMatch);
+                tableNamePositions.add(tableNameStart);
+            }
+
             const regex = new RegExp(`\\b${this.escapeRegex(oldName)}\\b`, 'gi');
             let match;
             while ((match = regex.exec(statement)) !== null) {
+                // Skip table name positions (only rename alias, not the table itself)
+                if (tableNamePositions.has(match.index)) {
+                    continue;
+                }
                 const absOffset = statementStart + match.index;
                 const startPos = document.positionAt(absOffset);
                 const endPos = document.positionAt(absOffset + oldName.length);
