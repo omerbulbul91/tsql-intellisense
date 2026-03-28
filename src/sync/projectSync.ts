@@ -116,8 +116,8 @@ export class ProjectSync {
             fs.mkdirSync(dir, { recursive: true });
         }
 
-        // Write file
-        fs.writeFileSync(filePath, createScript, 'utf-8');
+        // Write file (normalize to LF to avoid whitespace-only git diffs)
+        fs.writeFileSync(filePath, createScript.replace(/\r\n/g, '\n'), 'utf-8');
 
         // Add to .sqlproj if new file
         if (!fileExists) {

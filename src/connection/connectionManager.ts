@@ -32,6 +32,8 @@ export interface BatchResult {
 export class ConnectionManager {
     private pool: mssql.ConnectionPool | null = null;
     private activeProfile: ConnectionProfile | null = null;
+    /** All open pools keyed by "profileName::database" — enables simultaneous connections */
+    private pools: Map<string, { pool: mssql.ConnectionPool; profile: ConnectionProfile }> = new Map();
     private statusBarItem: vscode.StatusBarItem;
     private _onConnectionChanged = new vscode.EventEmitter<ConnectionProfile | null>();
     public readonly onConnectionChanged = this._onConnectionChanged.event;
@@ -157,7 +159,20 @@ export class ConnectionManager {
     }
 
     private async _connectInternal(profile: ConnectionProfile): Promise<void> {
-        if (this.pool) { await this.disconnect(); }
+        const poolKey = `${profile.name}::${profile.database}`;
+
+        // If already connected to this exact profile, just switch to it
+        const existing = this.pools.get(poolKey);
+        if (existing?.pool?.connected) {
+            this.pool = existing.pool;
+            this.activeProfile = existing.profile;
+            this.updateStatusBar();
+            this._onConnectionChanged.fire(existing.profile);
+            this.log.appendLine(`[${ts()}] Switched to existing connection: ${profile.name}/${profile.database}`);
+            return;
+        }
+
+        // Do NOT close other pools — keep simultaneous connections alive
         this._connectingProfileName = profile.name;
         let cancelled = false;
         const start = Date.now();
@@ -191,6 +206,7 @@ export class ConnectionManager {
             }
             this.pool = pool;
             this.activeProfile = profile;
+            this.pools.set(poolKey, { pool, profile });
             this.updateStatusBar();
             // Fetch SPID for logging
             let spid = '?';
@@ -223,20 +239,34 @@ export class ConnectionManager {
                 this.pool.close().catch(() => {});
                 this.pool = null;
             }
+            // Remove partially-added entry from pools map if any
+            for (const [key, val] of this.pools.entries()) {
+                if (!val.pool.connected) { this.pools.delete(key); }
+            }
         }
     }
 
-    /** Disconnect from the current database */
+    /** Disconnect from the active connection (keeps other connections alive) */
     async disconnect(): Promise<void> {
         if (this.pool) {
             const name = this.activeProfile?.name || 'unknown';
+            const key = `${this.activeProfile?.name}::${this.activeProfile?.database}`;
             try { await this.pool.close(); } catch { /* ignore */ }
+            this.pools.delete(key);
             this.pool = null;
             this.activeProfile = null;
             this.updateStatusBar();
             this.log.appendLine(`[${ts()}] Disconnected from ${name}`);
             this._onConnectionChanged.fire(null);
         }
+    }
+
+    /** Returns all currently open connection pools */
+    getOpenConnections(): Array<{ profileName: string; database: string }> {
+        return Array.from(this.pools.entries()).map(([key, val]) => ({
+            profileName: val.profile.name,
+            database: val.profile.database,
+        }));
     }
 
     /** Execute a SQL query and return results */
@@ -545,9 +575,12 @@ export class ConnectionManager {
     }
 
     dispose(): void {
-        if (this.pool) {
-            this.pool.close().catch(() => {});
+        // Close all open pools, not just the active one
+        for (const { pool } of this.pools.values()) {
+            pool.close().catch(() => {});
         }
+        this.pools.clear();
+        this.pool = null;
         this.statusBarItem.dispose();
         this._onConnectionChanged.dispose();
     }

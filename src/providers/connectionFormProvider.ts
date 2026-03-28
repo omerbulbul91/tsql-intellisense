@@ -12,6 +12,9 @@ export class ConnectionFormProvider {
         editProfile?: ConnectionProfile,
         showProjectPath: boolean = true
     ): void {
+        // Hide terminal panel so the form isn't hidden behind it
+        vscode.commands.executeCommand('workbench.action.closePanel');
+
         const column = vscode.window.activeTextEditor?.viewColumn || vscode.ViewColumn.One;
 
         // Get saved and recent connections for sidebar
@@ -358,15 +361,17 @@ export class ConnectionFormProvider {
     /* --- Form --- */
     h2 { margin: 0 0 4px 0; font-size: 16px; }
     .subtitle { color: var(--vscode-descriptionForeground); font-size: 12px; margin-bottom: 16px; }
-    .form-group { margin-bottom: 14px; }
+    .form-group { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+    .form-group.top-align { align-items: flex-start; padding-top: 2px; }
     label {
-        display: block; margin-bottom: 3px;
+        flex: 0 0 120px; min-width: 0;
         font-weight: 600; font-size: 11px;
         color: var(--vscode-descriptionForeground);
         text-transform: uppercase; letter-spacing: 0.5px;
     }
     input, select, textarea {
-        width: 100%; padding: 6px 8px;
+        flex: 1; min-width: 0;
+        padding: 6px 8px;
         background: var(--vscode-input-background);
         color: var(--vscode-input-foreground);
         border: 1px solid var(--vscode-input-border, transparent);
@@ -375,10 +380,10 @@ export class ConnectionFormProvider {
     }
     textarea { min-height: 80px; resize: vertical; }
     input:focus, select:focus, textarea:focus { outline: 1px solid var(--vscode-focusBorder); }
-    .checkbox-group { display: flex; align-items: center; gap: 8px; }
-    .checkbox-group input { width: auto; }
-    .browse-group { display: flex; gap: 6px; }
-    .browse-group input { flex: 1; }
+    .checkbox-group { display: flex; align-items: center; gap: 8px; flex: 1; margin-left: 130px; }
+    .checkbox-group input { width: auto; flex: none; }
+    .browse-group { display: flex; gap: 6px; flex: 1; }
+    .browse-group input { flex: 1; min-width: 0; }
     button {
         padding: 6px 14px; border: none; border-radius: 2px;
         font-size: 13px; cursor: pointer;
@@ -505,9 +510,9 @@ export class ConnectionFormProvider {
         <div class="conn-str-hint">
             Paste a connection string below. Form fields will update automatically as you type.
         </div>
-        <div class="form-group">
+        <div class="form-group top-align">
             <label>Connection String</label>
-            <textarea id="connString" oninput="onConnStrInput()" placeholder="Data Source=myserver,1433;Initial Catalog=mydb;User Id=sa;Password=***;TrustServerCertificate=True"></textarea>
+            <textarea id="connString" oninput="onConnStrInput()" onpaste="setTimeout(onConnStrInput,0)" placeholder="Data Source=myserver,1433;Initial Catalog=mydb;User Id=sa;Password=***;TrustServerCertificate=True"></textarea>
         </div>
     </div>
 
@@ -780,6 +785,8 @@ export class ConnectionFormProvider {
         } else if (msg.cmd === 'parsedConnectionString') {
             if (msg.profile) {
                 // Fill form fields without switching tab — user stays on conn string tab
+                // Save original pasted text so updateConnStr() doesn't overwrite it
+                const savedConnStr = document.getElementById('connString').value;
                 const pr = msg.profile;
                 if (pr.name) document.getElementById('name').value = pr.name;
                 if (pr.server) document.getElementById('server').value = pr.server;
@@ -789,7 +796,8 @@ export class ConnectionFormProvider {
                 if (pr.password) document.getElementById('password').value = pr.password;
                 if (pr.encrypt) document.getElementById('encrypt').value = pr.encrypt;
                 if (pr.trustServerCertificate !== undefined) document.getElementById('trustCert').checked = pr.trustServerCertificate;
-                updateConnStr();
+                // Restore original pasted string — don't overwrite with reconstructed version
+                document.getElementById('connString').value = savedConnStr;
             }
         } else if (msg.cmd === 'updatedRecent') {
             recentConns = msg.recent || [];

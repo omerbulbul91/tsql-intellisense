@@ -57,7 +57,7 @@ export class SchemaExporter {
                 if (!fs.existsSync(dir)) {
                     fs.mkdirSync(dir, { recursive: true });
                 }
-                fs.writeFileSync(filePath, script, 'utf-8');
+                fs.writeFileSync(filePath, script.replace(/\r\n/g, '\n'), 'utf-8');
                 written++;
             } catch (err: any) {
                 errors++;
