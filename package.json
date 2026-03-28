@@ -45,6 +45,12 @@
         "category": "T-SQL"
       },
       {
+        "command": "tsql-intellisense.exportSchema",
+        "title": "Export Schema (DDL to Folder)",
+        "icon": "$(export)",
+        "category": "T-SQL"
+      },
+      {
         "command": "tsql-intellisense.refreshDocumentCache",
         "title": "%command.refreshDocumentCache%",
         "icon": "$(sync)",
@@ -581,6 +587,11 @@
         {
           "command": "tsql-intellisense.loadDatabaseSchema",
           "when": "viewItem == Database"
+        },
+        {
+          "command": "tsql-intellisense.exportSchema",
+          "when": "viewItem == Database",
+          "group": "2_export@1"
         },
         {
           "command": "tsql-intellisense.backupDatabase",

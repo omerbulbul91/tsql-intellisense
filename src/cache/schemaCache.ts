@@ -339,6 +339,11 @@ export class SchemaCache {
         return Array.from(this.objects.values()).filter(o => o.type === 'FUNCTION');
     }
 
+    /** Get all objects (tables, views, SPs, functions, triggers) */
+    getAllObjects(): ObjectInfo[] {
+        return Array.from(this.objects.values());
+    }
+
     /** Find an object by name (case-insensitive) */
     findObject(name: string): ObjectInfo | undefined {
         return this.objects.get(name.toLowerCase());

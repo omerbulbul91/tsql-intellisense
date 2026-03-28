@@ -8,6 +8,7 @@ import { QueryRunner } from './providers/queryRunner';
 import { TsqlRenameProvider } from './providers/renameProvider';
 import { TsqlDefinitionProvider } from './providers/definitionProvider';
 import { ProjectSync } from './sync/projectSync';
+import { SchemaExporter } from './sync/schemaExporter';
 import { SnippetProvider } from './providers/snippetProvider';
 import { SnippetManagerProvider } from './providers/snippetManagerProvider';
 import { ConnectionTreeProvider } from './providers/connectionTreeProvider';
@@ -1192,6 +1193,60 @@ export function activate(context: vscode.ExtensionContext) {
             vscode.window.showWarningMessage(`Project Sync error: ${err.message}`);
         }
     });
+
+    // Export Schema: bulk export all DB objects to a project folder
+    const schemaExporter = new SchemaExporter(connectionManager, schemaCache);
+    context.subscriptions.push(
+        vscode.commands.registerCommand('tsql-intellisense.exportSchema', async (node?: DatabaseTreeItem) => {
+            if (!connectionManager.isConnected) {
+                vscode.window.showWarningMessage('T-SQL IntelliSense: Bağlantı yok. Lütfen önce bir bağlantı kurun.');
+                return;
+            }
+
+            const profile = connectionManager.currentProfile;
+            if (!profile) { return; }
+
+            // Determine default export path from profile, then ask user
+            const currentDb = profile.database;
+            const defaultPath = profile.databaseProjects?.[currentDb] ?? profile.projectPath ?? undefined;
+
+            const picked = await vscode.window.showOpenDialog({
+                canSelectFolders: true,
+                canSelectFiles: false,
+                canSelectMany: false,
+                openLabel: 'Export Buraya',
+                title: 'Export Schema — Hedef Klasör',
+                defaultUri: defaultPath ? vscode.Uri.file(defaultPath) : undefined,
+            });
+
+            if (!picked || picked.length === 0) { return; }
+            const exportPath = picked[0].fsPath;
+
+            await vscode.window.withProgress(
+                {
+                    location: vscode.ProgressLocation.Notification,
+                    title: `T-SQL: Schema dışa aktarılıyor (${currentDb})`,
+                    cancellable: true,
+                },
+                async (progress, token) => {
+                    progress.report({ message: 'Başlıyor...' });
+                    const { written, skipped, errors } = await schemaExporter.exportAll(
+                        exportPath,
+                        buildObjectScript,
+                        progress,
+                        token
+                    );
+                    if (token.isCancellationRequested) {
+                        vscode.window.showWarningMessage(`T-SQL: Export iptal edildi. ${written} dosya yazıldı.`);
+                    } else {
+                        vscode.window.showInformationMessage(
+                            `T-SQL: Export tamamlandı — ${written} yazıldı, ${skipped} atlandı, ${errors} hata. Klasör: ${exportPath}`
+                        );
+                    }
+                }
+            );
+        })
+    );
 
     // Fetch SP code when selected from ALTER PROC completion
     context.subscriptions.push(
