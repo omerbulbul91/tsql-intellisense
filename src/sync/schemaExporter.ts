@@ -37,12 +37,15 @@ export class SchemaExporter {
         let skipped = 0;
         let errors = 0;
 
+        if (total === 0) {
+            return { written, skipped, errors };
+        }
+
         for (let i = 0; i < objects.length; i++) {
             if (token.isCancellationRequested) { break; }
 
             const obj = objects[i];
-            const pct = Math.floor((i / total) * 100);
-            progress.report({ message: `(${i + 1}/${total}) ${obj.name}`, increment: i === 0 ? 0 : (100 / total) });
+            progress.report({ message: `(${i + 1}/${total}) ${obj.name}`, increment: 100 / total });
 
             try {
                 const script = await this.getScript(obj, buildObjectScript);

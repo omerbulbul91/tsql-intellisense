@@ -1206,6 +1206,19 @@ export function activate(context: vscode.ExtensionContext) {
             const profile = connectionManager.currentProfile;
             if (!profile) { return; }
 
+            // Warn if schema not loaded yet
+            if (!schemaCacheManager.active?.isLoaded) {
+                const action = await vscode.window.showWarningMessage(
+                    'T-SQL IntelliSense: Schema henüz yüklenmedi. Önce Ctrl+Shift+D ile schema yükleyin.',
+                    'Schema Yükle'
+                );
+                if (action === 'Schema Yükle') {
+                    await loadSchemaForActiveDb();
+                } else {
+                    return;
+                }
+            }
+
             // Determine default export path from profile, then ask user
             const currentDb = profile.database;
             const defaultPath = profile.databaseProjects?.[currentDb] ?? profile.projectPath ?? undefined;
@@ -1238,6 +1251,8 @@ export function activate(context: vscode.ExtensionContext) {
                     );
                     if (token.isCancellationRequested) {
                         vscode.window.showWarningMessage(`T-SQL: Export iptal edildi. ${written} dosya yazıldı.`);
+                    } else if (written === 0 && skipped === 0 && errors === 0) {
+                        vscode.window.showWarningMessage('T-SQL: Export — schema boş. Önce Ctrl+Shift+D ile schema yükleyin.');
                     } else {
                         vscode.window.showInformationMessage(
                             `T-SQL: Export tamamlandı — ${written} yazıldı, ${skipped} atlandı, ${errors} hata. Klasör: ${exportPath}`
