@@ -377,6 +377,12 @@
         "category": "T-SQL"
       },
       {
+        "command": "tsql-intellisense.exportSchema",
+        "title": "%command.exportSchema%",
+        "icon": "$(export)",
+        "category": "T-SQL"
+      },
+      {
         "command": "tsql-intellisense.backupDatabase",
         "title": "Backup Database...",
         "icon": "$(archive)",
@@ -580,6 +586,10 @@
         },
         {
           "command": "tsql-intellisense.loadDatabaseSchema",
+          "when": "viewItem == Database"
+        },
+        {
+          "command": "tsql-intellisense.exportSchema",
           "when": "viewItem == Database"
         },
         {

@@ -40,6 +40,7 @@
   "command.filterItems": "Filtrele...",
   "command.clearFilter": "Filtreyi Temizle",
   "command.loadDatabaseSchema": "Veritabanı Şemasını Yenile",
+  "command.exportSchema": "T-SQL IntelliSense: Şemayı Dışa Aktar",
   "command.toggleResultsPanel": "T-SQL IntelliSense: Sorgu Sonuçları Panelini Aç/Kapat",
   "command.selectInObjectExplorer": "Object Explorer'da Seç",
   "command.openProjectFile": "Proje Dosyasını Aç",
