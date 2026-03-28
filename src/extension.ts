@@ -94,6 +94,7 @@ export function activate(context: vscode.ExtensionContext) {
         await cache.loadIndexes().catch(e => console.error('loadIndexes failed:', e));
         await cache.loadTriggers().catch(e => console.error('loadTriggers failed:', e));
         await cache.loadViewDefinitions().catch(e => console.error('loadViewDefinitions failed:', e));
+        await cache.loadObjectDefinitions().catch(e => console.error('loadObjectDefinitions failed:', e));
         statusItem.text = cache.isFullyLoaded
             ? '$(check) T-SQL: Schema ready'
             : '$(warning) T-SQL: Schema partially loaded';
@@ -1196,16 +1197,23 @@ export function activate(context: vscode.ExtensionContext) {
 
     // Export Schema: export all DB objects to folder
     context.subscriptions.push(
-        vscode.commands.registerCommand('tsql-intellisense.exportSchema', async () => {
+        vscode.commands.registerCommand('tsql-intellisense.exportSchema', async (node?: DatabaseTreeItem) => {
+            // Tree'den geldi ama connectionManager bağlı değilse → otomatik bağlan
+            if (node?.profileName && !connectionManager.isConnected) {
+                const p = connectionManager.getSavedProfiles().find(pr => pr.name === node.profileName);
+                if (p) {
+                    try { await connectionManager.connect({ ...p, database: node.databaseName || p.database }); }
+                    catch (err: any) { vscode.window.showErrorMessage(`Bağlantı kurulamadı: ${err.message}`); return; }
+                }
+            }
+
             if (!connectionManager.isConnected) {
                 vscode.window.showWarningMessage('T-SQL IntelliSense: Bağlantı yok. Lütfen önce bir bağlantı kurun.');
                 return;
             }
 
-            const profile = connectionManager.currentProfile;
-            if (!profile) { return; }
-
-            const currentDb = profile.database;
+            const profile = connectionManager.currentProfile!;
+            const currentDb = node?.databaseName ?? profile.database;
             const defaultPath = profile.databaseProjects?.[currentDb]
                 ?? (profile as any).projectPath
                 ?? undefined;
@@ -1245,7 +1253,6 @@ export function activate(context: vscode.ExtensionContext) {
                     progress.report({ message: 'Başlıyor...' });
                     const { written, skipped, errors } = await exporter.exportAll(
                         exportPath,
-                        (name) => definitionProvider.buildTableScript(name),
                         progress,
                         token
                     );

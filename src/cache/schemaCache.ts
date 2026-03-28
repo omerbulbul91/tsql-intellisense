@@ -66,6 +66,8 @@ export class SchemaCache {
     private indexesLoaded = false;
     private viewDefinitions: Map<string, string> = new Map();
     private viewDefsLoaded = false;
+    private objectDefinitions: Map<string, string> = new Map();
+    private objectDefsLoaded = false;
     private refreshTimer: NodeJS.Timeout | null = null;
     private _loadedDbName: string | null = null;
     private _onSchemaLoaded = new vscode.EventEmitter<void>();
@@ -84,7 +86,7 @@ export class SchemaCache {
     }
 
     get isFullyLoaded(): boolean {
-        return this.allColumnsLoaded && this.fkLoaded && this.indexesLoaded && this.triggersLoaded && this.viewDefsLoaded;
+        return this.allColumnsLoaded && this.fkLoaded && this.indexesLoaded && this.triggersLoaded && this.viewDefsLoaded && this.objectDefsLoaded;
     }
 
     get objectCount(): number {
@@ -218,6 +220,8 @@ export class SchemaCache {
         this.indexesLoaded = false;
         this.viewDefinitions.clear();
         this.viewDefsLoaded = false;
+        this.objectDefinitions.clear();
+        this.objectDefsLoaded = false;
 
         const start = Date.now();
         this.log.appendLine(`[${ts()}] Schema loading object names for ${this._loadedDbName}...`);
@@ -480,6 +484,39 @@ export class SchemaCache {
     /** Get view definition */
     getViewDefinition(viewName: string): string | undefined {
         return this.viewDefinitions.get(viewName.toLowerCase());
+    }
+
+    /** Load all SP/Function/Trigger/View definitions in one query */
+    async loadObjectDefinitions(): Promise<void> {
+        if (!this.connectionManager.isConnected || this.objectDefsLoaded) {
+            return;
+        }
+
+        const start = Date.now();
+        this.log.appendLine(`[${ts()}] Loading object definitions...`);
+        const result = await this.connectionManager.executeQuery(`
+            SELECT o.name, OBJECT_DEFINITION(o.object_id) AS [definition]
+            FROM sys.objects o
+            WHERE o.type IN ('P','V','FN','IF','TF','TR')
+              AND o.schema_id = SCHEMA_ID('dbo')
+              AND o.is_ms_shipped = 0
+        `);
+        this.objectDefinitions.clear();
+
+        for (const row of result.rows) {
+            const name = (row['name'] as string).toLowerCase();
+            const def = row['definition'] as string;
+            if (def) {
+                this.objectDefinitions.set(name, def.trim());
+            }
+        }
+        this.objectDefsLoaded = true;
+        this.log.appendLine(`[${ts()}] Object definitions loaded: ${this.objectDefinitions.size} objects (${Date.now() - start}ms)`);
+    }
+
+    /** Get cached object definition (SP/View/Function/Trigger) */
+    getObjectDefinition(name: string): string | undefined {
+        return this.objectDefinitions.get(name.toLowerCase());
     }
 
     /** Update cached view definition */
