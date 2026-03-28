@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.5.4] - 2026-03-28
+
+### Added
+- **Export Schema** — `T-SQL: Export Schema` command exports all DB objects (Tables, Views, SPs, Functions, Triggers) to folder as `.sql` files
+- **Cache-first export** — all scripts generated from schema cache, ~1s for 1700+ objects
+- **Idempotent write** — unchanged files are not rewritten (no git diff noise)
+- **CRLF normalize** — exported files use LF line endings with trailing whitespace trimmed
+- **Bulk object definitions** — `loadObjectDefinitions()` caches all SP/View/Function/Trigger definitions in one query
+- **Auto-connect from tree** — tree context menu commands auto-connect `connectionManager` if not connected
+- **Export logging** — start/end timestamps and results logged to `T-SQL Connection` output channel
+
 ## [0.5.3] - 2026-03-24
 
 ### Added
