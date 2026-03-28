@@ -344,6 +344,11 @@ export class SchemaCache {
         return this.objects.get(name.toLowerCase());
     }
 
+    /** Return all cached objects (for export, etc.) */
+    getAllObjects(): ObjectInfo[] {
+        return Array.from(this.objects.values());
+    }
+
     /** Load foreign key relationships */
     async loadForeignKeys(): Promise<void> {
         if (!this.connectionManager.isConnected || this.fkLoaded) {
