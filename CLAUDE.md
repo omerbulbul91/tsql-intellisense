@@ -272,12 +272,34 @@ npm test    # 199 test (context detection + projectSync/snippet + formatter)
 | 31 | F5 öncelik | Eklenti aktifken F5 | Senin runQuery çalışır (mssql değil) |
 | 32 | Run Query butonu | SQL dosyasında toolbar'a bak | $(play) butonu görünür |
 
+### Export Schema
+
+- `T-SQL: Export Schema` komutu — Command Palette + Database node context menü
+- Tüm DB nesnelerini (Table, View, SP, Function, Trigger) seçilen klasöre `.sql` dosyaları olarak export eder
+- Klasör yapısı: `<hedef>/dbo/{Tables,Views,Stored Procedures,Functions,Triggers}/<Name>.sql`
+- Cache-first: tüm scriptler `schemaCache`'ten alınır (DB sorgusu yok), ~1sn'de 1700+ nesne
+- TABLE scriptleri cache'teki columns/indexes/FK/triggers'tan üretilir
+- VIEW/SP/Function/Trigger tanımları `loadObjectDefinitions()` ile toplu cache'lenir, CREATE OR ALTER dönüşümü yapılmaz
+- İdempotent write: mevcut dosya ile byte-for-byte karşılaştırma, aynıysa yazmaz (git diff oluşmaz)
+- CRLF → LF + trailing whitespace normalize
+- Cancel desteği (her nesne öncesi kontrol)
+- Tree context menüden geldiğinde `connectionManager` bağlı değilse otomatik bağlanır
+- Output Channel'a (`T-SQL Connection`) başlangıç/bitiş zamanı ve sonuç loglanır
+
 ### Project Sync (DDL → SQL Project)
 
 - `ALTER`, `CREATE`, `CREATE OR ALTER` sonrası PROC/VIEW/FUNCTION/TRIGGER/TABLE otomatik sync
 - Bağlantı profilinde `projectPath` ayarı gerekli
 - `ALTER TABLE` seçilince sadece isim tamamlanır, CREATE scripti açılmaz
 - `ALTER VIEW/FUNCTION/TRIGGER` seçilince definition açılır
+
+## Rakip Analizi
+
+| Kaynak | Repo | Açıklama |
+|--------|------|----------|
+| vscode-mssql | https://github.com/Microsoft/vscode-mssql | Microsoft'un resmi SQL Server eklentisi — Object Explorer, query execution, connection yönetimi referans implementasyon |
+
+Yeni özellik eklerken vscode-mssql'in aynı özelliği nasıl çözdüğüne bakılmalı (UX akışı, komut parametreleri, context menu yapısı).
 
 ## Bilinen Sınırlamalar
 
@@ -346,6 +368,20 @@ Projede merkezi bir logger modülü yoktur — loglama doğrudan VS Code `Output
 - Webview (client-side) loglarında `[TSQL]` prefix'i zorunlu — DevTools'ta filtreleme kolaylığı sağlar
 - SchemaCache gibi modüller kendi OutputChannel oluşturmak yerine ConnectionManager'ın kanalını paylaşmalı
 
+### Bağlantı Mimarisi (İki Pool)
+
+Projede iki bağımsız bağlantı katmanı vardır:
+
+| Katman | Sınıf | Kullanım |
+|--------|-------|----------|
+| **connectionManager** | `ConnectionManager` | IntelliSense, query execution, schema cache, export |
+| **treeQueryService** | `TreeQueryService` | Object Explorer tree (DB listesi, tablo/kolon gösterimi) |
+
+- Tree'de connection node expand edildiğinde `connectionTreeProvider.ensureConnection()` → `treeQueryService.connect()` çağrılır — bu sadece tree pool'unu açar, `connectionManager` bağlanmaz
+- `connectionManager` ancak `treeConnect` komutu (sağ tık → Connect) veya IntelliSense/query çalıştırıldığında bağlanır
+- [2026-03-28] Tree context menüsünden çağrılan komutlar (Export Schema vb.) `connectionManager` bağlı değilse otomatik bağlanmalı — `node.profileName` ile profile bulunup `connectionManager.connect()` çağrılmalı
+- Tree'de bağlantı durumu `contextValue` ile gösterilir: `ConnectionConnected` (yeşil ikon) / `ConnectionDisconnected` (kırmızı ikon). `treeConnect` komutu başarılı olduğunda `contextValue` güncellenir ve ikon yeşile döner
+
 ### Cancel (İptal) Mantığı
 
 Bağlantı ve sorgu çalıştırma işlemlerinde kullanıcı iptal desteği vardır.
@@ -387,6 +423,7 @@ Bağlantı ve sorgu çalıştırma işlemlerinde kullanıcı iptal desteği vard
 
 - Test sırasında bulunan hata veya eksik özellikler, sormadan CLAUDE.md'ye kural olarak eklenir
 - Ship sonrası `vsce package && vsce publish` çalıştır (marketplace'e otomatik yayınla)
+- [2026-03-28] VS Code user settings (`%APPDATA%/Code/User/settings.json`) düzenlerken ASLA Write ile tüm dosyayı yazma — Read ile oku, Edit ile sadece ilgili bloğu değiştir. Aksi halde snippet klasörü, query shortcuts, style ayarları gibi diğer ayarlar kaybolur
 
 ### Test Sonrası Otomatik Eylemler
 

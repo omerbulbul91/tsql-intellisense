@@ -2,7 +2,7 @@
   "name": "tsql-intellisense",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "0.5.3",
+  "version": "0.5.4",
   "publisher": "omerbulbul",
   "license": "MIT",
   "repository": {
@@ -377,6 +377,12 @@
         "category": "T-SQL"
       },
       {
+        "command": "tsql-intellisense.exportSchema",
+        "title": "%command.exportSchema%",
+        "icon": "$(export)",
+        "category": "T-SQL"
+      },
+      {
         "command": "tsql-intellisense.backupDatabase",
         "title": "Backup Database...",
         "icon": "$(archive)",
@@ -580,6 +586,10 @@
         },
         {
           "command": "tsql-intellisense.loadDatabaseSchema",
+          "when": "viewItem == Database"
+        },
+        {
+          "command": "tsql-intellisense.exportSchema",
           "when": "viewItem == Database"
         },
         {
@@ -1332,7 +1342,7 @@
     "build": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node && esbuild src/extension.web.ts --bundle --outfile=dist/extension.web.js --external:vscode --format=cjs --platform=browser",
     "build:web": "esbuild src/extension.web.ts --bundle --outfile=dist/extension.web.js --external:vscode --format=cjs --platform=browser",
     "watch": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --watch",
-    "test": "npx ts-node test/contextDetection.test.ts && npx ts-node test/projectSync.test.ts && npx ts-node test/formatter.test.ts && npx ts-node test/statementRule.test.ts && npx ts-node test/rename.test.ts && npx ts-node test/packageMenus.test.ts",
+    "test": "npx ts-node test/contextDetection.test.ts && npx ts-node test/projectSync.test.ts && npx ts-node test/formatter.test.ts && npx ts-node test/statementRule.test.ts && npx ts-node test/rename.test.ts && npx ts-node test/packageMenus.test.ts && npx ts-node test/schemaExporter.test.ts",
     "package": "vsce package"
   },
   "dependencies": {
