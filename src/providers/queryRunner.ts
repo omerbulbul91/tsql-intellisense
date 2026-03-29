@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { ConnectionManager, BatchResult, QueryResult } from '../connection/connectionManager';
+import { ConnectionManager, BatchResult, QueryResult, SqlMessage } from '../connection/connectionManager';
 import { createGridRenderer } from './grids/gridRenderer';
 import { MessagePanel } from './messagePanel';
 import { ts } from '../utils/timestamp';
@@ -488,7 +488,7 @@ ${grid.headHtml}
 </style>
 </head>
 <body>
-    ${result.error ? `<div class="error-bar">${this.escapeHtml(result.error)}</div>` : ''}
+    ${result.error ? `<div class="error-bar">${this.formatErrorBar(result)}</div>` : ''}
     ${result.resultSets.length > 0 && !isStacked ? `
     <div class="toolbar">
         <label>Filter:</label>
@@ -738,6 +738,23 @@ console.log('[TSQL] Grid init completed, gridApi:', typeof window.gridApi);
 </script>
 </body>
 </html>`;
+    }
+
+    /** Format error bar with SSMS-style details */
+    private formatErrorBar(result: BatchResult): string {
+        const errMsgs = result.messages.filter(m => (m.severity ?? 0) >= 11);
+        if (errMsgs.length > 0) {
+            return errMsgs.map(m => {
+                const parts: string[] = [];
+                parts.push(`Msg ${m.number ?? 0}`);
+                parts.push(`Level ${m.severity ?? 0}`);
+                parts.push(`State ${m.state ?? 0}`);
+                if (m.procName) { parts.push(`Procedure ${m.procName}`); }
+                if (m.lineNumber != null) { parts.push(`Line ${m.lineNumber}`); }
+                return `${this.escapeHtml(parts.join(', '))}\n${this.escapeHtml(m.message)}`;
+            }).join('\n\n');
+        }
+        return this.escapeHtml(result.error || '');
     }
 
     private escapeHtml(text: string): string {

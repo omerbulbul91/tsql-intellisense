@@ -182,6 +182,9 @@ Built-in snippet'ler (`contributes.snippets`) kaldırılmıştır — tüm snipp
 - İki görüntüleme modu: `tabs` (sekmeler) veya `stacked` (alt alta) — settings'ten ayarlanır
 - CSV/JSON export
 - Sıralanabilir kolon başlıkları
+- [2026-03-29] `executeSingleBatch` mutlaka `request.batch()` kullanmalı — `request.query()` SQL'i `sp_executesql` ile sarar, PRINT mesajlarını yutar ve hata satır numaralarını yanlış raporlar
+- [2026-03-29] Hata ve info mesajları `SqlMessage` interface ile yapısal olarak yakalanmalı (number, severity, state, lineNumber, procName) — düz string değil
+- [2026-03-29] Messages panelinde SSMS formatı kullanılmalı: `Msg N, Level N, State N, Procedure X, Line N` + mesaj metni. PRINT (severity < 11) düz metin olarak gösterilir
 
 ### Şema Cache
 

@@ -30,7 +30,8 @@ function stripLineEndings(s: string): string {
     return s.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n').replace(/\n+$/, '\n');
 }
 
-/** Only write if content actually changed (idempotent) */
+/** Only write if content actually changed (idempotent).
+ *  If content is same but format differs (BOM/line endings), normalize silently. */
 function writeIfChanged(filePath: string, content: string): boolean {
     const dir = path.dirname(filePath);
     if (!fs.existsSync(dir)) {
@@ -38,7 +39,12 @@ function writeIfChanged(filePath: string, content: string): boolean {
     }
     if (fs.existsSync(filePath)) {
         const existing = fs.readFileSync(filePath, 'utf-8');
-        if (stripLineEndings(existing) === stripLineEndings(content)) { return false; }
+        if (existing === content) { return false; }
+        if (stripLineEndings(existing) === stripLineEndings(content)) {
+            // Content same but format differs (BOM/CRLF) — normalize without counting as change
+            fs.writeFileSync(filePath, content, 'utf-8');
+            return false;
+        }
     }
     fs.writeFileSync(filePath, content, 'utf-8');
     return true;
@@ -66,8 +72,9 @@ export class SchemaExporter {
         }
 
         const log = this.connectionManager.log;
+        const connName = this.connectionManager.currentProfile?.name || 'unknown';
         const start = Date.now();
-        log.appendLine(`[${ts()}] [SchemaExporter] Export başladı — ${total} nesne → ${exportPath}`);
+        log.appendLine(`[${ts()}] [SchemaExporter] Export başladı — ${connName} — ${total} nesne → ${exportPath}`);
         log.show(true);
 
         // Always refresh all schema data before export (columns, FKs, indexes, triggers, definitions)
@@ -104,7 +111,7 @@ export class SchemaExporter {
         }
 
         const elapsed = ((Date.now() - start) / 1000).toFixed(1);
-        log.appendLine(`[${ts()}] [SchemaExporter] Export bitti — ${written} yazıldı, ${skipped} atlandı, ${errors} hata (${elapsed}s)`);
+        log.appendLine(`[${ts()}] [SchemaExporter] Export bitti — ${connName} — ${written} yazıldı, ${skipped} atlandı, ${errors} hata (${elapsed}s)`);
 
         return { written, skipped, errors };
     }
