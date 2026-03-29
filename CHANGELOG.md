@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.5.5] - 2026-03-29
+
+### Fixed
+- **Export Schema: DEFAULT values** — `/*...*/` placeholder yerine gerçek DEFAULT değerleri yazılıyor (#18)
+- **Export Schema: CRLF line endings** — UTF-8 BOM + CRLF + trailing blank line (SSDT standardı) (#17)
+- **Export Schema: idempotent write** — BOM, LF/CRLF ve trailing newline farkları yoksayılıyor
+
+### Added
+- **SSDT-compatible table export** — UPPERCASE datatypes, precision (`DATETIME2 (7)`), inline PK/FK, cascade info, named DEFAULT constraints, computed columns, filtered index WHERE clause, column alignment
+- **Schema cache refresh** — export öncesi cache tamamen yenileniyor (her zaman güncel DB verisi)
+- **Index order preservation** — mevcut dosyadaki index sırası korunuyor
+- **26 yeni test** — SSDT format kuralları (datatype, constraint, computed, cascade, BOM, normalization)
+
 ## [0.5.4] - 2026-03-28
 
 ### Added

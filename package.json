@@ -2,7 +2,7 @@
   "name": "tsql-intellisense",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "0.5.4",
+  "version": "0.5.5",
   "publisher": "omerbulbul",
   "license": "MIT",
   "repository": {
