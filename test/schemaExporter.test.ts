@@ -23,13 +23,19 @@ function assert(condition: boolean, testName: string) {
 // Mirror of normalize + idempotent write logic from schemaExporter.ts
 function normalizeScript(script: string): string {
     let s = script.replace(/\r\n/g, '\n').replace(/[ \t]+$/gm, '').replace(/\n+$/, '');
-    return s + '\n';
+    s = s + '\n';
+    // Convert to CRLF (Windows/SSDT standard)
+    return s.replace(/\n/g, '\r\n');
+}
+
+function stripLineEndings(s: string): string {
+    return s.replace(/\r\n/g, '\n');
 }
 
 function shouldWriteFile(filePath: string, newContent: string): boolean {
     if (!fs.existsSync(filePath)) { return true; }
     const existing = fs.readFileSync(filePath, 'utf-8');
-    return existing !== newContent;
+    return stripLineEndings(existing) !== stripLineEndings(newContent);
 }
 
 const SUBDIRECTORY_MAP: Record<string, string> = {
@@ -48,13 +54,14 @@ function buildExportPath(exportRoot: string, objectType: string, objectName: str
 // ─── normalizeScript ───
 console.log('\n── normalizeScript ──');
 
-assert(normalizeScript('SELECT 1\r\n') === 'SELECT 1\n', 'CRLF to LF');
-assert(normalizeScript('SELECT 1  \n') === 'SELECT 1\n', 'trailing spaces removed');
-assert(normalizeScript('SELECT 1\t\n') === 'SELECT 1\n', 'trailing tabs removed');
-assert(normalizeScript('SELECT 1\n\n\n') === 'SELECT 1\n', 'trailing newlines collapsed');
-assert(normalizeScript('SELECT 1\r\nGO\r\n') === 'SELECT 1\nGO\n', 'multi-line CRLF');
-assert(normalizeScript('  SELECT 1  \r\n  GO  \r\n') === '  SELECT 1\n  GO\n', 'leading spaces preserved, trailing removed');
-assert(normalizeScript('SELECT 1') === 'SELECT 1\n', 'adds trailing newline if missing');
+assert(normalizeScript('SELECT 1\r\n') === 'SELECT 1\r\n', 'CRLF preserved');
+assert(normalizeScript('SELECT 1\n') === 'SELECT 1\r\n', 'LF to CRLF');
+assert(normalizeScript('SELECT 1  \n') === 'SELECT 1\r\n', 'trailing spaces removed');
+assert(normalizeScript('SELECT 1\t\n') === 'SELECT 1\r\n', 'trailing tabs removed');
+assert(normalizeScript('SELECT 1\n\n\n') === 'SELECT 1\r\n', 'trailing newlines collapsed');
+assert(normalizeScript('SELECT 1\r\nGO\r\n') === 'SELECT 1\r\nGO\r\n', 'multi-line CRLF');
+assert(normalizeScript('  SELECT 1  \r\n  GO  \r\n') === '  SELECT 1\r\n  GO\r\n', 'leading spaces preserved, trailing removed');
+assert(normalizeScript('SELECT 1') === 'SELECT 1\r\n', 'adds trailing CRLF if missing');
 
 // ─── shouldWriteFile (idempotent) ───
 console.log('\n── shouldWriteFile ──');
@@ -62,12 +69,16 @@ console.log('\n── shouldWriteFile ──');
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'export-test-'));
 
 const newFile = path.join(tmpDir, 'new.sql');
-assert(shouldWriteFile(newFile, 'SELECT 1\n') === true, 'new file should write');
+assert(shouldWriteFile(newFile, 'SELECT 1\r\n') === true, 'new file should write');
 
+fs.writeFileSync(newFile, 'SELECT 1\r\n', 'utf-8');
+assert(shouldWriteFile(newFile, 'SELECT 1\r\n') === false, 'same content should skip');
+
+assert(shouldWriteFile(newFile, 'SELECT 2\r\n') === true, 'changed content should write');
+
+// LF vs CRLF difference should NOT trigger rewrite
 fs.writeFileSync(newFile, 'SELECT 1\n', 'utf-8');
-assert(shouldWriteFile(newFile, 'SELECT 1\n') === false, 'same content should skip');
-
-assert(shouldWriteFile(newFile, 'SELECT 2\n') === true, 'changed content should write');
+assert(shouldWriteFile(newFile, 'SELECT 1\r\n') === false, 'LF vs CRLF = same content (no rewrite)');
 
 assert(shouldWriteFile(newFile, 'SELECT 1\n\n') === true, 'extra newline = different content');
 
@@ -115,7 +126,7 @@ const e2eFile = path.join(tmpDir2, 'test.sql');
 // First write
 const script1 = 'CREATE PROC dbo.spTest\r\nAS\r\n  SELECT 1  \r\n';
 const norm1 = normalizeScript(script1);
-assert(norm1 === 'CREATE PROC dbo.spTest\nAS\n  SELECT 1\n', 'normalize complex script');
+assert(norm1 === 'CREATE PROC dbo.spTest\r\nAS\r\n  SELECT 1\r\n', 'normalize complex script to CRLF');
 fs.writeFileSync(e2eFile, norm1, 'utf-8');
 
 // Second write with same logical content but different whitespace

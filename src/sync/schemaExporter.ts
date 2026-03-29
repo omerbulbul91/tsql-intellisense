@@ -13,10 +13,17 @@ const SUBDIRECTORY_MAP: Record<string, string> = {
     'TABLE': 'Tables',
 };
 
-/** Normalize line endings and trailing whitespace for consistent git diffs */
+/** Normalize line endings to CRLF and trim trailing whitespace for consistent git diffs */
 function normalizeScript(script: string): string {
     let s = script.replace(/\r\n/g, '\n').replace(/[ \t]+$/gm, '').replace(/\n+$/, '');
-    return s + '\n';
+    s = s + '\n';
+    // Convert to CRLF (Windows/SSDT standard)
+    return s.replace(/\n/g, '\r\n');
+}
+
+/** Strip line endings for content comparison (ignores LF vs CRLF difference) */
+function stripLineEndings(s: string): string {
+    return s.replace(/\r\n/g, '\n');
 }
 
 /** Only write if content actually changed (idempotent) */
@@ -27,7 +34,7 @@ function writeIfChanged(filePath: string, content: string): boolean {
     }
     if (fs.existsSync(filePath)) {
         const existing = fs.readFileSync(filePath, 'utf-8');
-        if (existing === content) { return false; }
+        if (stripLineEndings(existing) === stripLineEndings(content)) { return false; }
     }
     fs.writeFileSync(filePath, content, 'utf-8');
     return true;
