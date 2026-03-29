@@ -21,9 +21,24 @@ export interface QueryResult {
     columns: string[];
 }
 
+/** Structured SQL Server message (info, warning, or error) */
+export interface SqlMessage {
+    message: string;
+    /** SQL Server message number (e.g. 208 = Invalid object name) */
+    number?: number;
+    /** Severity/class: 0-10 info, 11-16 user error, 17-25 system error */
+    severity?: number;
+    /** Error state */
+    state?: number;
+    /** Line number in the SQL batch */
+    lineNumber?: number;
+    /** Procedure name (if error occurred inside a SP) */
+    procName?: string;
+}
+
 export interface BatchResult {
     resultSets: QueryResult[];
-    messages: string[];
+    messages: SqlMessage[];
     rowsAffected: number;
     error?: string;
     elapsed: number;
@@ -259,7 +274,7 @@ export class ConnectionManager {
     async executeBatch(sql: string): Promise<BatchResult> {
         const startTime = Date.now();
         const resultSets: QueryResult[] = [];
-        const messages: string[] = [];
+        const messages: SqlMessage[] = [];
         let totalRowsAffected = 0;
 
         // Split by GO on its own line
@@ -283,6 +298,17 @@ export class ConnectionManager {
                 elapsed: Date.now() - startTime,
             };
         } catch (err: any) {
+            // Extract structured error details from mssql/tedious error object
+            const errorMsg: SqlMessage = {
+                message: err.message,
+                number: err.number,
+                severity: err.class ?? err.severity,
+                state: err.state,
+                lineNumber: err.lineNumber,
+                procName: err.procName || undefined,
+            };
+            messages.push(errorMsg);
+
             return {
                 resultSets,
                 messages,
@@ -306,20 +332,30 @@ export class ConnectionManager {
         return this._activeRequest !== null;
     }
 
-    private async executeSingleBatch(sql: string, messages: string[]): Promise<QueryResult[]> {
+    private async executeSingleBatch(sql: string, messages: SqlMessage[]): Promise<QueryResult[]> {
         if (!this.pool || !this.pool.connected) { throw new Error('Not connected'); }
 
-        // Use query() instead of batch() for arrayRowMode compatibility
-        // GO splitting is already handled by executeBatch()
+        // Use batch() instead of query() — batch() sends SQL directly via TDS (like SSMS),
+        // while query() wraps in sp_executesql which swallows PRINT messages and
+        // reports incorrect line numbers in errors.
         const request = this.pool.request();
         this._activeRequest = request;
         (request as any).arrayRowMode = true;
         request.on('info', (info: any) => {
-            if (info.message) { messages.push(info.message); }
+            if (info.message) {
+                messages.push({
+                    message: info.message,
+                    number: info.number,
+                    severity: info.class,
+                    state: info.state,
+                    lineNumber: info.lineNumber,
+                    procName: info.procName || undefined,
+                });
+            }
         });
 
         try {
-            const result = await request.query(sql);
+            const result = await request.batch(sql);
             return this.normalizeArrayQueryResults(result);
         } finally {
             this._activeRequest = null;

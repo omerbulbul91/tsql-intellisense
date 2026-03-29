@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { BatchResult } from '../connection/connectionManager';
+import { BatchResult, SqlMessage } from '../connection/connectionManager';
 
 export interface QueryMeta {
     startTime: Date;
@@ -82,19 +82,24 @@ export class MessagePanel implements vscode.WebviewViewProvider {
             lines.push(`${timeStr}         Started executing query at  Line ${meta.startLine}`);
         }
 
-        // PRINT messages and server info messages
-        for (const m of result.messages) {
-            lines.push(this.escapeHtml(m));
+        // PRINT messages, info messages, and errors (SSMS-style)
+        if (result.messages.length > 0) {
+            for (const m of result.messages) {
+                lines.push(this.formatMessage(m));
+            }
+            lines.push('');
         }
 
         // Rows affected
         if (result.rowsAffected > 0) {
             lines.push(`(${result.rowsAffected} rows affected)`);
+            lines.push('');
         }
 
         // Command completed (no result sets, no error)
         if (!result.error && result.resultSets.length === 0 && result.rowsAffected === 0) {
             lines.push('Command(s) completed successfully.');
+            lines.push('');
         }
 
         // Total execution time
@@ -105,9 +110,16 @@ export class MessagePanel implements vscode.WebviewViewProvider {
         const ems = String(elapsed % 1000).padStart(3, '0');
         lines.push(`Total execution time: ${eh}:${em}:${es}.${ems}`);
 
+        // Error messages are already included in messages array with SSMS-style formatting
+        // Show a summary error bar only if there's an error
         let errorHtml = '';
         if (result.error) {
-            errorHtml = `<div class="error">${this.escapeHtml(result.error)}</div>`;
+            const errMsgs = result.messages.filter(m => (m.severity ?? 0) >= 11);
+            if (errMsgs.length > 0) {
+                errorHtml = errMsgs.map(m => `<div class="error">${this.formatMessage(m)}</div>`).join('');
+            } else {
+                errorHtml = `<div class="error">${this.escapeHtml(result.error)}</div>`;
+            }
         }
 
         return `<!DOCTYPE html>
@@ -130,6 +142,27 @@ export class MessagePanel implements vscode.WebviewViewProvider {
     }
 </style></head>
 <body>${errorHtml}${lines.join('\n')}</body></html>`;
+    }
+
+    /** Format SqlMessage in SSMS style: Msg N, Level N, State N, Line N */
+    private formatMessage(m: SqlMessage): string {
+        const severity = m.severity ?? 0;
+        // Info messages (severity < 11, e.g. PRINT): show just the text
+        if (severity < 11 && !m.number) {
+            return this.escapeHtml(m.message);
+        }
+        // SSMS-style: Msg 208, Level 16, State 1, Procedure sp_name, Line 5
+        const parts: string[] = [];
+        parts.push(`Msg ${m.number ?? 0}`);
+        parts.push(`Level ${severity}`);
+        parts.push(`State ${m.state ?? 0}`);
+        if (m.procName) {
+            parts.push(`Procedure ${m.procName}`);
+        }
+        if (m.lineNumber != null) {
+            parts.push(`Line ${m.lineNumber}`);
+        }
+        return `${this.escapeHtml(parts.join(', '))}\n${this.escapeHtml(m.message)}`;
     }
 
     private escapeHtml(text: string): string {
