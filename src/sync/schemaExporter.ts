@@ -128,7 +128,7 @@ export class SchemaExporter {
 
             if (col.isIdentity) { colDef += ' IDENTITY(1,1)'; }
             colDef += col.isNullable ? ' NULL' : ' NOT NULL';
-            if (col.hasDefault) { colDef += ' DEFAULT /*...*/'; }
+            if (col.hasDefault && col.defaultValue) { colDef += ` DEFAULT ${col.defaultValue}`; }
 
             if (i < obj.columns.length - 1) { colDef += ','; }
             lines.push(colDef);

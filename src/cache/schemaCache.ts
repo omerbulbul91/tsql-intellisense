@@ -20,6 +20,7 @@ export interface ColumnInfo {
     ordinalPosition: number;
     isIdentity?: boolean;
     hasDefault?: boolean;
+    defaultValue?: string;
 }
 
 export interface ObjectInfo {
@@ -175,7 +176,8 @@ export class SchemaCache {
         const result = await this.connectionManager.executeQuery(
             `SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE, CHARACTER_MAXIMUM_LENGTH, ORDINAL_POSITION,
                     COLUMNPROPERTY(OBJECT_ID('[${safe}].dbo.' + TABLE_NAME), COLUMN_NAME, 'IsIdentity') AS IS_IDENTITY,
-                    CASE WHEN COLUMN_DEFAULT IS NOT NULL THEN 1 ELSE 0 END AS HAS_DEFAULT
+                    CASE WHEN COLUMN_DEFAULT IS NOT NULL THEN 1 ELSE 0 END AS HAS_DEFAULT,
+                    COLUMN_DEFAULT
              FROM [${safe}].INFORMATION_SCHEMA.COLUMNS
              WHERE TABLE_NAME = @tableName
              ORDER BY ORDINAL_POSITION`,
@@ -190,6 +192,7 @@ export class SchemaCache {
             ordinalPosition: row['ORDINAL_POSITION'] as number,
             isIdentity: row['IS_IDENTITY'] === 1,
             hasDefault: row['HAS_DEFAULT'] === 1,
+            defaultValue: (row['COLUMN_DEFAULT'] as string) || undefined,
         }));
         this.extraDbColumnsLoaded.add(cacheKey);
         return obj.columns;
@@ -282,6 +285,7 @@ export class SchemaCache {
                 ordinalPosition: row['ORDINAL_POSITION'] as number,
                 isIdentity: row['IS_IDENTITY'] === 1,
                 hasDefault: row['HAS_DEFAULT'] === 1,
+                defaultValue: (row['COLUMN_DEFAULT'] as string) || undefined,
             });
 
             this.columnsLoaded.add(tableName);
@@ -320,6 +324,7 @@ export class SchemaCache {
             ordinalPosition: row['ORDINAL_POSITION'] as number,
             isIdentity: row['IS_IDENTITY'] === 1,
             hasDefault: row['HAS_DEFAULT'] === 1,
+            defaultValue: (row['COLUMN_DEFAULT'] as string) || undefined,
         }));
 
         this.columnsLoaded.add(key);
