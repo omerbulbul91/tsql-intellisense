@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.5.6] - 2026-03-29
+
+### Fixed
+- **SSMS-style error messages** — hata mesajlarında satır numarası, severity, state ve procedure bilgisi gösteriliyor (#16)
+- **PRINT message support** — `request.query()` → `request.batch()` geçişi ile PRINT mesajları artık Messages panelinde görünüyor
+- **Structured error capture** — `SqlMessage` interface ile yapısal hata/mesaj yakalama (number, severity, state, lineNumber, procName)
+
+### Added
+- **Export notification connection name** — export bildiriminde ve log mesajlarında bağlantı adı gösterimi
+- **Messages panel spacing** — mesaj bölümleri arası boş satır (okunabilirlik)
+
 ## [0.5.5] - 2026-03-29
 
 ### Fixed
