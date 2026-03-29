@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import { ConnectionManager } from '../connection/connectionManager';
-import { SchemaCache, ObjectInfo } from '../cache/schemaCache';
+import { SchemaCache, ObjectInfo, ColumnInfo } from '../cache/schemaCache';
 import { ts } from '../utils/timestamp';
 
 const SUBDIRECTORY_MAP: Record<string, string> = {
@@ -13,17 +13,21 @@ const SUBDIRECTORY_MAP: Record<string, string> = {
     'TABLE': 'Tables',
 };
 
-/** Normalize line endings to CRLF and trim trailing whitespace for consistent git diffs */
+const BOM = '\uFEFF';
+
+/** Normalize line endings to CRLF, add BOM, and trim trailing whitespace for consistent git diffs */
 function normalizeScript(script: string): string {
-    let s = script.replace(/\r\n/g, '\n').replace(/[ \t]+$/gm, '').replace(/\n+$/, '');
-    s = s + '\n';
-    // Convert to CRLF (Windows/SSDT standard)
-    return s.replace(/\n/g, '\r\n');
+    // Strip existing BOM if present
+    let s = script.startsWith(BOM) ? script.slice(1) : script;
+    s = s.replace(/\r\n/g, '\n').replace(/[ \t]+$/gm, '').replace(/\n+$/, '');
+    s = s + '\n\n'; // trailing blank line (SSDT standard)
+    // Convert to CRLF (Windows/SSDT standard) and prepend BOM
+    return BOM + s.replace(/\n/g, '\r\n');
 }
 
-/** Strip line endings for content comparison (ignores LF vs CRLF difference) */
+/** Strip BOM, normalize line endings and trailing newlines for content comparison */
 function stripLineEndings(s: string): string {
-    return s.replace(/\r\n/g, '\n');
+    return s.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n').replace(/\n+$/, '\n');
 }
 
 /** Only write if content actually changed (idempotent) */
@@ -66,11 +70,10 @@ export class SchemaExporter {
         log.appendLine(`[${ts()}] [SchemaExporter] Export başladı — ${total} nesne → ${exportPath}`);
         log.show(true);
 
-        // Ensure object definitions are cached
-        if (!this.schemaCache.isFullyLoaded) {
-            log.appendLine(`[${ts()}] [SchemaExporter] Schema detayları yükleniyor...`);
-            await this.schemaCache.loadObjectDefinitions();
-        }
+        // Always refresh all schema data before export (columns, FKs, indexes, triggers, definitions)
+        log.appendLine(`[${ts()}] [SchemaExporter] Schema yenileniyor...`);
+        await this.schemaCache.refresh();
+        await this.schemaCache.loadObjectDefinitions();
 
         for (let i = 0; i < objects.length; i++) {
             if (token.isCancellationRequested) { break; }
@@ -82,12 +85,12 @@ export class SchemaExporter {
             });
 
             try {
-                const script = this.getScript(obj);
+                const subDir = SUBDIRECTORY_MAP[obj.type] || obj.type;
+                const filePath = path.join(exportPath, 'dbo', subDir, `${obj.name}.sql`);
+                const script = this.getScript(obj, filePath);
                 if (!script) { skipped++; continue; }
 
                 const normalized = normalizeScript(script);
-                const subDir = SUBDIRECTORY_MAP[obj.type] || obj.type;
-                const filePath = path.join(exportPath, 'dbo', subDir, `${obj.name}.sql`);
 
                 if (writeIfChanged(filePath, normalized)) {
                     written++;
@@ -106,69 +109,154 @@ export class SchemaExporter {
         return { written, skipped, errors };
     }
 
-    private getScript(obj: ObjectInfo): string | null {
+    private getScript(obj: ObjectInfo, existingFilePath?: string): string | null {
         if (obj.type === 'TABLE') {
-            return this.buildTableScriptFromCache(obj.name);
+            return this.buildTableScriptFromCache(obj.name, existingFilePath);
         }
 
         // VIEW / SP / FUNCTION / TRIGGER — cache'ten al
         return this.schemaCache.getObjectDefinition(obj.name) || null;
     }
 
-    /** Build CREATE TABLE script from cached schema data */
-    private buildTableScriptFromCache(tableName: string): string | null {
+    /** Format data type in SSDT style: UPPERCASE, unbracketed, with precision */
+    private formatDataType(col: ColumnInfo): string {
+        const dt = col.dataType.toLowerCase();
+        const upper = col.dataType.toUpperCase();
+
+        // String/binary types: NVARCHAR (250), VARCHAR (MAX)
+        if (['varchar', 'nvarchar', 'char', 'nchar', 'varbinary', 'binary'].includes(dt)) {
+            const len = col.maxLength === -1 ? 'MAX' : String(col.maxLength);
+            return `${upper} (${len})`;
+        }
+        // Numeric types with precision: DECIMAL (18, 2)
+        if (['decimal', 'numeric'].includes(dt) && col.numericPrecision != null) {
+            return `${upper} (${col.numericPrecision}, ${col.numericScale ?? 0})`;
+        }
+        // Datetime types with precision: DATETIME2 (7)
+        if (['datetime2', 'datetimeoffset', 'time'].includes(dt) && col.datetimePrecision != null) {
+            return `${upper} (${col.datetimePrecision})`;
+        }
+        return upper;
+    }
+
+    /** Extract index names from existing file to preserve ordering */
+    private getExistingIndexOrder(filePath: string): string[] {
+        if (!fs.existsSync(filePath)) { return []; }
+        const content = fs.readFileSync(filePath, 'utf-8');
+        const order: string[] = [];
+        const re = /CREATE\s+(?:UNIQUE\s+)?(?:CLUSTERED|NONCLUSTERED)\s+INDEX\s+\[([^\]]+)\]/gi;
+        let m;
+        while ((m = re.exec(content)) !== null) {
+            order.push(m[1]);
+        }
+        return order;
+    }
+
+    /** Build CREATE TABLE script from cached schema data (SSDT format) */
+    private buildTableScriptFromCache(tableName: string, existingFilePath?: string): string | null {
         const obj = this.schemaCache.findObject(tableName);
         if (!obj?.columns || obj.columns.length === 0) { return null; }
 
-        const lines: string[] = [];
-        lines.push(`CREATE TABLE [dbo].[${tableName}]`, '(');
-
-        // Columns
-        for (let i = 0; i < obj.columns.length; i++) {
-            const col = obj.columns[i];
-            let colDef = `    [${col.name}]`;
-            colDef += ` [${col.dataType}]`;
-
-            if (['varchar', 'nvarchar', 'char', 'nchar', 'varbinary', 'binary'].includes(col.dataType)) {
-                colDef += col.maxLength === -1 ? '(MAX)' : `(${col.maxLength})`;
-            }
-
-            if (col.isIdentity) { colDef += ' IDENTITY(1,1)'; }
-            colDef += col.isNullable ? ' NULL' : ' NOT NULL';
-            if (col.hasDefault && col.defaultValue) { colDef += ` DEFAULT ${col.defaultValue}`; }
-
-            if (i < obj.columns.length - 1) { colDef += ','; }
-            lines.push(colDef);
-        }
-        lines.push(')');
-        lines.push('GO');
-
-        // Indexes & PK
         const indexes = this.schemaCache.getIndexes(tableName);
-        for (const idx of indexes) {
-            if (idx.isPrimaryKey) {
-                lines.push(`ALTER TABLE [dbo].[${tableName}] ADD CONSTRAINT [${idx.name}] PRIMARY KEY ${idx.type} (${idx.columns})`);
-            } else {
-                const unique = idx.isUnique ? 'UNIQUE ' : '';
-                lines.push(`CREATE ${unique}${idx.type} INDEX [${idx.name}] ON [dbo].[${tableName}] (${idx.columns})`);
-            }
-            lines.push('GO');
-        }
-
-        // Foreign keys
         const fks = this.schemaCache.getForeignKeysForTable(tableName)
             .filter(fk => fk.parentTable.toLowerCase() === tableName.toLowerCase());
-        for (const fk of fks) {
-            lines.push(`ALTER TABLE [dbo].[${tableName}] ADD CONSTRAINT [${fk.fkName}] FOREIGN KEY ([${fk.parentColumn}]) REFERENCES [dbo].[${fk.referencedTable}] ([${fk.referencedColumn}])`);
-            lines.push('GO');
+
+        // --- Build column definitions for alignment ---
+        const colParts: { name: string; type: string; suffix: string }[] = [];
+        for (const col of obj.columns) {
+            const name = `[${col.name}]`;
+
+            // Computed column: [Name] AS (expression)
+            if (col.computedDefinition) {
+                const persisted = col.isPersisted ? ' PERSISTED' : '';
+                colParts.push({ name, type: `AS ${col.computedDefinition}${persisted}`, suffix: '' });
+                continue;
+            }
+
+            const type = this.formatDataType(col);
+            let suffix = '';
+            if (col.isIdentity) { suffix += ' IDENTITY (1, 1)'; }
+            if (col.hasDefault && col.defaultValue) {
+                const dcName = col.defaultConstraintName ? `CONSTRAINT [${col.defaultConstraintName}] ` : '';
+                suffix += ` ${dcName}DEFAULT ${col.defaultValue}`;
+            }
+            suffix += col.isNullable ? ' NULL' : ' NOT NULL';
+            colParts.push({ name, type, suffix });
         }
 
-        // Triggers
+        // Calculate alignment widths
+        const maxNameLen = Math.max(...colParts.map(c => c.name.length));
+        const maxTypeLen = Math.max(...colParts.map(c => c.type.length));
+
+        // --- Build constraint lines (inline) ---
+        const constraintLines: string[] = [];
+
+        // PK inline
+        const pk = indexes.find(idx => idx.isPrimaryKey);
+        if (pk) {
+            constraintLines.push(`    CONSTRAINT [${pk.name}] PRIMARY KEY ${pk.type} (${pk.columns})`);
+        }
+
+        // FK inline
+        for (const fk of fks) {
+            let fkLine = `    CONSTRAINT [${fk.fkName}] FOREIGN KEY ([${fk.parentColumn}]) REFERENCES [dbo].[${fk.referencedTable}] ([${fk.referencedColumn}])`;
+            if (fk.deleteAction && fk.deleteAction !== 'NO_ACTION') {
+                fkLine += ` ON DELETE ${fk.deleteAction.replace(/_/g, ' ')}`;
+            }
+            if (fk.updateAction && fk.updateAction !== 'NO_ACTION') {
+                fkLine += ` ON UPDATE ${fk.updateAction.replace(/_/g, ' ')}`;
+            }
+            constraintLines.push(fkLine);
+        }
+
+        // --- Assemble CREATE TABLE ---
+        const lines: string[] = [];
+        lines.push(`CREATE TABLE [dbo].[${tableName}] (`);
+
+        const allInlineItems = [...colParts.map((c) => {
+            const padName = c.name.padEnd(maxNameLen);
+            const padType = c.type.padEnd(maxTypeLen);
+            return `    ${padName} ${padType}${c.suffix}`;
+        }), ...constraintLines];
+
+        for (let i = 0; i < allInlineItems.length; i++) {
+            const comma = i < allInlineItems.length - 1 ? ',' : '';
+            lines.push(allInlineItems[i] + comma);
+        }
+
+        lines.push(');');
+
+        // --- Non-PK indexes (separate, SSDT format, preserve existing file order) ---
+        let nonPkIndexes = indexes.filter(idx => !idx.isPrimaryKey);
+        if (existingFilePath) {
+            const existingOrder = this.getExistingIndexOrder(existingFilePath);
+            if (existingOrder.length > 0) {
+                const orderMap = new Map(existingOrder.map((name, i) => [name.toLowerCase(), i]));
+                nonPkIndexes.sort((a, b) => {
+                    const oa = orderMap.get(a.name.toLowerCase()) ?? 99999;
+                    const ob = orderMap.get(b.name.toLowerCase()) ?? 99999;
+                    return oa - ob;
+                });
+            }
+        }
+        for (const idx of nonPkIndexes) {
+            lines.push('');
+            lines.push('');
+            lines.push('GO');
+            const unique = idx.isUnique ? 'UNIQUE ' : '';
+            const filter = idx.filterDefinition ? ` WHERE ${idx.filterDefinition}` : '';
+            lines.push(`CREATE ${unique}${idx.type} INDEX [${idx.name}]`);
+            lines.push(`    ON [dbo].[${tableName}](${idx.columns})${filter};`);
+        }
+
+        // Triggers (separate)
         const triggers = this.schemaCache.getTriggers(tableName);
         for (const trig of triggers) {
             if (trig.definition) {
-                lines.push(trig.definition.trim());
+                lines.push('');
+                lines.push('');
                 lines.push('GO');
+                lines.push(trig.definition.trim());
             }
         }
 

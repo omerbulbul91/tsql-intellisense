@@ -277,14 +277,35 @@ npm test    # 199 test (context detection + projectSync/snippet + formatter)
 - `T-SQL: Export Schema` komutu — Command Palette + Database node context menü
 - Tüm DB nesnelerini (Table, View, SP, Function, Trigger) seçilen klasöre `.sql` dosyaları olarak export eder
 - Klasör yapısı: `<hedef>/dbo/{Tables,Views,Stored Procedures,Functions,Triggers}/<Name>.sql`
-- Cache-first: tüm scriptler `schemaCache`'ten alınır (DB sorgusu yok), ~1sn'de 1700+ nesne
-- TABLE scriptleri cache'teki columns/indexes/FK/triggers'tan üretilir
-- VIEW/SP/Function/Trigger tanımları `loadObjectDefinitions()` ile toplu cache'lenir, CREATE OR ALTER dönüşümü yapılmaz
-- İdempotent write: mevcut dosya ile byte-for-byte karşılaştırma, aynıysa yazmaz (git diff oluşmaz)
-- CRLF → LF + trailing whitespace normalize
+- Export öncesi schema cache tamamen yenilenir (`refresh()` + `loadObjectDefinitions()`) — her zaman güncel DB verisi
 - Cancel desteği (her nesne öncesi kontrol)
 - Tree context menüden geldiğinde `connectionManager` bağlı değilse otomatik bağlanır
 - Output Channel'a (`T-SQL Connection`) başlangıç/bitiş zamanı ve sonuç loglanır
+
+#### Export Kuralları — Nesne Tipleri
+
+| Nesne Tipi | Export Yöntemi |
+|-----------|---------------|
+| **TABLE** | Cache'ten SSDT formatında üretilir (`buildTableScriptFromCache`) |
+| **VIEW / SP / FUNCTION / TRIGGER** | `OBJECT_DEFINITION()` ile DB'den aynen çekilir — format değiştirilmez |
+
+#### TABLE Export Formatı (SSDT Uyumlu)
+
+- **Kolon formatı:** `[ColName]` + UPPERCASE unbracketed datatype + precision (`DATETIME2 (7)`, `NVARCHAR (250)`) + hizalı padding
+- **Computed columns:** `[ColName] AS (expression)` formatında, PERSISTED varsa eklenir
+- **IDENTITY:** `IDENTITY (1, 1)` (boşluklu)
+- **DEFAULT:** Named constraint varsa `CONSTRAINT [DcName] DEFAULT (value)`, yoksa sadece `DEFAULT (value)`
+- **PK:** CREATE TABLE içinde inline (`CONSTRAINT [PkName] PRIMARY KEY CLUSTERED ([Col] ASC)`)
+- **FK:** CREATE TABLE içinde inline, cascade bilgisi dahil (`ON DELETE CASCADE`, `ON DELETE SET NULL` vb.)
+- **Index:** Ayrı `CREATE INDEX` statement'ları, SSDT formatında (`[Col] ASC/DESC`), filtered index WHERE clause dahil. Sıralama: mevcut dosya varsa dosyadaki sıra korunur, yeni dosyada DB creation order (`index_id`)
+- **Trigger:** Ayrı statement olarak dosya sonunda, DB'den aynen çekilir
+
+#### Export Dosya Formatı
+
+- **Encoding:** UTF-8 BOM
+- **Line ending:** CRLF (Windows/SSDT standardı)
+- **Trailing:** Dosya sonunda 1 boş satır
+- **İdempotent write:** Karşılaştırmada BOM, LF/CRLF ve trailing newline farkları yoksayılır — sadece içerik farkında yazılır
 
 ### Project Sync (DDL → SQL Project)
 
