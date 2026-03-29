@@ -1259,8 +1259,9 @@ export function activate(context: vscode.ExtensionContext) {
                     if (token.isCancellationRequested) {
                         vscode.window.showWarningMessage(`T-SQL: Export iptal edildi. ${written} dosya yazıldı.`);
                     } else {
+                        const connName = connectionManager.currentProfile?.name || 'unknown';
                         vscode.window.showInformationMessage(
-                            `T-SQL: Export tamamlandı — ${written} yazıldı, ${skipped} atlandı, ${errors} hata. Klasör: ${exportPath}`
+                            `T-SQL: Export tamamlandı — ${written} yazıldı, ${skipped} atlandı, ${errors} hata. Bağlantı: ${connName}. Klasör: ${exportPath}`
                         );
                     }
                 }
