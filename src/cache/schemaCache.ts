@@ -20,6 +20,13 @@ export interface ColumnInfo {
     ordinalPosition: number;
     isIdentity?: boolean;
     hasDefault?: boolean;
+    defaultValue?: string;
+    defaultConstraintName?: string;
+    numericPrecision?: number;
+    numericScale?: number;
+    datetimePrecision?: number;
+    computedDefinition?: string;
+    isPersisted?: boolean;
 }
 
 export interface ObjectInfo {
@@ -41,6 +48,7 @@ export interface IndexInfo {
     isUnique: boolean;
     isPrimaryKey: boolean;
     columns: string;
+    filterDefinition?: string;
 }
 
 export interface ForeignKeyInfo {
@@ -49,6 +57,8 @@ export interface ForeignKeyInfo {
     parentColumn: string;
     referencedTable: string;
     referencedColumn: string;
+    deleteAction?: string;
+    updateAction?: string;
 }
 
 export class SchemaCache {
@@ -173,12 +183,20 @@ export class SchemaCache {
 
         const safe = dbName.replace(/\]/g, ']]');
         const result = await this.connectionManager.executeQuery(
-            `SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE, CHARACTER_MAXIMUM_LENGTH, ORDINAL_POSITION,
-                    COLUMNPROPERTY(OBJECT_ID('[${safe}].dbo.' + TABLE_NAME), COLUMN_NAME, 'IsIdentity') AS IS_IDENTITY,
-                    CASE WHEN COLUMN_DEFAULT IS NOT NULL THEN 1 ELSE 0 END AS HAS_DEFAULT
-             FROM [${safe}].INFORMATION_SCHEMA.COLUMNS
-             WHERE TABLE_NAME = @tableName
-             ORDER BY ORDINAL_POSITION`,
+            `SELECT c.COLUMN_NAME, c.DATA_TYPE, c.IS_NULLABLE, c.CHARACTER_MAXIMUM_LENGTH, c.ORDINAL_POSITION,
+                    c.NUMERIC_PRECISION, c.NUMERIC_SCALE, c.DATETIME_PRECISION,
+                    COLUMNPROPERTY(OBJECT_ID('[${safe}].dbo.' + c.TABLE_NAME), c.COLUMN_NAME, 'IsIdentity') AS IS_IDENTITY,
+                    CASE WHEN c.COLUMN_DEFAULT IS NOT NULL THEN 1 ELSE 0 END AS HAS_DEFAULT,
+                    c.COLUMN_DEFAULT,
+                    dc.name AS DEFAULT_CONSTRAINT_NAME,
+                    cc.definition AS COMPUTED_DEFINITION,
+                    cc.is_persisted AS IS_PERSISTED
+             FROM [${safe}].INFORMATION_SCHEMA.COLUMNS c
+             LEFT JOIN [${safe}].sys.columns sc ON sc.object_id = OBJECT_ID('[${safe}].dbo.' + c.TABLE_NAME) AND sc.name = c.COLUMN_NAME
+             LEFT JOIN [${safe}].sys.default_constraints dc ON sc.default_object_id = dc.object_id
+             LEFT JOIN [${safe}].sys.computed_columns cc ON sc.object_id = cc.object_id AND sc.column_id = cc.column_id
+             WHERE c.TABLE_NAME = @tableName
+             ORDER BY c.ORDINAL_POSITION`,
             { tableName: { type: TYPES.NVarChar, value: tableName } }
         );
 
@@ -190,6 +208,13 @@ export class SchemaCache {
             ordinalPosition: row['ORDINAL_POSITION'] as number,
             isIdentity: row['IS_IDENTITY'] === 1,
             hasDefault: row['HAS_DEFAULT'] === 1,
+            defaultValue: (row['COLUMN_DEFAULT'] as string) || undefined,
+            defaultConstraintName: (row['DEFAULT_CONSTRAINT_NAME'] as string) || undefined,
+            numericPrecision: row['NUMERIC_PRECISION'] as number | undefined,
+            numericScale: row['NUMERIC_SCALE'] as number | undefined,
+            datetimePrecision: row['DATETIME_PRECISION'] as number | undefined,
+            computedDefinition: (row['COMPUTED_DEFINITION'] as string) || undefined,
+            isPersisted: row['IS_PERSISTED'] === true || row['IS_PERSISTED'] === 1 || undefined,
         }));
         this.extraDbColumnsLoaded.add(cacheKey);
         return obj.columns;
@@ -282,6 +307,13 @@ export class SchemaCache {
                 ordinalPosition: row['ORDINAL_POSITION'] as number,
                 isIdentity: row['IS_IDENTITY'] === 1,
                 hasDefault: row['HAS_DEFAULT'] === 1,
+                defaultValue: (row['COLUMN_DEFAULT'] as string) || undefined,
+            defaultConstraintName: (row['DEFAULT_CONSTRAINT_NAME'] as string) || undefined,
+                numericPrecision: row['NUMERIC_PRECISION'] as number | undefined,
+                numericScale: row['NUMERIC_SCALE'] as number | undefined,
+                datetimePrecision: row['DATETIME_PRECISION'] as number | undefined,
+            computedDefinition: (row['COMPUTED_DEFINITION'] as string) || undefined,
+            isPersisted: row['IS_PERSISTED'] === true || row['IS_PERSISTED'] === 1 || undefined,
             });
 
             this.columnsLoaded.add(tableName);
@@ -320,6 +352,13 @@ export class SchemaCache {
             ordinalPosition: row['ORDINAL_POSITION'] as number,
             isIdentity: row['IS_IDENTITY'] === 1,
             hasDefault: row['HAS_DEFAULT'] === 1,
+            defaultValue: (row['COLUMN_DEFAULT'] as string) || undefined,
+            defaultConstraintName: (row['DEFAULT_CONSTRAINT_NAME'] as string) || undefined,
+            numericPrecision: row['NUMERIC_PRECISION'] as number | undefined,
+            numericScale: row['NUMERIC_SCALE'] as number | undefined,
+            datetimePrecision: row['DATETIME_PRECISION'] as number | undefined,
+            computedDefinition: (row['COMPUTED_DEFINITION'] as string) || undefined,
+            isPersisted: row['IS_PERSISTED'] === true || row['IS_PERSISTED'] === 1 || undefined,
         }));
 
         this.columnsLoaded.add(key);
@@ -368,6 +407,8 @@ export class SchemaCache {
             parentColumn: row['PARENT_COLUMN'] as string,
             referencedTable: row['REFERENCED_TABLE'] as string,
             referencedColumn: row['REFERENCED_COLUMN'] as string,
+            deleteAction: row['DELETE_ACTION'] as string | undefined,
+            updateAction: row['UPDATE_ACTION'] as string | undefined,
         }));
         this.fkLoaded = true;
         this.log.appendLine(`[${ts()}] Foreign keys loaded: ${this.foreignKeys.length} relations (${Date.now() - start}ms)`);
@@ -443,6 +484,7 @@ export class SchemaCache {
                 isUnique: row['IS_UNIQUE'] as boolean,
                 isPrimaryKey: row['IS_PRIMARY_KEY'] as boolean,
                 columns: row['COLUMNS'] as string,
+                filterDefinition: (row['FILTER_DEFINITION'] as string) || undefined,
             };
 
             if (!this.indexes.has(tableName)) {
